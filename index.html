@@ -1831,18 +1831,10 @@
                     
                     generatePrompt();
                     
-                    // 如果处于编辑模式，更新编辑器内容 - 优先使用编辑过的模板，但必须包含占位符
+                    // 如果处于编辑模式，更新编辑器内容 - 使用原始模板（包含占位符）
                     if (isEditMode) {
                         const editedPrompt = getEditedPrompt(currentModule);
-                        const hasPlaceholdersInEdited = editedPrompt && (
-                            editedPrompt.includes('{{user_info.user_name}}') || 
-                            editedPrompt.includes('{{user_info.gender}}') ||
-                            editedPrompt.includes('{{user_info.user_provide}}') ||
-                            editedPrompt.includes('{{crush_info.crush_name}}') ||
-                            editedPrompt.includes('{{action_info[0].analysis_result}}') ||
-                            editedPrompt.includes('{user_query}')
-                        );
-                        const template = (editedPrompt && hasPlaceholdersInEdited) ? editedPrompt : PROMPTS[currentModule];
+                        const template = editedPrompt || PROMPTS[currentModule];
                         document.getElementById('promptEditor').value = template || '';
                     }
                 });
@@ -1860,20 +1852,11 @@
                 return;
             }
             
-            // 优先使用编辑过的 prompt，但必须包含占位符；否则使用原始 prompt
+            // 优先使用编辑过的 prompt，否则使用原始 prompt
             const editedPrompt = getEditedPrompt(currentModule);
-            const hasPlaceholdersInEdited = editedPrompt && (
-                editedPrompt.includes('{{user_info.user_name}}') || 
-                editedPrompt.includes('{{user_info.gender}}') ||
-                editedPrompt.includes('{{user_info.user_provide}}') ||
-                editedPrompt.includes('{{crush_info.crush_name}}') ||
-                editedPrompt.includes('{{action_info[0].analysis_result}}') ||
-                editedPrompt.includes('{user_query}')
-            );
-            // 如果编辑过的 prompt 没有占位符，说明是旧版本（已替换过的），使用原始模板
-            let template = (editedPrompt && hasPlaceholdersInEdited) ? editedPrompt : PROMPTS[currentModule];
+            let template = editedPrompt || PROMPTS[currentModule];
             // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/de2621f6-74c7-4b5a-aa75-95b418483386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'prompt_builder.html:generatePrompt',message:'Template source',data:{currentModule,hasEditedPrompt:!!editedPrompt,hasPlaceholdersInEdited,usingOriginalTemplate:!hasPlaceholdersInEdited,templateLength:template?.length,hasPlaceholders:template?.includes('{{user_info.user_name}}')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            fetch('http://127.0.0.1:7243/ingest/de2621f6-74c7-4b5a-aa75-95b418483386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'prompt_builder.html:generatePrompt',message:'Template source',data:{currentModule,hasEditedPrompt:!!editedPrompt,templateLength:template?.length,hasPlaceholders:template?.includes('{{user_info.user_name}}')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
             // #endregion
             if (!template) {
                 document.getElementById('outputArea').textContent = '模板未找到';
@@ -1974,20 +1957,10 @@
                 
                 // 填充编辑器内容 - 使用原始模板（包含占位符），而不是替换后的 prompt
                 const editedPrompt = getEditedPrompt(currentModule);
-                // 检查编辑过的 prompt 是否包含占位符（如果包含，说明是有效的模板）
-                const hasPlaceholdersInEdited = editedPrompt && (
-                    editedPrompt.includes('{{user_info.user_name}}') || 
-                    editedPrompt.includes('{{user_info.gender}}') ||
-                    editedPrompt.includes('{{user_info.user_provide}}') ||
-                    editedPrompt.includes('{{crush_info.crush_name}}') ||
-                    editedPrompt.includes('{{action_info[0].analysis_result}}') ||
-                    editedPrompt.includes('{user_query}')
-                );
-                // 如果编辑过的 prompt 没有占位符，说明是旧版本（已替换过的），使用原始模板
-                const template = (editedPrompt && hasPlaceholdersInEdited) ? editedPrompt : PROMPTS[currentModule];
+                const template = editedPrompt || PROMPTS[currentModule];
                 document.getElementById('promptEditor').value = template || '';
                 // #region agent log
-                fetch('http://127.0.0.1:7243/ingest/de2621f6-74c7-4b5a-aa75-95b418483386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'prompt_builder.html:toggleEditMode',message:'Entering edit mode',data:{currentModule,hasEditedPrompt:!!editedPrompt,hasPlaceholdersInEdited,usingOriginalTemplate:!hasPlaceholdersInEdited,hasPlaceholders:template?.includes('{{user_info.user_name}}')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+                fetch('http://127.0.0.1:7243/ingest/de2621f6-74c7-4b5a-aa75-95b418483386',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'prompt_builder.html:toggleEditMode',message:'Entering edit mode',data:{currentModule,hasEditedPrompt:!!editedPrompt,hasPlaceholders:template?.includes('{{user_info.user_name}}')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
                 // #endregion
                 document.getElementById('promptEditor').focus();
             } else {
