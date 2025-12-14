@@ -1605,12 +1605,17 @@
 现在，请分析 \`{{action_summary}}\` 和上下文，识别 SOP 执行所需的缺失信息，并生成对应的 JSON 问题列表。`
         };
         
-        // ==================== Initialization ====================
+                // ==================== Initialization ====================
         document.addEventListener('DOMContentLoaded', function() {
-            renderUserList();
-            setupTabListeners();
-            if (currentUserId && users.find(u => u.id === currentUserId)) {
-                selectUser(currentUserId);
+            try {
+                renderUserList();
+                setupTabListeners();
+                if (currentUserId && users.find(u => u.id === currentUserId)) {
+                    selectUser(currentUserId);
+                }
+            } catch (error) {
+                console.error('初始化错误:', error);
+                alert('页面加载出错，请刷新页面。错误: ' + error.message);
             }
         });
         
@@ -1621,58 +1626,63 @@
         
         
         
-        function addNewUser() {
-            const name = prompt('请输入用户昵称：');
-            if (!name) return;
-            
-            const newUser = {
-                id: generateId(),
-                name: name,
-                createdAt: new Date().toISOString(),
-                common: {
-                    user_name: name,
-                    user_gender: '',
-                    user_provide: '',
-                    user_ai_provide: '',
-                    crush_name: '',
-                    crush_provide: '',
-                    crush_fact: '',
-                    crush_ai_provide: '',
-                    both_provide: '',
-                    both_fact: '',
-                    both_ai_provide: '',
-                    analysis_result: '',
-                    feedback_plan: ''
-                },
-                modules: {
-                    emotional_compass: {},
-                    action_guide: {
-                        next_step_decision: '',
-                        pre_question_feedback: ''
+                function addNewUser() {
+            try {
+                const name = prompt('请输入用户昵称：');
+                if (!name) return;
+                
+                const newUser = {
+                    id: generateId(),
+                    name: name,
+                    createdAt: new Date().toISOString(),
+                    common: {
+                        user_name: name,
+                        user_gender: '',
+                        user_provide: '',
+                        user_ai_provide: '',
+                        crush_name: '',
+                        crush_provide: '',
+                        crush_fact: '',
+                        crush_ai_provide: '',
+                        both_provide: '',
+                        both_fact: '',
+                        both_ai_provide: '',
+                        analysis_result: '',
+                        feedback_plan: ''
                     },
-                    chat_analysis: {
-                        chat_input: '',
-                        reply_req: '',
-                        reply_style: ''
-                    },
-                    seek_answer: {
-                        user_query: ''
-                    },
-                    seek_support: {
-                        user_query: ''
-                    },
-                    pre_question: {
-                        relation_stage: '',
-                        action_summary: ''
+                    modules: {
+                        emotional_compass: {},
+                        action_guide: {
+                            next_step_decision: '',
+                            pre_question_feedback: ''
+                        },
+                        chat_analysis: {
+                            chat_input: '',
+                            reply_req: '',
+                            reply_style: ''
+                        },
+                        seek_answer: {
+                            user_query: ''
+                        },
+                        seek_support: {
+                            user_query: ''
+                        },
+                        pre_question: {
+                            relation_stage: '',
+                            action_summary: ''
+                        }
                     }
-                }
-            };
-            
-            users.push(newUser);
-            saveToStorage();
-            renderUserList();
-            selectUser(newUser.id);
-            showToast('用户创建成功');
+                };
+                
+                users.push(newUser);
+                saveToStorage();
+                renderUserList();
+                selectUser(newUser.id);
+                showToast('用户创建成功');
+            } catch (error) {
+                console.error('创建用户错误:', error);
+                alert('创建用户失败: ' + error.message);
+            }
         }
         
         
