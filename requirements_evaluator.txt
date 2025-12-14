@@ -1,0 +1,7 @@
+# Prompt 批量评估工具依赖
+# 安装命令: pip install -r requirements_evaluator.txt
+
+streamlit>=1.28.0
+pandas>=2.0.0
+openpyxl>=3.1.0
+openai>=1.0.0

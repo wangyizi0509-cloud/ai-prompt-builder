@@ -1,0 +1,17 @@
+{
+  "models": {
+    "DeepSeek-Chat": {
+      "api_base": "https://api.deepseek.com/v1",
+      "api_key": "sk-a5047a0f182d48d2b5f41c9bab8b7e9b",
+      "model_name": "deepseek-chat",
+      "description": "DeepSeek V3 对话模型"
+    },
+    "DeepSeek-Reasoner": {
+      "api_base": "https://api.deepseek.com/v1",
+      "api_key": "sk-a5047a0f182d48d2b5f41c9bab8b7e9b",
+      "model_name": "deepseek-reasoner",
+      "description": "DeepSeek R1 推理模型"
+    }
+  },
+  "default": "DeepSeek-Chat"
+}
