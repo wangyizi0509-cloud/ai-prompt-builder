@@ -2072,8 +2072,7 @@
                 
                 // 提取 PROMPTS 对象 - 使用更精确的匹配
                 const startMarker = 'const PROMPTS = {';
-                const endMarker = '        };
-';
+                const endMarker = '        };\n';
                 const startIdx = html.indexOf(startMarker);
                 const endIdx = html.indexOf(endMarker, startIdx);
                 
