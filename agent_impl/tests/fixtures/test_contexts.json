@@ -1,0 +1,91 @@
+{
+  "user_context_example": {
+    "user_info": {
+      "user_provide": "我叫小明，25岁，在北京做程序员，性格比较内向",
+      "fact": "",
+      "ai_provide": ""
+    },
+    "crush_info": {
+      "crush_name": "小红",
+      "user_provide": "是我同事，比我大两岁，性格很开朗",
+      "fact": "",
+      "ai_provide": ""
+    },
+    "both_info": {
+      "user_provide": "我们认识三个月了，经常一起吃饭，偶尔周末也会出去玩",
+      "fact": "一起吃过5次饭，看过1次电影",
+      "ai_provide": ""
+    }
+  },
+  "status_report_example": {
+    "stage": "L2",
+    "stage_description": "正常线第二阶段：建立联系",
+    "acr_analysis": {
+      "attraction": "中等",
+      "comfort": "较高",
+      "tension": "较低"
+    },
+    "key_issues": [
+      "需要增加互动频率",
+      "需要创造更多共同话题"
+    ],
+    "risk_points": [
+      "关系进展较慢",
+      "缺乏深度交流"
+    ],
+    "summary": "用户与 crush 处于正常发展阶段，需要继续推进关系"
+  },
+  "action_plan_example": {
+    "goal": "通过线上保持联系，寒假见面时尝试升温",
+    "strategy": "保持日常互动，增加深度交流，为见面做准备",
+    "phases": [
+      {
+        "phase": "第一阶段",
+        "goal": "保持日常联系",
+        "duration": "2周"
+      },
+      {
+        "phase": "第二阶段",
+        "goal": "增加深度交流",
+        "duration": "2周"
+      }
+    ],
+    "key_principles": [
+      "保持自然，不要过于主动",
+      "关注她的兴趣和需求",
+      "创造共同话题"
+    ],
+    "summary": "分阶段推进关系，保持耐心"
+  },
+  "action_guide_example": {
+    "current_task": "今晚发一条朋友圈",
+    "steps": [
+      "选择一张合适的照片",
+      "写一段有趣的内容",
+      "在合适的时间发布"
+    ],
+    "talking_points": [
+      "可以分享今天的有趣经历",
+      "可以展示自己的兴趣爱好",
+      "可以表达对生活的积极态度"
+    ],
+    "dos": [
+      "保持真实自然",
+      "内容要有趣有料",
+      "选择合适的时间发布"
+    ],
+    "donts": [
+      "不要过于刻意",
+      "不要发负面内容",
+      "不要频繁刷屏"
+    ],
+    "next_milestone": "等待她的互动反馈",
+    "guide_content": "# 行动指南：发朋友圈\n\n## 当前任务\n今晚发一条朋友圈\n\n## 具体步骤\n1. 选择一张合适的照片\n2. 写一段有趣的内容\n3. 在合适的时间发布\n\n..."
+  }
+}
+
+
+
+
+
+

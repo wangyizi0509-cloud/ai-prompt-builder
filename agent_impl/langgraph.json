@@ -1,0 +1,11 @@
+{
+  "graphs": {
+    "crushe_agent": {
+      "path": "graph.workflow:get_workflow",
+      "description": "AI恋爱军师 Agent - 主工作流"
+    }
+  },
+  "env": ".env",
+  "dependencies": ["."]
+}
+
