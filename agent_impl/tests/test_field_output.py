@@ -118,6 +118,45 @@ class TestStatusAgentOutput:
             f"status_report 应该是 string，实际是 {type(result['status_report'])}"
         assert "status_report_id" in result
 
+    @patch('graph.nodes.status_agent.get_llm')
+    def test_status_agent_need_questions_true_without_inquiry_card_should_ask(self, mock_get_llm):
+        """
+        回归测试：
+        - 模型按“第一阶段”输出了 need_questions=true 但 inquiry_card=null（或缺失）
+        - status_agent_node 不应直接生成报告
+        - 严格模式：不做纠错、不做兜底；应显式返回错误，且不产出报告
+        """
+        mock_llm = MagicMock()
+        resp = MagicMock()
+        resp.content = """```json
+{
+  "need_questions": true,
+  "response": "我需要再确认几个点。",
+  "inquiry_card": null,
+  "report_content": null
+}
+```"""
+        resp.tool_calls = None
+
+        mock_llm.bind_tools.return_value = mock_llm
+        mock_llm.invoke.return_value = resp
+        mock_get_llm.return_value = mock_llm
+
+        state = create_initial_state("我想追一个女生")
+        state["last_response_for_continuity"] = "好的，我来帮你分析"
+
+        result = status_agent_node(state)
+
+        # 不产出报告
+        assert result.get("status_report") is None
+        assert result.get("inquiry_card") is None
+        # 显式错误提示（便于排查，不吞 bug）
+        msgs = result.get("messages", [])
+        assert msgs and "系统异常" in (msgs[0].get("content") if isinstance(msgs[0], dict) else "")
+        # 进入暂停态，避免同一轮回到 main_agent 覆盖错误
+        assert result.get("current_agent") == "status_agent"
+        assert result.get("agent_resume_point") == "continue_analysis"
+
 
 class TestPlanAgentOutput:
     """测试 Plan Agent 输出格式"""
