@@ -86,8 +86,10 @@ Plan Agent 制定姿态 (Stance) 的依据。
     *   **< 70 (模糊期)**: 信息不足以确诊。设置 `need_questions=true`。
     *   **>= 70 (确诊期)**: 证据确凿，或已 Rule of 3。设置 `need_questions=false`。
 3.  **Act (二阶段协议)**:
-    *   **Phase 1 (发起提问)**: 如果 `need_questions=true`，你**不需要**自己编写提问卡，只需在 JSON 中返回 `need_questions: true`。系统会自动加载 `Inquiry Skill` 的指令。
-    *   **Phase 2 (生成内容)**: 在收到 `Inquiry Skill` 的指令后（通常在下一轮对话），你再根据新指令生成具体的 `inquiry_card`。
+    *   **Phase 1 (申请提问指令)**: 如果 `need_questions=true`，你必须 **调用工具** `load_inquiry_skill_instructions()` 来获取「提问 Skill」的完整指令。
+        - ✅ 正确做法：发起 `load_inquiry_skill_instructions()` 的 tool call（不要只返回 `need_questions=true` 就结束）。
+        - ❌ 错误做法：仅在 JSON 中返回 `need_questions=true` 并假设系统会自动加载指令。
+    *   **Phase 2 (生成提问卡)**: 在工具返回并给到 `Inquiry Skill` 的完整指令后（同一轮会回到你这里继续执行），你再根据新指令生成具体的 `inquiry_card`。
 
 ## 提问策略 (Inquiry Strategy)
 *   **严禁查户口**：不要一次问一堆无关痛痒的问题。
@@ -141,26 +143,80 @@ Plan Agent 制定姿态 (Stance) 的依据。
 
 # 输出要求
 
-请以 JSON 格式输出，包含以下字段：
+{phase_instruction}
 
+## ⚠️ 阶段判断 (Phase Detection) - 输出前必须先做！
+在生成 JSON 之前，你必须先判断当前处于哪个阶段：
+
+**如何判断？**
+检查下方 `{inquiry_skill_metadata}` 区域或对话历史中，是否存在「你刚才已经成功获取了以下提问指令」或「第二阶段执行指令」字样。
+- **如果存在** → 你在 **Phase 2**，你的唯一任务是生成 `inquiry_card`，**严禁输出 report_content**。
+- **如果不存在** → 你在 **Phase 1**，正常执行判断流程。
+
+---
+
+## Phase 1 输出规范 (正常判断流程)
+在 Phase 1，你需要评估 Confidence Score 并决定下一步：
+
+**情况 A: Confidence >= 70 (信息充足)**
 ```json
-{
+{{
   "task_id": "当前任务ID",
-  "thought": "内部思考 (Chain of Thought)。请在此处分析 P.M.P 三要素，并计算 Confidence Score (0-100)。如果 <70 且未达到 Rule of 3，则 need_questions=true。",
-  "need_questions": true/false,
-  "response": "如果需要提问，这里写对用户说的话；如果出报告，这里写引导语。",
-  "update_type": "none | minor_refine | major_rewrite",
-  "report_content": "完整报告 Markdown (仅当 need_questions=false 且 update_type != none 时输出)",
+  "thought": "分析 P.M.P 三要素，Confidence Score = XX...",
+  "need_questions": false,
+  "response": "报告引导语",
+  "update_type": "minor_refine | major_rewrite",
+  "report_content": "完整报告 Markdown",
   "inquiry_card": null
-}
+}}
 ```
 
-## 重要：关于 inquiry_card 字段
-*   **在 Phase 1**：即使 `need_questions=true`，也请将 `inquiry_card` 设为 `null`。你只需要标记需求，系统会接管后续的 Skill 调用。
-*   **在 Phase 2**（仅当你收到了 Inquiry Skill 的具体指令后）：才需要填充此字段。
+**情况 B: Confidence < 70 (信息不足，需要提问)**
+- 发起 `load_inquiry_skill_instructions()` tool call
+- 同时输出以下 JSON（`inquiry_card` 暂时为 null，等 Phase 2 再填）：
+```json
+{{
+  "task_id": "当前任务ID",
+  "thought": "分析 P.M.P，Confidence Score = XX，信息不足，需要提问...",
+  "need_questions": true,
+  "response": "对用户说的引导语",
+  "update_type": "none",
+  "report_content": null,
+  "inquiry_card": null
+}}
+```
+
+---
+
+## Phase 2 输出规范 (工具返回后) - 互斥约束！
+一旦你检测到自己处于 Phase 2（即：已经收到了 Inquiry Skill 的完整指令），你的**唯一任务**是生成 `inquiry_card`。
+
+**强制约束 (CRITICAL)**：
+- `need_questions` = **true** (强制)
+- `inquiry_card` = **完整对象** (必须包含 questions 数组)
+- `report_content` = **null** (强制禁止，你必须先提问！)
+- `update_type` = **none**
+
+```json
+{{
+  "task_id": "当前任务ID",
+  "thought": "Phase 2：已收到提问指令，现在生成 inquiry_card...",
+  "need_questions": true,
+  "response": "对用户说的话（引导用户回答问题）",
+  "update_type": "none",
+  "report_content": null,
+  "inquiry_card": {{
+    "questions": [...],
+    "intro": "...",
+    "reasoning": "..."
+  }}
+}}
+```
+
+---
 
 ## Update Type 说明
-*   **none**: 信息不足以确诊，或无实质变化。
+*   **none**: 信息不足以确诊，或在 Phase 2 提问阶段。
 *   **minor_refine (微调)**: 只有 Momentum (趋势) 或 Evidence (新证据) 变化，L/T 阶段和核心阻力不变。
 *   **major_rewrite (重构)**: 发生了里程碑事件，导致 Position (L/T 阶段) 或 Power (高低位) 发生质变。首次生成报告也属于此项。
 

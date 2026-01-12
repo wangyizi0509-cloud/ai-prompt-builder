@@ -32,13 +32,6 @@ QuestionType = Literal[
     "universal_screenshot_analysis",  # 通用截图分析
 ]
 
-# 信息归属类型枚举
-InfoType = Literal[1, 2, 3, 4]
-# 1: 用户信息
-# 2: Crush信息
-# 3: 双方相处信息
-# 4: 行动专属动态信息
-
 class InquiryInput(BaseModel):
     """提问 Skill 输入"""
     goal: str = Field(description="提问目标，说明需要了解什么信息")
@@ -53,7 +46,6 @@ class Question(BaseModel):
     id: str = Field(description="问题唯一标识")
     question: str = Field(description="问题内容，只写问题，不要包含选项内容")
     type: QuestionType = Field(description="题目类型，7种枚举之一")
-    info_type: InfoType = Field(description="信息归属类型：1=用户信息, 2=Crush信息, 3=双方相处信息, 4=行动专属动态信息")
     options: Optional[list[str]] = Field(default=None, description="选项列表，最多4个。仅 single_choice 或 multiple_choice 需要填写")
     is_required: bool = Field(default=True, description="是否必填")
     purpose: str = Field(default="", description="问这个问题的目的（内部分析用）")
@@ -123,127 +115,40 @@ class InquirySkill(PromptSkill):
             "reasoning": data.get("reasoning", ""),
         }
     
-    def _get_fallback_output(self) -> dict:
-        """解析失败时的默认输出"""
-        return {
-            "questions": [
-                {
-                    "id": "q1",
-                    "question": "你能简单说说你们目前的情况吗？",
-                    "type": "free_input_question",
-                    "info_type": 3,  # 双方相处信息
-                    "is_required": True,
-                    "purpose": "了解基本情况",
-                }
-            ],
-            "intro": "为了更好地帮你，我需要了解一些情况～",
-            "reasoning": "无法解析 LLM 输出，使用默认问题",
-        }
-    
     def _get_default_prompt(self) -> str:
-        """获取默认 Prompt - 与策略库 Pre_Question_Gen 保持一致"""
-        return """# 提问 Skill
+        """获取默认 Prompt - 对应 inquiry_skill.md 的简化版"""
+        return """# Inquiry Skill Protocol (提问能力协议)
 
-你是恋爱军师「小话」的提问能力模块。你的任务是基于提问目标和已知信息，生成精准、高效的引导性问题。
+本模块定义了生成 `inquiry_card` 的标准协议。
 
----
+## 1. 核心原则
+本 Skill 不做决策，只提供**提问方法论**。请基于你（Agent）当前上下文中的**提问目标**和**已知信息**，利用本工具生成最高效的问题卡片。
 
-## 提问目标
-{goal}
+## 2. 题型定义
+- **定时间/地点/预算**: 使用 `single_choice` / `multiple_choice`
+- **分析证据**: 使用 `_screenshot` 类
+- **开放描述**: 使用 `free_input_question`
 
-## 已知信息
-{known_info}
+## 3. 输出协议 (Schema)
+请在 `inquiry_card` 字段中填充以下 JSON：
 
-## 约束条件
-- 最多生成 {max_questions} 个问题（严格控制在 1-4 个）
-- 提问风格：{style}
-- 需要避免的话题：{avoid_topics}
-
----
-
-## 提问逻辑法则 (Gap Analysis)
-
-在生成问题前，请进行以下逻辑推演：
-
-1. **锁定变量**：根据提问目标，列出执行该动作所需的必要参数（时间、地点、预算、当前情绪窗口、对方最新动态等）。
-2. **排除已知**：检查已知信息，如果某些参数已知，**严禁重复提问**。
-3. **转化缺口**：将"缺失的必要参数"转化为具体问题。
-
-### 场景化提问示例（思维链参考）：
-* **场景 A：目标是"发起聊天破冰"**
-    * *Gap*：不知道对方最近发了什么朋友圈（找话题钩子），也不知道上次聊完后的收尾状态。
-    * *Question*：要求上传对方朋友圈截图 + 上次聊天结尾截图。
-* **场景 B：目标是"线下邀约"**
-    * *Gap*：不知道用户想约饭还是看展（偏好），不知道预算，不知道哪天有空。
-    * *Question*：提供选项让用户选活动类型、预算范围、时间段。
-* **场景 C：目标是"冷冻/断联"**
-    * *Gap*：断联最大的阻碍是被动见面。
-    * *Question*："未来 3 天你们在公司/学校会有不可避免的碰面机会吗？"
-
----
-
-## 提问执行规范
-
-### 可问的题目类型 (Type Enum)
-请严格从以下 7 种类型中选择：
-1. 基础题型：
-    - 单选题："single_choice"
-    - 多选题："multiple_choice"
-    - 自由输入题："free_input_question"
-2. 证据上传类（Evidence Upload）：
-    - 私聊截图："private_chat_screenshot"
-    - 群聊截图："group_chat_screenshot"
-    - 朋友圈截图："moments_screenshot"
-    - 其他社媒截图："other_social_media_screenshot"
-
-### 形式与数量
-* **数量限制**：严格控制在 **1-4 个**问题以内。如果缺口太大，优先问最影响下一步生死的关键信息。
-* **语态风格**：
-    * **角色感**：保持"小话"的口吻（机智、干练、像个老练的军师）
-    * **UI 适配性**：文案必须**极度简练**。不要大段寒暄，直接切入重点。
-    * *Bad*: "亲爱的用户，为了帮您更好地规划约会，请问您打算什么时候去呢？"
-    * *Good*: "打算约哪天？选个你状态最好的时候。"
-
-### 题型优先级 (Hierarchy)
-1. **截图优先**：凡是涉及"对方态度"、"回复内容"、"社媒动态"的，**强制使用 `_screenshot` 类题目**。
-2. **选项优先**：凡是涉及"时间"、"地点"、"预算"的，**优先提供 `_choice` 类题目**。
-3. **保底策略**：只有无法穷举的信息，才使用 `free_input_question`。
-
----
-
-## 输出格式
-请以 JSON 格式输出：
 ```json
-{{
+{
   "questions": [
-    {{
-      "id": "q1",
-      "question": "问题内容（简练、直接，只写问题，不要包含选项）",
-      "type": "single_choice|multiple_choice|free_input_question|private_chat_screenshot|group_chat_screenshot|moments_screenshot|other_social_media_screenshot",
-      "info_type": 1,
-      "options": ["选项1", "选项2", "选项3"],
+    {
+      "id": "unique_id",
+      "question": "问题文案",
+      "type": "single_choice|free_input_question|...",
+      "options": ["选项A", "选项B"],
       "is_required": true,
-      "purpose": "问这个问题的目的"
-    }}
+      "purpose": "意图"
+    }
   ],
-  "intro": "引导语（简短、有角色感）",
-  "reasoning": "为什么问这些问题（内部分析）"
-}}
+  "intro": "引导语",
+  "reasoning": "思考过程"
+}
 ```
-
-### 字段说明
-- **question** (string): 提问的具体文案。只写问题，不要包含选项内容。
-- **type** (string): 题目类型，必须严格匹配上述 7 个枚举值之一。
-- **info_type** (integer): 信息归属类型，枚举如下：
-    - 1: 用户信息
-    - 2: Crush信息
-    - 3: 双方相处信息
-    - 4: 行动专属动态信息
-- **options** (Array<string>): 仅 `single_choice` / `multiple_choice` 需要，最多 4 个。
-- **is_required** (boolean): 是否必填。
 """
-    
-
 
 # 创建全局实例
 _inquiry_skill_instance = None
