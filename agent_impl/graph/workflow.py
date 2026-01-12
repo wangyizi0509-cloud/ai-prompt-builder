@@ -204,21 +204,16 @@ def route_after_sub_agent(state: AgentState) -> Literal["skill_tools", "main_age
     return "main_agent"
 
 
-def route_after_guide_agent(state: AgentState) -> Literal["skill_tools", "end"]:
+def route_after_guide_agent(state: AgentState) -> Literal["skill_tools", "main_agent", "end"]:
     """
-    Guide Agent 后的路由（防止单轮内反复回到 Main Agent 继续 call_guide 形成死循环）。
+    Guide Agent 后的路由（与其他子 Agent 对齐）：
 
-    原则：
-    - guide_agent 产出指南后，本轮直接结束，由下一轮用户输入再继续（避免单次 invoke 内递归过深）
-    - 若 guide_agent 自己触发了 tool_calls，则先走 skill_tools
-    - 若 guide_agent 进入提问/恢复机制，本轮结束（由下轮恢复）
+    优先级：
+    1. 如果有 tool_calls，先执行工具
+    2. 如果 guide_agent 设置了 current_agent（需要提问/等待用户输入），本轮结束（下轮从 Router 恢复）
+    3. 否则视为任务完成，回到 main_agent 统一再决策（是否继续下一步 / 是否结束本轮）
     """
-    if _has_tool_calls(state):
-        return "skill_tools"
-    # 如果有待回答的问题，使用 interrupt 机制，这里直接结束
-    if state.get("current_agent") and state.get("agent_resume_point"):
-        return "end"
-    return "end"
+    return route_after_sub_agent(state)
 
 
 def route_after_skill_tools(state: AgentState) -> Literal["main_agent", "status_agent", "plan_agent", "guide_agent"]:
@@ -476,6 +471,7 @@ def create_workflow() -> StateGraph:
         route_after_guide_agent,
         {
             "skill_tools": "skill_tools",
+            "main_agent": "main_agent",
             "end": "post_turn_finalize",
         }
     )

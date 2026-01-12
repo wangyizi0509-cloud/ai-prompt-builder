@@ -30,7 +30,7 @@ from graph.context_types import (
 from utils.message_utils import get_msg_role_and_content
 from skills.inquiry import get_inquiry_skill
 from skills import load_inquiry_skill_instructions
-from utils.prompt_loader import load_prompt
+from utils.prompt_loader import load_prompt, get_prompt_path
 from config import get_llm
 
 
@@ -118,8 +118,14 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
     Returns:
         状态更新字典
     """
-    question_count = state.get("question_count", 0)
-    max_questions = state.get("max_questions", 3)
+    # 提问节流（同一 agent 连续提问 <= max_question_streak；中间发生非提问动作则清零）
+    streak_agent = state.get("question_streak_agent")
+    streak_count = int(state.get("question_streak_count", 0) or 0)
+    max_streak = int(state.get("max_question_streak", 3) or 3)
+
+    # 向后兼容：旧字段仍可能被外部依赖（日志/测试）
+    question_count = int(state.get("question_count", 0) or 0)
+    max_questions = int(state.get("max_questions", 3) or 3)
     
     # === 任务边界判定 ===
     is_resuming = (state.get("current_agent") == "plan_agent" and 
@@ -150,9 +156,15 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
     
     # 加载 Prompt
     try:
-        prompt_template = load_prompt("plan_agent")
+        prompt_name = "plan_agent"
+        prompt_path = get_prompt_path(prompt_name)
+        prompt_template = load_prompt(prompt_name)
+        prompt_source = str(prompt_path)
+        prompt_fallback = False
     except FileNotFoundError:
         prompt_template = _get_default_prompt()
+        prompt_source = "fallback:_get_default_prompt(FileNotFoundError)"
+        prompt_fallback = True
     
     # 获取主 Agent 刚说的话（用于保持对话连贯）
     last_response = state.get("last_response_for_continuity", "")
@@ -228,6 +240,8 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
         }))
     except Exception:
         prompt = _get_default_prompt()
+        prompt_source = "fallback:_get_default_prompt(format_error)"
+        prompt_fallback = True
 
     # === 调用 LLM（模型自主决定是否需要工具）===
     print(f"[DEBUG] PlanAgent: Invoking LLM (from_tool_call={from_tool_call})")
@@ -264,6 +278,8 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
         "debug_log": [{
             "node": "plan_agent",
             "step": "Response Generated",
+            "prompt_source": prompt_source,
+            "prompt_fallback": prompt_fallback,
             # "prompt": prompt,  # [FIX] 移除完整 prompt 存储，防止 state 爆炸
             "response": response.content[:500] + "..." if len(response.content) > 500 else response.content,
             "parsed_result": parsed,
@@ -272,19 +288,27 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
     }
     
     # 检查是否需要提问
-    need_questions = parsed.get("need_questions", False)
+    need_questions = bool(parsed.get("need_questions", False))
     inquiry_card = parsed.get("inquiry_card")
-    
-    if need_questions and inquiry_card and inquiry_card.get("questions") and question_count < max_questions:
+
+    questions_list = inquiry_card.get("questions", []) if isinstance(inquiry_card, dict) else []
+    next_streak = (streak_count + 1) if (streak_agent == "plan_agent") else 1
+    allow_ask = next_streak <= max_streak
+
+    if need_questions and questions_list and allow_ask:
         print(f"[DEBUG] PlanAgent: Generated {len(inquiry_card.get('questions', []))} questions")
         
         result["inquiry_card"] = inquiry_card
-        result["pending_questions"] = [q.get("question", "") if isinstance(q, dict) else str(q) for q in inquiry_card.get("questions", [])]
+        result["pending_questions"] = [q.get("question", "") if isinstance(q, dict) else str(q) for q in questions_list]
         
         # === 设置恢复状态 ===
         result["current_agent"] = "plan_agent"
         result["agent_resume_point"] = "continue_planning"
-        result["question_count"] = question_count + 1
+        # 连续提问计数
+        result["question_streak_agent"] = "plan_agent"
+        result["question_streak_count"] = next_streak
+        # 旧字段：保持与 streak 对齐
+        result["question_count"] = next_streak
         
         # 信息不足时，不生成规划，等待用户回答
         result["action_plan"] = None
@@ -362,6 +386,10 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
             # === 清除恢复状态 ===
             result["current_agent"] = None
             result["agent_resume_point"] = None
+            # 非提问动作：清零“连续提问计数”
+            result["question_streak_agent"] = None
+            result["question_streak_count"] = 0
+            # 旧字段清零
             result["question_count"] = 0
             result["collected_info"] = {}
             # 显式清除 inquiry_card，避免残留上一轮的问题

@@ -31,7 +31,7 @@ from graph.context_types import (
 from utils.message_utils import get_msg_role_and_content
 from skills.inquiry import get_inquiry_skill
 from skills import load_inquiry_skill_instructions
-from utils.prompt_loader import load_prompt
+from utils.prompt_loader import load_prompt, get_prompt_path
 from config import get_llm
 
 
@@ -202,9 +202,15 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
     
     # 加载 Prompt
     try:
-        prompt_template = load_prompt("status_agent")
+        prompt_name = "status_agent"
+        prompt_path = get_prompt_path(prompt_name)
+        prompt_template = load_prompt(prompt_name)
+        prompt_source = str(prompt_path)
+        prompt_fallback = False
     except FileNotFoundError:
         prompt_template = _get_default_prompt()
+        prompt_source = "fallback:_get_default_prompt(FileNotFoundError)"
+        prompt_fallback = True
     
     # 获取主 Agent 刚说的话（用于保持对话连贯）
     last_response = state.get("last_response_for_continuity", "")
@@ -292,6 +298,8 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
     except Exception:
         # 如果格式化失败（通常是 prompt 模板残留未转义花括号），回退到默认 prompt
         prompt = _get_default_prompt()
+        prompt_source = "fallback:_get_default_prompt(format_error)"
+        prompt_fallback = True
 
     # === 调用 LLM（模型自主决定是否需要工具）===
     print(f"[DEBUG] StatusAgent: Invoking LLM (from_tool_call={from_tool_call})")
@@ -328,6 +336,8 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
         "debug_log": [{
             "node": "status_agent",
             "step": "Response Generated",
+            "prompt_source": prompt_source,
+            "prompt_fallback": prompt_fallback,
             # "prompt": prompt,  # [FIX] 移除完整 prompt 存储，防止 state 爆炸
             "response": response.content[:500] + "..." if len(response.content) > 500 else response.content,
             "parsed_result": parsed,
@@ -336,51 +346,79 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
     }
     
     # 检查是否需要提问
-    need_questions = parsed.get("need_questions", False)
+    need_questions = bool(parsed.get("need_questions", False))
     inquiry_card = parsed.get("inquiry_card")
-    
-    if need_questions and inquiry_card and inquiry_card.get("questions") and question_count < max_questions:
-        print(f"[DEBUG] StatusAgent: Generated {len(inquiry_card.get('questions', []))} questions")
-        
+
+    # 强约束：如果本轮是从提问 Skill 工具返回，说明 *一定* 需要提问（“调用工具”本身就是决策信号）
+    forced_need_questions = bool(from_tool_call and last_tool_content)
+    effective_need_questions = bool(need_questions or forced_need_questions)
+
+    if effective_need_questions and question_count < max_questions:
+        # ⚠️ 严格模式（按你的要求）：不做任何“纠错二次调用”、不做任何“工程兜底造 inquiry_card”
+        # - Phase 1：应由模型触发 tool_calls（上面已处理 tool_calls 分支）
+        # - Phase 2：必须输出 inquiry_card.questions，否则直接报错并结束本轮（暴露问题，便于排查）
+
+        # 至此：必须有 inquiry_card.questions，才能真正发起提问
+        questions_list = inquiry_card.get("questions", []) if isinstance(inquiry_card, dict) else []
+        if not questions_list:
+            err_msg = "系统异常：需要提问但未生成问题列表（inquiry_card.questions 为空）。请重试。"
+            result["status_report"] = None
+            result["inquiry_card"] = None
+            result["pending_questions"] = []
+            existing_responses = state.get("pending_responses", [])
+            result["pending_responses"] = existing_responses + [{"from": "status_agent", "content": err_msg, "phase": "after_status"}]
+            result["messages"] = [{"role": "assistant", "content": err_msg}]
+            # 防止本轮继续回到 main_agent 覆盖错误提示：进入“等待用户输入/重试”的暂停态
+            result["current_agent"] = "status_agent"
+            result["agent_resume_point"] = "continue_analysis"
+            result["completion_status"] = None
+            result["result_summary"] = None
+            return result
+
+        print(f"[DEBUG] StatusAgent: Asking questions (count={len(questions_list)})")
+
         result["inquiry_card"] = inquiry_card
-        result["pending_questions"] = [q.get("question", "") if isinstance(q, dict) else str(q) for q in inquiry_card.get("questions", [])]
-        
+        result["pending_questions"] = [
+            q.get("question", "") if isinstance(q, dict) else str(q)
+            for q in questions_list
+        ]
+
         # === 设置恢复状态 ===
         result["current_agent"] = "status_agent"
         result["agent_resume_point"] = "continue_analysis"
         result["question_count"] = question_count + 1
-        
+
         # 信息不足时，不生成报告，等待用户回答
         result["status_report"] = None
-        response_content = parsed.get("response", "")
-        # 如果 Agent 没有生成回复，使用 intro 作为引导语
-        if not response_content.strip() and inquiry_card.get("intro"):
-            response_content = inquiry_card.get("intro")
-        elif not response_content.strip():
+        response_content = (parsed.get("response") or "").strip()
+        if not response_content:
+            response_content = (inquiry_card.get("intro") or "").strip()
+        if not response_content:
             response_content = "为了更准确地分析你们的情况，我需要再了解一些细节～"
-        # 累积到 pending_responses（不覆盖之前的消息）
+
         existing_responses = state.get("pending_responses", [])
         result["pending_responses"] = existing_responses + [{
-            "from": "status_agent", 
+            "from": "status_agent",
             "content": response_content,
-            "phase": "after_status"  # 现状分析阶段的提问
+            "phase": "after_status"
         }]
-        # 保留原始 LLM 输出，确保下一轮上下文能看到完整问题列表
-        raw_assistant_msg = response.content if getattr(response, "content", None) else response_content
+
+        # 保留模型原始输出（应包含 inquiry_card），便于 context_builder 从历史中抽取【提问】
+        raw_assistant_msg = getattr(response, "content", "") or response_content
         result["messages"] = [{
             "role": "assistant",
             "content": raw_assistant_msg,
             "metadata": {
-                "task_id": parsed.get("task_id"),
-                "thought": parsed.get("thought"),
+                "task_id": parsed.get("task_id") if isinstance(parsed, dict) else "",
+                "thought": parsed.get("thought") if isinstance(parsed, dict) else "",
             }
         }]
-        # 未完成，不设置完成信号
+
         result["completion_status"] = None
         result["result_summary"] = None
 
     else:
-        # 不需要提问，生成报告
+        # 不需要提问（或提问次数已达上限），生成报告
         
         # === 分配报告编号 ===
         report_counter = state.get("report_counter", {"status_report": 0, "action_plan": 0, "action_guide": 0})

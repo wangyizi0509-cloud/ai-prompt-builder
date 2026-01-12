@@ -226,6 +226,12 @@ class AgentState(TypedDict, total=False):
     last_onboarding_question: Optional[str]
     question_count: int
     max_questions: int
+
+    # === 提问节流（vNext）：同一 Agent 连续提问轮次控制 ===
+    # 规则：同一 agent 连续 ask_user 不超过 max_question_streak；一旦中间发生非提问动作（如出报告/路由到其它 agent/结束本轮但不在提问暂停态），立即清零。
+    question_streak_agent: Optional[str]        # 当前连续提问的 agent（main_agent/status_agent/plan_agent/guide_agent）
+    question_streak_count: int                 # 当前连续提问轮次（仅对 question_streak_agent 生效）
+    max_question_streak: int                   # 同一 agent 连续提问的最大轮次（默认 3）
     
     # === 循环控制 ===
     _iteration_count: int
@@ -307,6 +313,11 @@ def create_initial_state(user_message: str, **overrides) -> AgentState:
         last_onboarding_question=None,
         question_count=0,
         max_questions=3,
+
+        # 提问节流（默认：同一 agent 连续提问最多 3 轮）
+        question_streak_agent=None,
+        question_streak_count=0,
+        max_question_streak=3,
         
         # 循环控制
         _iteration_count=0,

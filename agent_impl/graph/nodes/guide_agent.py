@@ -36,7 +36,7 @@ from skills import load_inquiry_skill_instructions
 from skills.inquiry import get_inquiry_skill
 from skills.guide_loader import create_guide_loader_tool
 from graph.tools.guide_bind_tools import create_guide_bind_tool
-from utils.prompt_loader import load_prompt
+from utils.prompt_loader import load_prompt, get_prompt_path
 from config import get_llm
 
 
@@ -124,8 +124,14 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
     Returns:
         状态更新字典
     """
-    question_count = state.get("question_count", 0)
-    max_questions = state.get("max_questions", 3)
+    # 提问节流（同一 agent 连续提问 <= max_question_streak；中间发生非提问动作则清零）
+    streak_agent = state.get("question_streak_agent")
+    streak_count = int(state.get("question_streak_count", 0) or 0)
+    max_streak = int(state.get("max_question_streak", 3) or 3)
+
+    # 向后兼容：旧字段仍可能被外部依赖（日志/测试）
+    question_count = int(state.get("question_count", 0) or 0)
+    max_questions = int(state.get("max_questions", 3) or 3)
     
     # === 任务边界判定 ===
     is_resuming = (state.get("current_agent") == "guide_agent" and 
@@ -160,9 +166,15 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
     
     # 加载 Prompt
     try:
-        prompt_template = load_prompt("guide_agent")
+        prompt_name = "guide_agent"
+        prompt_path = get_prompt_path(prompt_name)
+        prompt_template = load_prompt(prompt_name)
+        prompt_source = str(prompt_path)
+        prompt_fallback = False
     except FileNotFoundError:
         prompt_template = _get_default_prompt()
+        prompt_source = "fallback:_get_default_prompt(FileNotFoundError)"
+        prompt_fallback = True
     
     # 获取主 Agent 刚说的话（用于保持对话连贯）
     last_response = state.get("last_response_for_continuity", "")
@@ -248,23 +260,35 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
 """
 
     # 填充 Prompt
-    prompt = prompt_template.format(
+    from collections import defaultdict
+    format_kwargs = {
         # 新版：使用分层上下文
-        instruction=context_dict.get("instruction") or "无",
-        user_context=context_dict.get("user_context", "暂无用户信息"),
-        status_report=context_dict.get("status_report", "暂无"),
-        action_plan=context_dict.get("action_plan", "暂无"),
-        action_guides=context_dict.get("action_guides", "暂无"),
-        bound_action_guides=context_dict.get("bound_action_guides", ""),
-        conversation_history=context_dict.get("conversation_history", "无历史对话"),
-        current_task_id=context_dict.get("current_task_id", ""),
-        task_reasoning=context_dict.get("task_reasoning", ""),
-        last_response=last_response if last_response else "无",
+        "instruction": context_dict.get("instruction") or "无",
+        "user_context": context_dict.get("user_context", "暂无用户信息"),
+        "status_report": context_dict.get("status_report", "暂无"),
+        "action_plan": context_dict.get("action_plan", "暂无"),
+        "action_guides": context_dict.get("action_guides", "暂无"),
+        "bound_action_guides": context_dict.get("bound_action_guides", ""),
+        "conversation_history": context_dict.get("conversation_history", "无历史对话"),
+        "current_task_id": context_dict.get("current_task_id", ""),
+        "task_reasoning": context_dict.get("task_reasoning", ""),
+        "last_response": last_response if last_response else "无",
         # 向后兼容
-        user_profile=context_dict.get("user_profile", "{}"),
+        "user_profile": context_dict.get("user_profile", "{}"),
         # Skills 元数据
-        inquiry_skill_metadata=inquiry_metadata,
-    )
+        "inquiry_skill_metadata": inquiry_metadata,
+    }
+    try:
+        prompt = prompt_template.format_map(defaultdict(str, format_kwargs))
+    except Exception as e:
+        print(f"[ERROR] GuideAgent: Prompt format error: {type(e).__name__}: {e}. Falling back to _get_default_prompt.")
+        prompt_source = "fallback:_get_default_prompt(format_error)"
+        prompt_fallback = True
+        fallback_template = _get_default_prompt()
+        try:
+            prompt = fallback_template.format_map(defaultdict(str, format_kwargs))
+        except Exception:
+            prompt = fallback_template
     
     # === 调用 LLM（模型自主决定是否需要工具）===
     print(f"[DEBUG] GuideAgent: Invoking LLM (from_tool_call={from_tool_call})")
@@ -360,6 +384,8 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
         "debug_log": [{
             "node": "guide_agent",
             "step": "Response Generated",
+            "prompt_source": prompt_source,
+            "prompt_fallback": prompt_fallback,
             # "prompt": prompt,  # [FIX] 移除完整 prompt 存储，防止 state 爆炸
             "response": response.content[:500] + "..." if len(response.content) > 500 else response.content,
             "parsed_result": parsed,
@@ -371,19 +397,27 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
         result["action_guides"] = layer2_memory.get("all_action_guides", [])
     
     # 检查是否需要提问
-    need_questions = parsed.get("need_questions", False)
+    need_questions = bool(parsed.get("need_questions", False))
     inquiry_card = parsed.get("inquiry_card")
-    
-    if need_questions and inquiry_card and inquiry_card.get("questions") and question_count < max_questions:
+
+    questions_list = inquiry_card.get("questions", []) if isinstance(inquiry_card, dict) else []
+    next_streak = (streak_count + 1) if (streak_agent == "guide_agent") else 1
+    allow_ask = next_streak <= max_streak
+
+    if need_questions and questions_list and allow_ask:
         print(f"[DEBUG] GuideAgent: Generated {len(inquiry_card.get('questions', []))} questions")
         
         result["inquiry_card"] = inquiry_card
-        result["pending_questions"] = [q.get("question", "") if isinstance(q, dict) else str(q) for q in inquiry_card.get("questions", [])]
+        result["pending_questions"] = [q.get("question", "") if isinstance(q, dict) else str(q) for q in questions_list]
         
         # === 设置恢复状态 ===
         result["current_agent"] = "guide_agent"
         result["agent_resume_point"] = "continue_guide"
-        result["question_count"] = question_count + 1
+        # 连续提问计数
+        result["question_streak_agent"] = "guide_agent"
+        result["question_streak_count"] = next_streak
+        # 旧字段：保持与 streak 对齐
+        result["question_count"] = next_streak
         
         # 信息不足时，不生成指南，等待用户回答
         result["action_guide"] = None
@@ -495,6 +529,10 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
         # === 清除恢复状态 ===
         result["current_agent"] = None
         result["agent_resume_point"] = None
+        # 非提问动作：清零“连续提问计数”
+        result["question_streak_agent"] = None
+        result["question_streak_count"] = 0
+        # 旧字段清零
         result["question_count"] = 0
         result["collected_info"] = {}
         # 显式清除 inquiry_card，避免残留上一轮的问题

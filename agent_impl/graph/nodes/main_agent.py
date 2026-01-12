@@ -47,7 +47,7 @@ from skills import (
     load_emotion_support_skill_instructions
 )
 from skills.guide_loader import create_guide_loader_tool
-from utils.prompt_loader import load_prompt
+from utils.prompt_loader import load_prompt, get_prompt_path
 from utils.message_utils import get_msg_role_and_content
 from config import get_llm
 from langchain_core.messages import ToolMessage
@@ -215,14 +215,26 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
         print(f"[DEBUG] MainAgent: Continuing after tool call (last_role={last_msg_role})")
     
     # === 获取提问状态（用于恢复执行）===
-    question_count = state.get("question_count", 0)
-    max_questions = state.get("max_questions", 10)
+    # vNext：同一 agent 连续提问 <= max_question_streak；中间发生非提问动作则清零
+    streak_agent = state.get("question_streak_agent")
+    streak_count = int(state.get("question_streak_count", 0) or 0)
+    max_streak = int(state.get("max_question_streak", 3) or 3)
+
+    # 向后兼容：旧字段（仍可能被日志/测试/旧逻辑依赖）
+    question_count = int(state.get("question_count", 0) or 0)
+    max_questions = int(state.get("max_questions", 10) or 10)
     
     # 加载 Prompt
     try:
-        prompt_template = load_prompt("main_agent")
+        prompt_name = "main_agent"
+        prompt_path = get_prompt_path(prompt_name)
+        prompt_template = load_prompt(prompt_name)
+        prompt_source = str(prompt_path)
+        prompt_fallback = False
     except FileNotFoundError:
         prompt_template = _get_default_prompt(from_sub_agent, is_resuming)
+        prompt_source = "fallback:_get_default_prompt(FileNotFoundError)"
+        prompt_fallback = True
     
     # 构建上下文（使用新的分层上下文架构，包含任务思考过程）
     context_dict = build_context_dict(state, target_agent="main_agent")
@@ -373,14 +385,24 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
         format_kwargs["is_resuming"] = True
         format_kwargs["question_count"] = question_count
     
+    from collections import defaultdict
     try:
         prompt = prompt_template.format(**format_kwargs)
-    except KeyError as e:
-        # 容错：如果 Prompt 中残留未转义的花括号，降级为默认值/空字符串
-        from collections import defaultdict
-        missing_key = str(e)
-        print(f"[ERROR] MainAgent: Prompt format KeyError: {missing_key}. Falling back to safe format_map.")
-        prompt = prompt_template.format_map(defaultdict(str, format_kwargs))
+    except Exception as e:
+        # 兼容：KeyError（缺变量）、ValueError（未转义花括号）、其他格式异常
+        print(f"[ERROR] MainAgent: Prompt format error: {type(e).__name__}: {e}. Trying safe format_map.")
+        try:
+            prompt = prompt_template.format_map(defaultdict(str, format_kwargs))
+        except Exception as e2:
+            print(f"[ERROR] MainAgent: Prompt safe format_map failed: {type(e2).__name__}: {e2}. Falling back to _get_default_prompt.")
+            prompt_source = "fallback:_get_default_prompt(format_error)"
+            prompt_fallback = True
+            fallback_template = _get_default_prompt(from_sub_agent, is_resuming)
+            try:
+                prompt = fallback_template.format_map(defaultdict(str, format_kwargs))
+            except Exception:
+                # 最后兜底：至少保证能继续跑，不阻塞调试
+                prompt = fallback_template
     
     # === 调用 LLM（模型自主决定是否需要工具）===
     print(f"[DEBUG] MainAgent: Invoking LLM with tool binding")
@@ -408,6 +430,8 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
     result["debug_log"] = [{
         "node": "main_agent",
         "step": "Response Generated",
+        "prompt_source": prompt_source,
+        "prompt_fallback": prompt_fallback,
         # "prompt": prompt,  # [FIX] 移除完整 prompt 存储，防止 state 爆炸
         "response": response.content[:500] + "..." if len(response.content) > 500 else response.content,
         "parsed_result": {k: v for k, v in result.items() if k != "debug_log"}
@@ -422,7 +446,10 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
     # 检查是否需要提问 (兼容 next_action="ask_user" 或 need_questions=true)
     need_to_ask = (next_action == "ask_user" or need_questions)
     
-    if need_to_ask and question_count < max_questions:
+    next_streak = (streak_count + 1) if (streak_agent == "main_agent") else 1
+    allow_ask = next_streak <= max_streak
+
+    if need_to_ask and allow_ask:
         print(f"[DEBUG] MainAgent: ask_user triggered (count={question_count}/{max_questions})")
         
         # 检查是否有完整的 inquiry_card
@@ -442,7 +469,11 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
             result["next_action"] = "ask_user"
             result["current_agent"] = "main_agent"
             result["agent_resume_point"] = "continue_decision"
-            result["question_count"] = question_count + 1
+            # 连续提问计数：同一 agent 连续 +1；否则重置为 1
+            result["question_streak_agent"] = "main_agent"
+            result["question_streak_count"] = next_streak
+            # 旧字段：保持与 streak 对齐
+            result["question_count"] = next_streak
             
             print(f"[DEBUG] MainAgent: Setting pause state, will resume after user answers")
 
@@ -452,25 +483,38 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
             result["next_action"] = "end_turn"
             result["inquiry_card"] = None
             result["pending_questions"] = []
+            # 非提问动作：清零“连续提问计数”
+            result["question_streak_agent"] = None
+            result["question_streak_count"] = 0
+            # 旧字段清零
+            result["question_count"] = 0
     
-    elif next_action == "ask_user" and question_count >= max_questions:
-        # 已达到最大提问次数，强制继续
-        print(f"[DEBUG] MainAgent: Reached max questions ({max_questions}), proceeding without more questions")
+    elif need_to_ask and not allow_ask:
+        # 已达到“同一 agent 连续提问”上限：强制继续（不再 ask_user），并清零 streak
+        print(f"[DEBUG] MainAgent: Reached max question streak ({max_streak}), proceeding without more questions")
         result["inquiry_card"] = None
         result["pending_questions"] = []
         result["next_action"] = "end_turn"
+        result["question_streak_agent"] = None
+        result["question_streak_count"] = 0
+        result["question_count"] = 0
         
     else:
         # 不需要提问
         if not inquiry_card:
             result["inquiry_card"] = None
         result["pending_questions"] = []
+
+        # 非提问动作：清零“连续提问计数”
+        result["question_streak_agent"] = None
+        result["question_streak_count"] = 0
+        result["question_count"] = 0
         
         # 清除暂停状态（如果是从恢复执行来的）
         if is_resuming:
             result["current_agent"] = None
             result["agent_resume_point"] = None
-            result["question_count"] = 0
+            # 旧字段已经在上面清零；这里保留但不再重复赋值
     
     # === 处理 pending_responses ===
     # 获取当前已有的 pending_responses（可能由之前的子 Agent 添加）
