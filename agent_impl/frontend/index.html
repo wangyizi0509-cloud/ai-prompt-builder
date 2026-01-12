@@ -1645,6 +1645,11 @@
                                     assistant_id: assistantId.value,
                                     input: {
                                         user_message: content,
+                                        // [FIX] Studio Mode 下可能不会经过 server.py:/api/chat 的归零逻辑，
+                                        // 导致 _iteration_count 跨轮累积触发 MAX_NODE_STEPS_PER_TURN，
+                                        // 表现为 router "to main_agent" 但被强制 end。
+                                        // 这里每轮显式归零，保留同一 thread 的上下文不变。
+                                        _iteration_count: 0,
                                         // 如果是第一次，LangGraph 会自动调用 create_initial_state
                                         // 如果不是第一次，它会合并到现有状态
                                     },
