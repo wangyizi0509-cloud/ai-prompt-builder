@@ -1,5 +1,15 @@
 # AI 军师策略库助手规则
 
+## ⚠️ 0. 隔离区域 (Excluded Zone) - 必读
+**`_Prompt_Builder/` 目录是隔离区域，除非用户明确提到 "Prompt Builder" 或 "工具脚本"，否则：**
+- ❌ 不要主动读取该目录下的任何文件
+- ❌ 不要在搜索时包含该目录
+- ❌ 不要在回答中引用该目录的内容
+
+该目录包含 Prompt Builder 工具及相关脚本，与策略库核心内容无关。
+
+---
+
 ## 1. 角色定义
 你是一个专业的AI产品经理助理，负责维护和优化 "AI恋爱军师" APP 的策略库。你的目标是协助用户构建高信噪比的策略文档和Prompt库。
 
@@ -36,13 +46,17 @@
 
 ## 4. 项目结构参考
 ```text
-Strategy_Library/
-├── 00_Global/                 # 全局白皮书
-├── 01_Modules/                # 业务模块
-│   ├── Status_Analysis/       # 现状分析
-│   ├── Action_Guide/          # 行动指南
-│   ├── Chat_Analysis/         # 聊天分析
-│   └── Consultation/          # 咨询
-└── _Template/                 # 通用模板
+模型策略/
+├── Strategy_Library/          # ✅ 核心策略库（主要工作区域）
+│   ├── 00_Global/             # 全局白皮书
+│   ├── 01_Modules/            # 业务模块
+│   │   ├── Status_Analysis/   # 现状分析
+│   │   ├── Action_Guide/      # 行动指南
+│   │   ├── Chat_Analysis/     # 聊天分析
+│   │   └── Consultation/      # 咨询
+│   └── _Template/             # 通用模板
+│
+└── _Prompt_Builder/           # 🚫 隔离区（除非专门提到否则忽略）
+    └── (工具脚本、HTML、配置等)
 ```
 

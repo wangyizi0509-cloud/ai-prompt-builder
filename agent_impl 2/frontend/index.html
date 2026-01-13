@@ -478,37 +478,6 @@
                     </div>
                 </div>
 
-                <!-- Onboarding 状态 -->
-                <div class="context-section" style="border-left-color: #10b981;">
-                    <div class="context-section-header" @click="contextExpanded.onboarding = !contextExpanded.onboarding">
-                        <span>🚀 Onboarding 状态</span>
-                        <span>{{ contextExpanded.onboarding ? '▼' : '▶' }}</span>
-                    </div>
-                    <div v-if="contextExpanded.onboarding" class="context-section-body">
-                        <div class="context-stat">
-                            <span>是否完成</span>
-                            <span class="context-stat-value" :class="{ 'text-green-400': contextData?.onboarding_status?.completed }">
-                                {{ contextData?.onboarding_status?.completed ? '✅ 已完成' : '⏳ 进行中' }}
-                            </span>
-                        </div>
-                        <div class="context-stat">
-                            <span>轮次进度</span>
-                            <span class="context-stat-value">
-                                {{ contextData?.onboarding_status?.turn_count ?? 0 }} / {{ contextData?.onboarding_status?.max_turns ?? 3 }}
-                            </span>
-                        </div>
-                        <div class="context-stat">
-                            <span>有 Handoff 数据</span>
-                            <span class="context-stat-value">
-                                {{ contextData?.onboarding_status?.has_handoff ? '是' : '否' }}
-                            </span>
-                        </div>
-                        <div class="text-xs text-gray-400 mt-2">
-                            提示：Onboarding 完成后会触发 onboarding_refine 任务
-                        </div>
-                    </div>
-                </div>
-
                 <!-- Layer 3: Conversation -->
                 <div class="context-section context-layer-3">
                     <div class="context-section-header" @click="contextExpanded.layer3 = !contextExpanded.layer3">
@@ -526,205 +495,14 @@
                             </span>
                         </div>
                         <div class="context-stat">
-                            <span>用户轮次（用于压缩）</span>
-                            <span class="context-stat-value">
-                                {{ contextData?.layer3_conversation?.current_user_turns ?? '未知' }}
-                            </span>
-                        </div>
-                        <div class="context-stat">
                             <span>压缩阈值</span>
-                            <span class="context-stat-value">{{ contextData?.layer3_conversation?.compression_threshold ?? 45 }}</span>
-                        </div>
-                        <div class="context-stat">
-                            <span>压缩批量</span>
-                            <span class="context-stat-value">{{ contextData?.layer3_conversation?.compression_batch_size ?? 5 }}</span>
-                        </div>
-                        <!-- 距离下次压缩进度 -->
-                        <div class="context-stat">
-                            <span>距离下次压缩</span>
-                            <span class="context-stat-value" :class="{
-                                'text-green-400': contextData?.layer3_conversation?.turns_to_next_compression === 0,
-                                'text-yellow-400': contextData?.layer3_conversation?.turns_to_next_compression > 0 && contextData?.layer3_conversation?.turns_to_next_compression <= 10
-                            }">
-                                <template v-if="contextData?.layer3_conversation?.turns_to_next_compression === 0">
-                                    🔥 已触发（待执行）
-                                </template>
-                                <template v-else>
-                                    还差 {{ contextData?.layer3_conversation?.turns_to_next_compression ?? '-' }} 轮
-                                </template>
-                            </span>
+                            <span class="context-stat-value">{{ contextData?.layer3_conversation?.compression_threshold || 45 }}</span>
                         </div>
                         <div class="context-stat">
                             <span>需要压缩</span>
                             <span class="context-stat-value" :class="{ 'danger': contextData?.layer3_conversation?.needs_compression }">
                                 {{ contextData?.layer3_conversation?.needs_compression ? '是 ⚠️' : '否' }}
                             </span>
-                        </div>
-                        <!-- 进度条 -->
-                        <div class="mt-2">
-                            <div class="text-xs text-gray-400 mb-1">压缩进度</div>
-                            <div style="background: #374151; border-radius: 4px; height: 8px; overflow: hidden;">
-                                <div 
-                                    :style="{
-                                        width: Math.min(100, ((contextData?.layer3_conversation?.current_user_turns || 0) / (contextData?.layer3_conversation?.compression_threshold || 45)) * 100) + '%',
-                                        background: contextData?.layer3_conversation?.needs_compression ? '#ef4444' : '#8b5cf6',
-                                        height: '100%',
-                                        transition: 'width 0.3s'
-                                    }"
-                                ></div>
-                            </div>
-                            <div class="text-xs text-gray-500 mt-1">
-                                {{ contextData?.layer3_conversation?.current_user_turns || 0 }} / {{ contextData?.layer3_conversation?.compression_threshold || 45 }} 轮
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Maintenance Queue: 后台维护任务 -->
-                <div class="context-section">
-                    <div class="context-section-header" @click="contextExpanded.maintenance = !contextExpanded.maintenance">
-                        <span>🧰 后台维护队列</span>
-                        <span>{{ contextExpanded.maintenance ? '▼' : '▶' }}</span>
-                    </div>
-                    <div v-if="contextExpanded.maintenance" class="context-section-body">
-                        <div class="context-stat">
-                            <span>队列长度</span>
-                            <span class="context-stat-value">{{ contextData?.maintenance?.queue_size ?? 0 }}</span>
-                        </div>
-                        <div class="context-field">
-                            <div class="context-field-label">任务列表（最新在后）</div>
-                            <div v-if="contextData?.maintenance?.queue?.length > 0" class="text-xs">
-                                <div v-for="(t, idx) in contextData.maintenance.queue.slice(-10)" :key="idx" class="mb-2">
-                                    <div>
-                                        <span class="context-badge pending" style="background:#334155;color:#e2e8f0;border-color:#475569;">
-                                            {{ t.type }}
-                                        </span>
-                                        <span class="context-badge" style="background:#111827;color:#e5e7eb;border-color:#374151;">
-                                            {{ t.status }}
-                                        </span>
-                                        <span class="text-gray-400 ml-1">attempts={{ t.attempts ?? 0 }}</span>
-                                    </div>
-                                    <div class="text-gray-400" v-if="t.last_error">last_error: {{ t.last_error }}</div>
-                                </div>
-                                <div class="text-gray-500">仅展示最近 10 条</div>
-                            </div>
-                            <div v-else class="context-field-value empty">暂无任务（未触发或已全部 done）</div>
-                        </div>
-                        <div class="context-field">
-                            <div class="context-field-label">Layer 版本（是否有写回）</div>
-                            <div class="text-xs text-gray-300">
-                                L1 v{{ contextData?.layered_memory?.layer1?.version ?? '-' }} / {{ contextData?.layered_memory?.layer1?.last_updated ?? '-' }}<br/>
-                                L2 v{{ contextData?.layered_memory?.layer2?.version ?? '-' }} / {{ contextData?.layered_memory?.layer2?.last_updated ?? '-' }}<br/>
-                                L3 v{{ contextData?.layered_memory?.layer3?.version ?? '-' }} / {{ contextData?.layered_memory?.layer3?.last_updated ?? '-' }}
-                            </div>
-                        </div>
-                        <div class="context-field">
-                            <div class="context-field-label">当前归档/压缩配置（代码常量）</div>
-                            <div class="text-xs text-gray-300">
-                                L3.threshold={{ contextData?.archive_config?.layer3?.compression_threshold ?? '-' }},
-                                batch={{ contextData?.archive_config?.layer3?.compression_batch_size ?? '-' }},
-                                keep_recent={{ contextData?.archive_config?.layer3?.max_recent_turns ?? '-' }}<br/>
-                                L2.recent_summary={{ contextData?.archive_config?.layer2?.recent_summary_count ?? '-' }},
-                                max_one_liner={{ contextData?.archive_config?.layer2?.max_one_liner_count ?? '-' }}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Organized Outputs: 归档/整理产物 -->
-                <div class="context-section">
-                    <div class="context-section-header" @click="contextExpanded.outputs = !contextExpanded.outputs">
-                        <span>📚 归档/整理产物（预览）</span>
-                        <span>{{ contextExpanded.outputs ? '▼' : '▶' }}</span>
-                    </div>
-                    <div v-if="contextExpanded.outputs" class="context-section-body">
-                        <!-- Layer3: Conversation Summaries -->
-                        <div class="context-field">
-                            <div class="context-field-label">Layer 3 对话摘要（最近 5 条）</div>
-                            <div v-if="contextData?.organized_outputs?.layer3_conversation_summaries?.length > 0" class="text-xs">
-                                <div v-for="(s, idx) in contextData.organized_outputs.layer3_conversation_summaries" :key="idx" class="mb-2 p-2 bg-gray-800 rounded">
-                                    <div class="text-gray-400 flex justify-between items-center">
-                                        <span>turns={{ s.turn_count ?? '-' }} · topics={{ (s.key_topics && s.key_topics.length) ? s.key_topics.join('、') : '无' }}</span>
-                                        <button @click="loadDetailModal('compressed_messages', idx)" class="text-blue-400 hover:text-blue-300 text-xs px-1">展开详情</button>
-                                    </div>
-                                    <div class="text-gray-200" style="white-space: pre-wrap;">{{ s.summary || '（空）' }}</div>
-                                </div>
-                            </div>
-                            <div v-else class="context-field-value empty">暂无（还没触发对话压缩/提纯）</div>
-                        </div>
-
-                        <!-- Layer2: Status Report History -->
-                        <div class="context-field">
-                            <div class="context-field-label">Layer 2 历史现状报告（最近 5 条）</div>
-                            <div v-if="contextData?.organized_outputs?.layer2_status_reports_history?.length > 0" class="text-xs">
-                                <div v-for="(r, idx) in contextData.organized_outputs.layer2_status_reports_history" :key="idx" class="mb-2 p-2 bg-gray-800 rounded">
-                                    <div class="text-gray-400 flex justify-between items-center">
-                                        <span>id={{ r.id }} · stage={{ r.stage || '-' }}</span>
-                                        <button @click="loadDetailModal('status_report', r.id)" class="text-blue-400 hover:text-blue-300 text-xs px-1">展开全文</button>
-                                    </div>
-                                    <div class="text-gray-200" style="white-space: pre-wrap;">{{ r.summary || r.one_liner || '（暂无摘要）' }}</div>
-                                </div>
-                            </div>
-                            <div v-else class="context-field-value empty">暂无</div>
-                        </div>
-
-                        <!-- Layer2: Action Plan History -->
-                        <div class="context-field">
-                            <div class="context-field-label">Layer 2 历史行动规划（最近 5 条）</div>
-                            <div v-if="contextData?.organized_outputs?.layer2_action_plans_history?.length > 0" class="text-xs">
-                                <div v-for="(p, idx) in contextData.organized_outputs.layer2_action_plans_history" :key="idx" class="mb-2 p-2 bg-gray-800 rounded">
-                                    <div class="text-gray-400">id={{ p.id }}</div>
-                                    <div class="text-gray-200" style="white-space: pre-wrap;">{{ p.summary || p.one_liner || '（暂无摘要）' }}</div>
-                                </div>
-                            </div>
-                            <div v-else class="context-field-value empty">暂无</div>
-                        </div>
-
-                        <!-- Layer2: Terminal Guides -->
-                        <div class="context-field">
-                            <div class="context-field-label">Layer 2 已归档指南（终态，最近 5 条）</div>
-                            <div v-if="contextData?.organized_outputs?.layer2_terminal_guides?.length > 0" class="text-xs">
-                                <div v-for="(g, idx) in contextData.organized_outputs.layer2_terminal_guides" :key="idx" class="mb-2 p-2 bg-gray-800 rounded">
-                                    <div class="text-gray-400 flex justify-between items-center">
-                                        <span>id={{ g.id }} · status={{ g.status }} · task={{ g.current_task || '-' }}</span>
-                                        <button @click="loadDetailModal('action_guide', g.id)" class="text-blue-400 hover:text-blue-300 text-xs px-1">展开全文</button>
-                                    </div>
-                                    <div class="text-gray-200" style="white-space: pre-wrap;">{{ g.summary || g.one_liner || '（暂无摘要）' }}</div>
-                                </div>
-                            </div>
-                            <div v-else class="context-field-value empty">暂无</div>
-                        </div>
-
-                        <!-- Layer2: Dynamic Intels -->
-                        <div class="context-field">
-                            <div class="context-field-label">Layer 2 动态情报（最近 10 条）</div>
-                            <div v-if="contextData?.organized_outputs?.layer2_dynamic_intels?.length > 0" class="text-xs">
-                                <div v-for="(d, idx) in contextData.organized_outputs.layer2_dynamic_intels" :key="idx" class="mb-2 p-2 bg-gray-800 rounded">
-                                    <div class="text-gray-400">type={{ d.type || '-' }} · ttl={{ d.ttl_days ?? '-' }}d · created={{ d.created_at || '-' }}</div>
-                                    <div class="text-gray-200" style="white-space: pre-wrap;">{{ d.content || d.summary || JSON.stringify(d) }}</div>
-                                </div>
-                            </div>
-                            <div v-else class="context-field-value empty">暂无</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Detail Modal for Full Content -->
-                <div v-if="detailModal.show" class="fixed inset-0 z-50 flex items-center justify-center" style="background: rgba(0,0,0,0.7);">
-                    <div class="bg-gray-900 rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[80vh] flex flex-col">
-                        <div class="p-4 border-b border-gray-700 flex justify-between items-center">
-                            <h3 class="font-bold text-white">{{ detailModal.title }}</h3>
-                            <button @click="detailModal.show = false" class="text-gray-400 hover:text-white">✕</button>
-                        </div>
-                        <div class="p-4 overflow-y-auto flex-1">
-                            <div v-if="detailModal.loading" class="text-gray-400 text-center py-10">加载中...</div>
-                            <div v-else-if="detailModal.error" class="text-red-400">{{ detailModal.error }}</div>
-                            <div v-else class="text-gray-200 text-sm" style="white-space: pre-wrap;" v-html="renderMarkdown(detailModal.content)"></div>
-                        </div>
-                        <div v-if="detailModal.metadata" class="p-4 border-t border-gray-700 text-xs text-gray-400">
-                            <div v-for="(value, key) in detailModal.metadata" :key="key">
-                                <strong>{{ key }}:</strong> {{ typeof value === 'object' ? JSON.stringify(value) : value }}
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -885,10 +663,7 @@
                             <div 
                                 :class="['max-w-[80%] px-4 py-3 text-sm shadow-sm', msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai']"
                             >
-                                <div v-if="msg.role === 'assistant'" class="markdown-body">
-                                    <div v-if="msg.isAssessment" v-html="msg.content"></div>
-                                    <div v-else v-html="renderMarkdown(msg.content)"></div>
-                                </div>
+                                <div v-if="msg.role === 'assistant'" class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
                                 <div v-else>{{ msg.content }}</div>
                             </div>
                         </div>
@@ -953,7 +728,7 @@
                         <h3 class="font-bold text-gray-800 mb-2 text-sm">当前关系阶段</h3>
                         <div class="bg-orange-50 p-4 rounded-lg flex items-center justify-center space-x-2 border border-orange-100">
                             <span class="text-2xl">🤝</span>
-                            <span class="text-orange-600 font-bold text-lg">{{ state.status_report ? '已生成' : '待分析' }}</span>
+                            <span class="text-orange-600 font-bold text-lg">{{ state.status_report?.stage || '待分析' }}</span>
                         </div>
                         <p class="text-xs text-gray-400 mt-2 text-center">基于对话内容自动分析</p>
                     </div>
@@ -1172,18 +947,6 @@
                                     <button @click="clearScreenshot(q.id)" class="text-xs text-red-500 underline mt-2">重试</button>
                                 </div>
                             </div>
-
-                            <!-- Fallback (兜底)：未知题型按自由输入处理，避免出现“题目无输入控件”的空白态 -->
-                            <div v-else>
-                                <textarea 
-                                    v-model="inquiryAnswers[q.id]"
-                                    :placeholder="q.placeholder || '请输入...'"
-                                    class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none"
-                                    rows="4"
-                                    @focus="$event.target.style.height = 'auto'; $event.target.style.height = $event.target.scrollHeight + 'px'"
-                                ></textarea>
-                                <p class="text-xs text-gray-400 mt-2">（系统提示：该题型暂未适配，已按文本输入处理）</p>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -1305,21 +1068,11 @@
                 const showDebug = ref(false);
                 const showContext = ref(false);
 
-                // --- Studio Mode Config ---
-                // 如果你想配合 LangGraph Studio 使用，请将 useStudioMode 设为 true
-                // 并确保 Studio 正在运行（默认端口 2024）
-                // 默认关闭 Studio Mode，避免 2024 未启动时前端直接报 “Failed to fetch”
-                const useStudioMode = ref(true); // 启用 Studio Mode 以在 Studio 中查看运行记录
-                const studioBaseUrl = ref('http://127.0.0.1:2024'); // Studio 默认端口
-                const assistantId = ref('crushe_agent'); // 对应 langgraph.json 中的名称
-                // --------------------------
-
                 // Chat State
                 const inputMessage = ref('');
                 const messages = ref([]);
                 const isLoading = ref(false);
                 const messagesContainer = ref(null);
-                const displayedMessageIds = ref(new Set()); // 防止 updates/values 重复展示同一回复
                 
                 // Data State
                 const state = ref({
@@ -1329,7 +1082,6 @@
                     action_guide: null,
                     action_guides: [],  // 新版：支持多个指南
                     inquiry_card: null,
-                    preliminary_assessment: null,
                     debug_log: []
                 });
 
@@ -1339,21 +1091,8 @@
                     layer1: true,
                     layer2: true,
                     layer3: true,
-                    onboarding: true,
-                    maintenance: true,
-                    outputs: true,
                     layer4: false,
                     crushChat: false,
-                });
-
-                // Detail Modal State (for full content viewing)
-                const detailModal = ref({
-                    show: false,
-                    title: '',
-                    content: '',
-                    metadata: null,
-                    loading: false,
-                    error: null,
                 });
 
                 // Inquiry Form State
@@ -1369,8 +1108,6 @@
                 });
 
                 const sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
-                // Studio thread_id（需要符合 UUID，否则会报 400）
-                const studioThreadId = ref(null);
 
                 // ============ 选项格式适配 ============
                 // 支持两种格式：
@@ -1417,335 +1154,14 @@
 
                 const refreshContext = async () => {
                     try {
-                        if (useStudioMode.value && studioThreadId.value) {
-                            // Studio Mode: 直接从 Studio API 获取 state
-                            const stateUrl = `${studioBaseUrl.value}/threads/${studioThreadId.value}/state`;
-                            console.log('[Context] Studio Mode: fetching from', stateUrl);
-                            const response = await fetch(stateUrl);
-                            if (response.ok) {
-                                const studioState = await response.json();
-                                // studioState.values 包含实际的 state
-                                const state = studioState.values || {};
-                                
-                                // 转换为前端期望的 contextData 格式
-                                const layer1_memory = state.layer1_memory || {};
-                                const layer2_memory = state.layer2_memory || {};
-                                const layer3_memory = state.layer3_memory || {};
-                                const user_context = state.user_context || layer1_memory.full_data || {};
-                                const maintenance_queue = state.maintenance_queue || [];
-                                const maintenance_flags = state.maintenance_flags || {};
-                                
-                                // 计算用户轮次（简单计算 user 消息数）
-                                const allMessages = layer3_memory.all_messages || state.messages || [];
-                                const userTurns = allMessages.filter(m => 
-                                    (m.role === 'user' || m.type === 'human')
-                                ).length;
-                                
-                                // 压缩阈值配置（硬编码，与后端一致）
-                                const compressionThreshold = 45;
-                                const compressionBatchSize = 5;
-                                
-                                contextData.value = {
-                                    session_id: studioThreadId.value,
-                                    onboarding_status: {
-                                        completed: Boolean(state.onboarding_completed),
-                                        turn_count: state.onboarding_turn_count || 0,
-                                        max_turns: state.onboarding_max_turns || 3,
-                                        has_handoff: Boolean(state.onboarding_handoff),
-                                    },
-                                    maintenance: {
-                                        queue_size: maintenance_queue.length,
-                                        queue: maintenance_queue,
-                                        flags: maintenance_flags,
-                                        last_finalized_at: state.maintenance_last_finalized_at,
-                                    },
-                                    archive_config: {
-                                        layer2: { recent_summary_count: 2, max_one_liner_count: 10, max_total_history: 20 },
-                                        layer3: { compression_threshold: compressionThreshold, compression_batch_size: compressionBatchSize, max_recent_turns: 4 },
-                                    },
-                                    organized_outputs: {
-                                        layer3_conversation_summaries: (layer3_memory.conversation_summaries || []).slice(-5),
-                                        layer2_status_reports_history: (layer2_memory.all_status_reports || [])
-                                            .filter(r => r && !r.is_current)
-                                            .slice(-5)
-                                            .map(r => ({
-                                                id: r.id,
-                                                created_at: r.created_at,
-                                                stage: r.stage || (r.report || {}).stage,
-                                                summary: r.summary || '',
-                                                one_liner: r.one_liner || '',
-                                            })),
-                                        layer2_action_plans_history: (layer2_memory.all_action_plans || [])
-                                            .filter(p => p && !p.is_current)
-                                            .slice(-5)
-                                            .map(p => ({
-                                                id: p.id,
-                                                created_at: p.created_at,
-                                                summary: p.summary || '',
-                                                one_liner: p.one_liner || '',
-                                            })),
-                                        layer2_terminal_guides: (layer2_memory.all_action_guides || state.action_guides || [])
-                                            .filter(g => g && ['completed', 'cancelled', 'expired'].includes(g.status))
-                                            .slice(-5)
-                                            .map(g => ({
-                                                id: g.id,
-                                                status: g.status,
-                                                created_at: g.created_at,
-                                                completed_at: g.completed_at,
-                                                current_task: (g.guide || {}).current_task,
-                                                one_liner: g.one_liner || '',
-                                                summary: g.summary || '',
-                                            })),
-                                        layer2_dynamic_intels: (layer2_memory.dynamic_intels || []).slice(-10),
-                                    },
-                                    layered_memory: {
-                                        layer1: {
-                                            version: layer1_memory.version,
-                                            last_updated: layer1_memory.last_updated,
-                                        },
-                                        layer2: {
-                                            version: layer2_memory.version,
-                                            last_updated: layer2_memory.last_updated,
-                                            status_reports_total: (layer2_memory.all_status_reports || []).length,
-                                            action_plans_total: (layer2_memory.all_action_plans || []).length,
-                                            action_guides_total: (layer2_memory.all_action_guides || []).length,
-                                            dynamic_intels_total: (layer2_memory.dynamic_intels || []).length,
-                                        },
-                                        layer3: {
-                                            version: layer3_memory.version,
-                                            last_updated: layer3_memory.last_updated,
-                                            all_messages_count: allMessages.length,
-                                            conversation_summaries_count: (layer3_memory.conversation_summaries || []).length,
-                                        },
-                                    },
-                                    layer1_static: {
-                                        user_info: user_context.user_info || {},
-                                        crush_info: user_context.crush_info || {},
-                                        both_info: user_context.both_info || {},
-                                    },
-                                    layer2_working: {
-                                        status_report: state.status_report,
-                                        action_plan: state.action_plan,
-                                        action_guides: state.action_guides || [],
-                                        recent_messages: (state.messages || []).slice(-10),
-                                    },
-                                    layer3_conversation: {
-                                        message_count: (state.messages || []).length,
-                                        messages_count_workspace: (state.messages || []).length,
-                                        all_messages_count_fullstore: allMessages.length,
-                                        conversation_summaries_count: (layer3_memory.conversation_summaries || []).length,
-                                        compression_threshold: compressionThreshold,
-                                        compression_batch_size: compressionBatchSize,
-                                        max_recent_turns: 4,
-                                        current_user_turns: userTurns,
-                                        turns_to_next_compression: userTurns <= compressionThreshold 
-                                            ? compressionThreshold - userTurns + 1 
-                                            : (compressionBatchSize - ((userTurns - compressionThreshold) % compressionBatchSize)) % compressionBatchSize,
-                                        needs_compression: userTurns > compressionThreshold && ((userTurns - compressionThreshold) % compressionBatchSize === 0),
-                                        messages_preview: allMessages.slice(-5),
-                                    },
-                                    layer4_archive: {
-                                        status_history_count: ((state.history_archive || {}).status_history || []).length,
-                                        guide_history_count: ((state.history_archive || {}).guide_history || []).length,
-                                        plan_history_count: ((state.history_archive || {}).plan_history || []).length,
-                                        conversation_archive_count: ((state.history_archive || {}).conversation_archive || []).length,
-                                    },
-                                    crush_chat: {
-                                        metadata: (state.crush_chat_storage || {}).metadata || {},
-                                        summary: (state.crush_chat_storage || {}).summary || {},
-                                    },
-                                };
-                                console.log('[Context] Studio Mode refreshed:', contextData.value);
-                            } else {
-                                console.error('[Context] Studio API error:', response.status);
-                                contextData.value = { error: `Studio API 错误: ${response.status}` };
-                            }
-                        } else {
-                            // 非 Studio Mode: 调用本地 server.py
-                            const response = await fetch(`/api/debug/context/${sessionId}`);
-                            if (response.ok) {
-                                contextData.value = await response.json();
-                                console.log('[Context] Refreshed:', contextData.value);
-                            }
+                        const response = await fetch(`/api/debug/context/${sessionId}`);
+                        if (response.ok) {
+                            contextData.value = await response.json();
+                            console.log('[Context] Refreshed:', contextData.value);
                         }
                     } catch (error) {
                         console.error('[Context] Failed to refresh:', error);
-                        contextData.value = { error: '获取上下文失败: ' + error.message };
-                    }
-                };
-
-                // ============ 全文展开相关 ============
-                
-                const loadDetailModal = async (type, id) => {
-                    detailModal.value = {
-                        show: true,
-                        title: type === 'status_report' ? '现状报告全文' : 
-                               type === 'action_guide' ? '行动指南全文' : 
-                               '对话摘要详情',
-                        content: '',
-                        metadata: null,
-                        loading: true,
-                        error: null,
-                    };
-                    
-                    try {
-                        // Studio Mode: 需要先刷新 contextData，然后从里面提取详情
-                        if (useStudioMode.value && studioThreadId.value) {
-                            // 先确保 contextData 是最新的
-                            if (!contextData.value || contextData.value.error) {
-                                await refreshContext();
-                            }
-                            
-                            // 从 Studio 获取完整 state
-                            const stateUrl = `${studioBaseUrl.value}/threads/${studioThreadId.value}/state`;
-                            const response = await fetch(stateUrl);
-                            if (!response.ok) {
-                                throw new Error(`Studio API 错误: ${response.status}`);
-                            }
-                            const studioState = await response.json();
-                            const state = studioState.values || {};
-                            
-                            let content = '';
-                            let metadata = {};
-                            
-                            if (type === 'status_report') {
-                                const layer2 = state.layer2_memory || {};
-                                const reports = layer2.all_status_reports || [];
-                                const report = reports.find(r => String(r?.id) === String(id));
-                                if (report) {
-                                    content = report.report_content || (report.report || {}).report_content || JSON.stringify(report, null, 2);
-                                    metadata = {
-                                        id: report.id,
-                                        stage: report.stage || (report.report || {}).stage,
-                                        is_current: report.is_current,
-                                        created_at: report.created_at,
-                                        summary: report.summary,
-                                        one_liner: report.one_liner,
-                                    };
-                                } else {
-                                    throw new Error(`Report with id ${id} not found`);
-                                }
-                            } else if (type === 'action_guide') {
-                                const layer2 = state.layer2_memory || {};
-                                const guides = layer2.all_action_guides || state.action_guides || [];
-                                const guide = guides.find(g => String(g?.id) === String(id));
-                                if (guide) {
-                                    const guideContent = guide.guide || {};
-                                    content = guideContent.guide_content || JSON.stringify(guide, null, 2);
-                                    metadata = {
-                                        id: guide.id,
-                                        status: guide.status,
-                                        current_task: guideContent.current_task,
-                                        created_at: guide.created_at,
-                                        completed_at: guide.completed_at,
-                                        summary: guide.summary,
-                                        one_liner: guide.one_liner,
-                                        user_feedback: guide.user_feedback,
-                                        execution_status: guide.execution_status,
-                                    };
-                                } else {
-                                    throw new Error(`Guide with id ${id} not found`);
-                                }
-                            } else if (type === 'compressed_messages') {
-                                const layer3 = state.layer3_memory || {};
-                                const summaries = layer3.conversation_summaries || [];
-                                const idx = parseInt(id);
-                                if (idx >= 0 && idx < summaries.length) {
-                                    const summary = summaries[idx];
-                                    content = (summary.summary || '（无摘要内容）') + '\n\n---\n\n**注意:** 原始消息在压缩后被删除，仅保留摘要。';
-                                    metadata = {
-                                        index: idx,
-                                        turn_count: summary.turn_count,
-                                        key_topics: summary.key_topics,
-                                        created_at: summary.created_at,
-                                        extracted_info: summary.extracted_info,
-                                    };
-                                } else {
-                                    throw new Error(`Summary at index ${id} not found`);
-                                }
-                            }
-                            
-                            detailModal.value = {
-                                show: true,
-                                title: detailModal.value.title,
-                                content: content,
-                                metadata: metadata,
-                                loading: false,
-                                error: null,
-                            };
-                            return;
-                        }
-                        
-                        // 非 Studio Mode: 调用本地 server.py API
-                        const endpoint = `/api/debug/detail/${type}/${sessionId}/${id}`;
-                        const response = await fetch(endpoint);
-                        
-                        if (!response.ok) {
-                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                        }
-                        
-                        const data = await response.json();
-                        
-                        // 根据类型提取主要内容和元数据
-                        let content = '';
-                        let metadata = {};
-                        
-                        if (type === 'status_report') {
-                            content = data.report_content || JSON.stringify(data.full_report, null, 2);
-                            metadata = {
-                                id: data.id,
-                                stage: data.stage,
-                                is_current: data.is_current,
-                                created_at: data.created_at,
-                                summary: data.summary,
-                                one_liner: data.one_liner,
-                            };
-                        } else if (type === 'action_guide') {
-                            content = data.guide_content || JSON.stringify(data.full_guide, null, 2);
-                            metadata = {
-                                id: data.id,
-                                status: data.status,
-                                current_task: data.current_task,
-                                created_at: data.created_at,
-                                completed_at: data.completed_at,
-                                summary: data.summary,
-                                one_liner: data.one_liner,
-                                user_feedback: data.user_feedback,
-                                execution_status: data.execution_status,
-                            };
-                        } else if (type === 'compressed_messages') {
-                            content = data.summary || '（无摘要内容）';
-                            if (data.note) {
-                                content += '\n\n---\n\n**注意:** ' + data.note;
-                            }
-                            metadata = {
-                                index: data.index,
-                                turn_count: data.turn_count,
-                                key_topics: data.key_topics,
-                                created_at: data.created_at,
-                                extracted_info: data.extracted_info,
-                            };
-                        }
-                        
-                        detailModal.value = {
-                            show: true,
-                            title: detailModal.value.title,
-                            content: content,
-                            metadata: metadata,
-                            loading: false,
-                            error: null,
-                        };
-                        
-                    } catch (error) {
-                        console.error('[DetailModal] Failed to load:', error);
-                        detailModal.value = {
-                            show: true,
-                            title: detailModal.value.title,
-                            content: '',
-                            metadata: null,
-                            loading: false,
-                            error: `加载失败: ${error.message}`,
-                        };
+                        contextData.value = { error: '获取上下文失败' };
                     }
                 };
                 
@@ -1753,14 +1169,7 @@
                 
                 // 判断是否是截图类型
                 const isScreenshotType = (type) => {
-                    return [
-                        'private_chat_screenshot',
-                        'group_chat_screenshot',
-                        'moments_screenshot',
-                        'other_social_media_screenshot',
-                        // 后端/Prompt 允许的通用截图类型（旧前端不识别会导致“题目无输入控件”）
-                        'universal_screenshot_analysis',
-                    ].includes(type);
+                    return ['private_chat_screenshot', 'group_chat_screenshot', 'moments_screenshot', 'other_social_media_screenshot'].includes(type);
                 };
                 
                 // 获取截图类型的中文标签
@@ -1769,8 +1178,7 @@
                         'private_chat_screenshot': '私聊截图',
                         'group_chat_screenshot': '群聊截图',
                         'moments_screenshot': '朋友圈截图',
-                        'other_social_media_screenshot': '社媒截图',
-                        'universal_screenshot_analysis': '截图',
+                        'other_social_media_screenshot': '社媒截图'
                     };
                     return labels[type] || '截图';
                 };
@@ -1885,74 +1293,6 @@
                     }
                 };
 
-                // Render Preliminary Assessment
-                const renderAssessmentToHTML = (assessment) => {
-                    if (!assessment) return '';
-                    
-                    const verdict = assessment.verdict || '未定性';
-                    const evidence = assessment.evidence || '';
-                    const projection = assessment.projection || '';
-                    const cta = assessment.call_to_action || '';
-                    
-                    // 1. Color Mapping
-                    let themeClass = 'bg-violet-50 text-violet-700'; // Default
-                    let icon = '🔮';
-                    
-                    if (verdict.includes('高危') || verdict.includes('危险')) {
-                        themeClass = 'bg-red-50 text-red-700';
-                        icon = '⚠️';
-                    } else if (verdict.includes('迷雾') || verdict.includes('不明')) {
-                        themeClass = 'bg-yellow-50 text-yellow-700';
-                        icon = '🌫️';
-                    } else if (verdict.includes('机会') || verdict.includes('推进')) {
-                        themeClass = 'bg-green-50 text-green-700';
-                        icon = '🎯';
-                    }
-                    
-                    // 2. Build HTML
-                    return `
-                    <div class="assessment-card -m-2 text-sm">
-                      <!-- 1. Verdict Header -->
-                      <div class="p-3 rounded-t-lg font-bold flex items-center justify-between ${themeClass}">
-                        <span>${icon} 局势初判</span>
-                        <span>${verdict}</span>
-                      </div>
-
-                      <!-- Content Area -->
-                      <div class="p-3 bg-white/50 space-y-3 rounded-b-lg border-x border-b border-gray-100">
-                        
-                        <!-- 2. Evidence -->
-                        ${evidence ? `
-                        <div class="text-xs text-gray-500">
-                          <div class="font-bold mb-1 text-gray-700">🔍 关键信号</div>
-                          <div class="bg-gray-50 p-2 rounded text-gray-600 leading-relaxed">
-                            ${evidence}
-                          </div>
-                        </div>` : ''}
-
-                        <!-- 3. Projection -->
-                        ${projection ? `
-                        <div class="flex items-start space-x-2">
-                          <span class="text-lg">📈</span>
-                          <div>
-                            <div class="font-bold text-xs text-gray-700 mb-0.5">走势预演</div>
-                            <div class="text-gray-600">${projection}</div>
-                          </div>
-                        </div>` : ''}
-
-                        <!-- 4. CTA -->
-                        ${cta ? `
-                        <div class="pt-2 border-t border-gray-100 mt-2">
-                          <div class="font-bold text-violet-600 text-center text-xs">
-                            👉 ${cta}
-                          </div>
-                        </div>` : ''}
-                        
-                      </div>
-                    </div>
-                    `;
-                };
-
                 // Logic for detecting changes
                 const processStateUpdate = (newState) => {
                     if (!newState) return;
@@ -2009,19 +1349,6 @@
                     if (newState.action_guide && newState.action_guide !== oldState.action_guide) {
                         state.value.action_guide = newState.action_guide;
                         hasUpdates = true;
-                    }
-
-                    // Check Preliminary Assessment
-                    if (newState.preliminary_assessment && JSON.stringify(newState.preliminary_assessment) !== JSON.stringify(oldState.preliminary_assessment)) {
-                         const assessmentHtml = renderAssessmentToHTML(newState.preliminary_assessment);
-                         if (assessmentHtml) {
-                             messages.value.push({
-                                 role: 'assistant',
-                                 content: assessmentHtml,
-                                 isAssessment: true
-                             });
-                             hasUpdates = true;
-                         }
                     }
 
                     // Check Inquiry
@@ -2174,141 +1501,6 @@
                     await scrollToBottom();
 
                     try {
-                        if (useStudioMode.value) {
-                            // === Path A: 直接调用 LangGraph Studio/Server API ===
-                            console.log('[Studio Mode] Sending to:', studioBaseUrl.value);
-
-                            // 1) 创建或复用 thread_id（必须是 UUID）
-                            if (!studioThreadId.value) {
-                                const createThreadRes = await fetch(`${studioBaseUrl.value}/threads`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({})
-                                });
-                                const createThreadJson = await createThreadRes.json();
-                                if (!createThreadRes.ok || !createThreadJson.thread_id) {
-                                    throw new Error(`Create thread failed: ${createThreadRes.status} - ${JSON.stringify(createThreadJson)}`);
-                                }
-                                studioThreadId.value = createThreadJson.thread_id;
-                                console.log('[Studio Mode] New thread_id:', studioThreadId.value);
-                            }
-                            
-                            // 2) 发起 Run (流式)
-                            const response = await fetch(`${studioBaseUrl.value}/threads/${studioThreadId.value}/runs/stream`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    assistant_id: assistantId.value,
-                                    input: {
-                                        user_message: content,
-                                        // [FIX] Studio Mode 下可能不会经过 server.py:/api/chat 的归零逻辑，
-                                        // 导致 _iteration_count 跨轮累积触发 MAX_NODE_STEPS_PER_TURN，
-                                        // 表现为 router "to main_agent" 但被强制 end。
-                                        // 这里每轮显式归零，保留同一 thread 的上下文不变。
-                                        _iteration_count: 0,
-                                        // 如果是第一次，LangGraph 会自动调用 create_initial_state
-                                        // 如果不是第一次，它会合并到现有状态
-                                    },
-                                    stream_mode: ['updates', 'values'], // 我们需要更新来显示过程，values 来获取最终状态
-                                })
-                            });
-
-                            if (!response.ok) {
-                                const errBody = await response.text();
-                                throw new Error(`Studio API Error: ${response.status} - ${errBody}`);
-                            }
-
-                            // 3. 解析 SSE 流
-                            const reader = response.body.getReader();
-                            const decoder = new TextDecoder();
-                            let buffer = '';
-
-                            while (true) {
-                                const { value, done } = await reader.read();
-                                if (done) break;
-                                
-                                buffer += decoder.decode(value, { stream: true });
-                                const lines = buffer.split('\n');
-                                buffer = lines.pop();
-
-                                for (const line of lines) {
-                                    if (line.startsWith('data: ')) {
-                                        try {
-                                            const raw = line.substring(6);
-                                            const chunk = JSON.parse(raw);
-                                            console.log('[Studio Chunk]:', chunk);
-                                            
-                                            const payload = chunk.event ? (chunk.data || {}) : chunk;
-
-                                            // 当收到最终状态 (values 模式下的最后一个 chunk)
-                                            if (chunk.event === 'values') {
-                                                const finalState = payload;
-                                                
-                                                // 1. 先展示最终 pending_responses（保证前端有可见回复在卡片之前）
-                                                const pending = finalState.pending_responses || [];
-                                                pending.forEach(resp => {
-                                                    if (resp?.content) {
-                                                        const msgKey = `${resp.from || 'assistant'}_${resp.content.substring(0, 50)}`;
-                                                        if (!displayedMessageIds.value.has(msgKey)) {
-                                                            displayedMessageIds.value.add(msgKey);
-                                                            messages.value.push({ role: 'assistant', content: resp.content });
-                                                        }
-                                                    }
-                                                });
-                                                await scrollToBottom();
-
-                                                // 2. 更新 UI 状态看板 (可能会生成 System Task Card)
-                                                processStateUpdate(finalState);
-                                                await scrollToBottom();
-                                            }
-                                            
-                                            // 收到节点更新 (updates 模式)
-                                            if (chunk.event === 'updates') {
-                                                const updates = payload;
-                                                // 如果 main_agent 回复了，实时展示出来
-                                                for (const nodeName in updates) {
-                                                    const nodeData = updates[nodeName];
-                                                    if (nodeData.response_content) {
-                                                        const msgKey = `${nodeName}_${nodeData.response_content.substring(0, 50)}`;
-                                                        if (!displayedMessageIds.value.has(msgKey)) {
-                                                            displayedMessageIds.value.add(msgKey);
-                                                            messages.value.push({ 
-                                                                role: 'assistant', 
-                                                                content: nodeData.response_content 
-                                                            });
-                                                            await scrollToBottom();
-                                                        }
-                                                    }
-                                                }
-                                            }
-
-                                            // 兼容：无 event 字段的直出 state，直接按 state 处理
-                                            if (!chunk.event) {
-                                                // 1. 先展示回复
-                                                const pending = payload.pending_responses || [];
-                                                pending.forEach(resp => {
-                                                    if (resp?.content) {
-                                                        const msgKey = `${resp.from || 'assistant'}_${resp.content.substring(0, 50)}`;
-                                                        if (!displayedMessageIds.value.has(msgKey)) {
-                                                            displayedMessageIds.value.add(msgKey);
-                                                            messages.value.push({ role: 'assistant', content: resp.content });
-                                                        }
-                                                    }
-                                                });
-                                                await scrollToBottom();
-
-                                                // 2. 再更新状态
-                                                processStateUpdate(payload);
-                                                await scrollToBottom();
-                                            }
-                                        } catch (e) {
-                                            // 忽略非 JSON 行
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            // === 原有逻辑: 调用本地 server.py ===
                         const response = await fetch('/api/chat', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -2321,21 +1513,26 @@
                         if (!response.ok) throw new Error('Network response was not ok');
 
                         const data = await response.json();
+                        console.log('[DEBUG] Response data:', data);
+                        
+                        // 1. Add AI Response
                         if (data.response) {
                             messages.value.push({ role: 'assistant', content: data.response });
                         }
+                        
+                        // 2. Process State Updates (generate tasks)
                         if (data.state) {
                             processStateUpdate(data.state);
-                            }
                         }
                         
+                        // 3. Refresh context if panel is open
                         if (showContext.value) {
                             await refreshContext();
                         }
                         
                     } catch (error) {
                         console.error('Error:', error);
-                        messages.value.push({ role: 'assistant', content: `[错误] ${error.message}` });
+                        messages.value.push({ role: 'assistant', content: '抱歉，我遇到了一些问题，请稍后再试。' });
                     } finally {
                         isLoading.value = false;
                         await scrollToBottom();
@@ -2418,9 +1615,6 @@
                     }
                 };
 
-                // --- DEBUG: Mock Assessment (Removed for production) ---
-                // window.testAssessment = ... 
-
                 return {
                     // UI
                     showStatusDrawer,
@@ -2451,10 +1645,6 @@
                     contextData,
                     contextExpanded,
                     refreshContext,
-                    
-                    // Detail Modal (full content viewing)
-                    detailModal,
-                    loadDetailModal,
                     
                     // Inquiry
                     inquiryCard,

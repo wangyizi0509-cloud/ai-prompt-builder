@@ -77,6 +77,10 @@ def post_turn_finalize_node(state: dict) -> dict:
     1) 同步 messages → layer3_memory.all_messages（全量存储）
     2) 评估是否需要触发维护任务（入队）
     """
+    # [DEBUG] 验证 finalizer 是否被调用
+    queue_before = len(_get_queue(state))
+    print(f"[Finalizer] post_turn_finalize called, queue_before={queue_before}, onboarding_completed={state.get('onboarding_completed')}")
+    
     updates: Dict[str, Any] = {}
 
     # 1) 全量存储（去重追加）

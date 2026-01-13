@@ -813,6 +813,21 @@ async def get_debug_context(session_id: str):
     maintenance_queue = state.get("maintenance_queue") or []
     maintenance_flags = state.get("maintenance_flags") or {}
 
+    # 计算压缩触发相关信息（用于可视化验证）
+    # 注意：这里仅用于 debug 面板，允许做相对“重”的 import。
+    try:
+        from graph.archive_manager import (
+            LAYER2_ARCHIVE_CONFIG,
+            LAYER3_ARCHIVE_CONFIG,
+            check_layer3_compression_needed,
+        )
+        from utils.message_utils import count_user_turns
+    except Exception:
+        LAYER2_ARCHIVE_CONFIG = {}
+        LAYER3_ARCHIVE_CONFIG = {}
+        check_layer3_compression_needed = None
+        count_user_turns = None
+
     # 兼容字段（旧）
     user_context = state.get("user_context", {}) or layer1_memory.get("full_data", {})
     history_archive = state.get("history_archive", {})
@@ -822,11 +837,76 @@ async def get_debug_context(session_id: str):
     
     return {
         "session_id": session_id,
+        "onboarding_status": {
+            "completed": bool(state.get("onboarding_completed", False)),
+            "turn_count": state.get("onboarding_turn_count", 0),
+            "max_turns": state.get("onboarding_max_turns", 3),
+            "has_handoff": bool(state.get("onboarding_handoff")),
+        },
         "maintenance": {
             "queue_size": len(maintenance_queue) if isinstance(maintenance_queue, list) else 0,
             "queue": maintenance_queue if isinstance(maintenance_queue, list) else [],
             "flags": maintenance_flags if isinstance(maintenance_flags, dict) else {},
             "last_finalized_at": state.get("maintenance_last_finalized_at"),
+        },
+        "archive_config": {
+            # 便于你验证“配置是否生效”（当前为代码常量）
+            "layer2": LAYER2_ARCHIVE_CONFIG or {},
+            "layer3": LAYER3_ARCHIVE_CONFIG or {},
+        },
+        # === 归档/整理后的“产物”预览（用于前端直观验收）===
+        # 说明：只返回最近 N 条，避免 payload 过大；需要全量/全文再考虑加单独接口。
+        "organized_outputs": {
+            "layer3_conversation_summaries": (
+                (layer3_memory.get("conversation_summaries", [])[-5:] if isinstance(layer3_memory, dict) else [])
+            ),
+            "layer2_status_reports_history": (
+                [
+                    {
+                        "id": r.get("id"),
+                        "created_at": r.get("created_at"),
+                        "stage": r.get("report", {}).get("stage") if isinstance(r.get("report"), dict) else r.get("stage"),
+                        "summary": (r.get("summary") or "").strip(),
+                        "one_liner": (r.get("one_liner") or "").strip(),
+                    }
+                    for r in (layer2_memory.get("all_status_reports", []) if isinstance(layer2_memory, dict) else [])
+                    if isinstance(r, dict) and not r.get("is_current")
+                ][-5:]
+            ),
+            "layer2_action_plans_history": (
+                [
+                    {
+                        "id": p.get("id"),
+                        "created_at": p.get("created_at"),
+                        "summary": (p.get("summary") or "").strip(),
+                        "one_liner": (p.get("one_liner") or "").strip(),
+                    }
+                    for p in (layer2_memory.get("all_action_plans", []) if isinstance(layer2_memory, dict) else [])
+                    if isinstance(p, dict) and not p.get("is_current")
+                ][-5:]
+            ),
+            "layer2_terminal_guides": (
+                [
+                    {
+                        "id": g.get("id"),
+                        "status": g.get("status"),
+                        "created_at": g.get("created_at"),
+                        "completed_at": g.get("completed_at"),
+                        "current_task": (
+                            (g.get("guide") or {}).get("current_task")
+                            if isinstance(g.get("guide"), dict)
+                            else None
+                        ),
+                        "one_liner": (g.get("one_liner") or "").strip(),
+                        "summary": (g.get("summary") or "").strip(),
+                    }
+                    for g in (layer2_memory.get("all_action_guides", []) if isinstance(layer2_memory, dict) else [])
+                    if isinstance(g, dict) and (g.get("status") in ("completed", "cancelled", "expired"))
+                ][-5:]
+            ),
+            "layer2_dynamic_intels": (
+                (layer2_memory.get("dynamic_intels", [])[-10:] if isinstance(layer2_memory, dict) else [])
+            ),
         },
         "layered_memory": {
             "layer1": {
@@ -859,12 +939,40 @@ async def get_debug_context(session_id: str):
             "action_guides": state.get("action_guides", []),
             "recent_messages": state.get("messages", [])[-10:] if state.get("messages") else [],
         },
-        "layer3_conversation": {
+        "layer3_conversation": (lambda: {
+            # 兼容前端旧字段命名（message_count / needs_compression / compression_threshold）
+            "message_count": len(state.get("messages", [])),
             "messages_count_workspace": len(state.get("messages", [])),
             "all_messages_count_fullstore": len(layer3_memory.get("all_messages", [])) if isinstance(layer3_memory, dict) else len(state.get("messages", [])),
             "conversation_summaries_count": len(layer3_memory.get("conversation_summaries", [])) if isinstance(layer3_memory, dict) else 0,
+            "compression_threshold": (LAYER3_ARCHIVE_CONFIG or {}).get("compression_threshold"),
+            "compression_batch_size": (LAYER3_ARCHIVE_CONFIG or {}).get("compression_batch_size"),
+            "max_recent_turns": (LAYER3_ARCHIVE_CONFIG or {}).get("max_recent_turns"),
+            "current_user_turns": (
+                _current_turns := (
+                    count_user_turns(layer3_memory.get("all_messages", state.get("messages", [])))
+                    if callable(count_user_turns)
+                    else 0
+                )
+            ),
+            "turns_to_next_compression": (
+                # 计算距离下次压缩还差多少轮
+                (lambda threshold, batch_size, turns: (
+                    threshold - turns + 1 if turns <= threshold else
+                    batch_size - ((turns - threshold) % batch_size) if ((turns - threshold) % batch_size) != 0 else 0
+                ))(
+                    (LAYER3_ARCHIVE_CONFIG or {}).get("compression_threshold", 45),
+                    (LAYER3_ARCHIVE_CONFIG or {}).get("compression_batch_size", 5),
+                    _current_turns if isinstance(_current_turns, int) else 0
+                )
+            ),
+            "needs_compression": (
+                bool(check_layer3_compression_needed(state))
+                if callable(check_layer3_compression_needed)
+                else None
+            ),
             "messages_preview": (layer3_memory.get("all_messages", [])[-5:] if isinstance(layer3_memory, dict) else []) or (state.get("messages", [])[-5:] if state.get("messages") else []),
-        },
+        })(),
         "layer4_archive": {
             "status_history_count": len(history_archive.get("status_history", [])),
             "guide_history_count": len(history_archive.get("guide_history", [])),
@@ -877,6 +985,117 @@ async def get_debug_context(session_id: str):
             "metadata": crush_chat_storage.get("metadata", {}) if crush_chat_storage else {},
             "summary": crush_chat_storage.get("summary", {}) if crush_chat_storage else {},
         },
+    }
+
+
+# ============ 全文展开接口（用于调试面板）============
+
+@app.get("/api/debug/detail/status_report/{session_id}/{report_id}")
+async def get_status_report_detail(session_id: str, report_id: str):
+    """
+    获取现状报告全文（用于调试面板展开查看）
+    """
+    workflow = get_workflow()
+    config = {"configurable": {"thread_id": session_id}}
+    checkpoint = workflow.get_state(config)
+    state = checkpoint.values if checkpoint and checkpoint.values else {}
+    
+    if not state:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    layer2_memory = state.get("layer2_memory") or {}
+    all_reports = layer2_memory.get("all_status_reports", []) if isinstance(layer2_memory, dict) else []
+    
+    for r in all_reports:
+        if isinstance(r, dict) and str(r.get("id")) == str(report_id):
+            return {
+                "id": r.get("id"),
+                "created_at": r.get("created_at"),
+                "is_current": r.get("is_current"),
+                "stage": r.get("stage") or (r.get("report", {}).get("stage") if isinstance(r.get("report"), dict) else None),
+                "summary": r.get("summary"),
+                "one_liner": r.get("one_liner"),
+                "report_content": r.get("report_content") or (r.get("report", {}).get("report_content") if isinstance(r.get("report"), dict) else None),
+                "full_report": r.get("report") if isinstance(r.get("report"), dict) else r,
+            }
+    
+    raise HTTPException(status_code=404, detail=f"Report with id {report_id} not found")
+
+
+@app.get("/api/debug/detail/action_guide/{session_id}/{guide_id}")
+async def get_action_guide_detail(session_id: str, guide_id: str):
+    """
+    获取行动指南全文（用于调试面板展开查看）
+    """
+    workflow = get_workflow()
+    config = {"configurable": {"thread_id": session_id}}
+    checkpoint = workflow.get_state(config)
+    state = checkpoint.values if checkpoint and checkpoint.values else {}
+    
+    if not state:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    layer2_memory = state.get("layer2_memory") or {}
+    all_guides = layer2_memory.get("all_action_guides", []) if isinstance(layer2_memory, dict) else []
+    
+    # 兼容旧字段
+    if not all_guides:
+        all_guides = state.get("action_guides", []) or []
+    
+    for g in all_guides:
+        if isinstance(g, dict) and str(g.get("id")) == str(guide_id):
+            guide_content = g.get("guide", {}) if isinstance(g.get("guide"), dict) else {}
+            return {
+                "id": g.get("id"),
+                "status": g.get("status"),
+                "created_at": g.get("created_at"),
+                "completed_at": g.get("completed_at"),
+                "current_task": guide_content.get("current_task"),
+                "summary": g.get("summary"),
+                "one_liner": g.get("one_liner"),
+                "user_feedback": g.get("user_feedback"),
+                "execution_status": g.get("execution_status"),
+                "guide_content": guide_content.get("guide_content"),
+                "full_guide": g,
+            }
+    
+    raise HTTPException(status_code=404, detail=f"Guide with id {guide_id} not found")
+
+
+@app.get("/api/debug/detail/compressed_messages/{session_id}/{summary_index}")
+async def get_compressed_messages_detail(session_id: str, summary_index: int):
+    """
+    获取压缩前的原始对话片段（用于调试面板展开查看）
+    
+    注意：目前压缩时只保留摘要，原始消息被删除。
+    如果需要保留原始消息，需要在 compress_layer3 里额外存储。
+    这里返回 summary 的详细信息 + 相关元数据。
+    """
+    workflow = get_workflow()
+    config = {"configurable": {"thread_id": session_id}}
+    checkpoint = workflow.get_state(config)
+    state = checkpoint.values if checkpoint and checkpoint.values else {}
+    
+    if not state:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    layer3_memory = state.get("layer3_memory") or {}
+    summaries = layer3_memory.get("conversation_summaries", []) if isinstance(layer3_memory, dict) else []
+    
+    if summary_index < 0 or summary_index >= len(summaries):
+        raise HTTPException(status_code=404, detail=f"Summary at index {summary_index} not found")
+    
+    summary = summaries[summary_index]
+    return {
+        "index": summary_index,
+        "summary": summary.get("summary") if isinstance(summary, dict) else str(summary),
+        "turn_count": summary.get("turn_count") if isinstance(summary, dict) else None,
+        "key_topics": summary.get("key_topics") if isinstance(summary, dict) else None,
+        "created_at": summary.get("created_at") if isinstance(summary, dict) else None,
+        "extracted_info": summary.get("extracted_info") if isinstance(summary, dict) else None,
+        # 原始消息目前不保留，这里返回提示信息
+        "original_messages": None,
+        "note": "原始消息在压缩后被删除，仅保留摘要。如需保留原始消息，需修改 compress_layer3 逻辑。",
     }
 
 

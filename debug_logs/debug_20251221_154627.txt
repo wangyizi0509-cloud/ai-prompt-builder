@@ -1,0 +1,107 @@
+
+==================== [15:46:27] User Input ====================
+我想约她这周末出来玩，但我不知道该怎么开口，也不知道她喜不喜欢这类活动。
+
+==================== [15:46:27] Initial State ====================
+{
+  "user_message": "我想约她这周末出来玩，但我不知道该怎么开口，也不知道她喜不喜欢这类活动。",
+  "messages": [
+    {
+      "role": "user",
+      "content": "我想约她这周末出来玩，但我不知道该怎么开口，也不知道她喜不喜欢这类活动。"
+    }
+  ],
+  "user_context": {
+    "user_info": {
+      "user_provide": "",
+      "fact": "",
+      "ai_provide": ""
+    },
+    "crush_info": {
+      "crush_name": "",
+      "user_provide": "",
+      "fact": "",
+      "ai_provide": ""
+    },
+    "both_info": {
+      "user_provide": "",
+      "fact": "",
+      "ai_provide": ""
+    }
+  },
+  "user_profile": {},
+  "status_report": null,
+  "action_plan": null,
+  "action_guides": [],
+  "action_guide": null,
+  "history_archive": {
+    "status_history": [],
+    "plan_history": [],
+    "guide_history": [],
+    "conversation_archive": []
+  },
+  "crush_chat_storage": null,
+  "intent_type": "action_trigger",
+  "next_action": "end_turn",
+  "pending_responses": [],
+  "pending_questions": [],
+  "should_continue": true,
+  "route_to": "main_agent",
+  "current_agent": null,
+  "agent_resume_point": null,
+  "collected_info": {},
+  "question_count": 0,
+  "max_questions": 3,
+  "completion_status": null,
+  "result_summary": null,
+  "last_response_for_continuity": null,
+  "debug_log": []
+}
+
+==================== [15:46:28] Exception Traceback ====================
+Traceback (most recent call last):
+  File "/Users/ant/Desktop/Crushe/模型策略/debug_agent.py", line 227, in run_debug
+    result = workflow.invoke(initial_state)
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/langgraph/pregel/main.py", line 3068, in invoke
+    for chunk in self.stream(
+                 ~~~~~~~~~~~^
+        input,
+        ^^^^^^
+    ...<10 lines>...
+        **kwargs,
+        ^^^^^^^^^
+    ):
+    ^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/langgraph/pregel/main.py", line 2643, in stream
+    for _ in runner.tick(
+             ~~~~~~~~~~~^
+        [t for t in loop.tasks.values() if not t.writes],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        schedule_task=loop.accept_push,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/langgraph/pregel/_runner.py", line 167, in tick
+    run_with_retry(
+    ~~~~~~~~~~~~~~^
+        t,
+        ^^
+    ...<10 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/langgraph/pregel/_retry.py", line 42, in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/langgraph/_internal/_runnable.py", line 656, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/langgraph/_internal/_runnable.py", line 400, in invoke
+    ret = self.func(*args, **kwargs)
+  File "/Users/ant/Desktop/Crushe/模型策略/agent_impl/graph/nodes/main_agent.py", line 54, in main_agent_node
+    if not from_tool_call:
+           ^^^^^^^^^^^^^^
+UnboundLocalError: cannot access local variable 'from_tool_call' where it is not associated with a value
+During task with name 'main_agent' and id 'be250401-f24e-20f2-a435-2c824d100148'
+
