@@ -820,24 +820,63 @@
                     </button>
                 </div>
 
-                <!-- Right: Board Toggles -->
-                <div class="flex space-x-2">
-                    <button 
-                        @click="toggleStatusDrawer"
-                        class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors border"
-                        :class="showStatusDrawer ? 'bg-orange-100 text-orange-700 border-orange-200' : 'bg-gray-50 text-gray-600 border-gray-100 hover:bg-gray-100'"
-                    >
-                        01 现状
-                    </button>
-                    <button 
-                        @click="togglePlanDrawer"
-                        class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors border"
-                        :class="showPlanDrawer ? 'bg-pink-100 text-pink-700 border-pink-200' : 'bg-gray-50 text-gray-600 border-gray-100 hover:bg-gray-100'"
-                    >
-                        02 计划
-                    </button>
+                <!-- Right: Board Toggles & User Info -->
+                <div class="flex items-center space-x-2">
+                    <div class="flex space-x-2 mr-2">
+                        <button 
+                            @click="toggleStatusDrawer"
+                            class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors border"
+                            :class="showStatusDrawer ? 'bg-orange-100 text-orange-700 border-orange-200' : 'bg-gray-50 text-gray-600 border-gray-100 hover:bg-gray-100'"
+                        >
+                            01 现状
+                        </button>
+                        <button 
+                            @click="togglePlanDrawer"
+                            class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors border"
+                            :class="showPlanDrawer ? 'bg-pink-100 text-pink-700 border-pink-200' : 'bg-gray-50 text-gray-600 border-gray-100 hover:bg-gray-100'"
+                        >
+                            02 计划
+                        </button>
+                    </div>
+
+                    <!-- User Info -->
+                    <div v-if="currentUser" class="flex items-center ml-2 border-l pl-3">
+                        <div class="text-xs text-right mr-2">
+                            <div class="font-medium text-gray-700">{{ currentUser.username }}</div>
+                        </div>
+                        <button 
+                            @click="handleLogout"
+                            class="text-xs text-red-500 hover:text-red-700 font-medium"
+                            title="退出登录"
+                        >
+                            退出
+                        </button>
+                    </div>
                 </div>
             </header>
+
+            <!-- Logout Confirm Modal -->
+            <div v-if="showLogoutConfirm" class="fixed inset-0 z-50 flex items-center justify-center">
+                <div class="absolute inset-0 bg-black bg-opacity-50" @click="cancelLogout"></div>
+                <div class="bg-white rounded-lg p-6 max-w-sm w-full mx-4 relative z-10 shadow-xl">
+                    <h3 class="text-lg font-bold mb-2">确认退出</h3>
+                    <p class="text-gray-600 mb-6">确定要退出登录吗？退出后将无法查看当前对话。</p>
+                    <div class="flex justify-end space-x-3">
+                        <button 
+                            @click="cancelLogout"
+                            class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
+                        >
+                            取消
+                        </button>
+                        <button 
+                            @click="confirmLogout"
+                            class="px-4 py-2 bg-red-500 text-white hover:bg-red-600 rounded-lg text-sm font-medium"
+                        >
+                            确认退出
+                        </button>
+                    </div>
+                </div>
+            </div>
 
             <!-- Main Content: Chat View -->
             <div class="flex-1 flex flex-col bg-white overflow-hidden relative z-0">
@@ -1297,6 +1336,81 @@
 
         createApp({
             setup() {
+                // Auth State
+                const currentUser = ref(null);
+                const showLogoutConfirm = ref(false);
+
+                const getToken = () => {
+                    return localStorage.getItem('token') || '';
+                };
+
+                const getStoredUser = () => {
+                    try {
+                        const raw = localStorage.getItem('user');
+                        return raw ? JSON.parse(raw) : null;
+                    } catch (e) {
+                        return null;
+                    }
+                };
+
+                const redirectToAuth = () => {
+                    window.location.href = '/auth.html';
+                };
+
+                const checkAuth = async () => {
+                    const token = getToken();
+                    if (!token) {
+                        redirectToAuth();
+                        return;
+                    }
+
+                    const storedUser = getStoredUser();
+                    if (storedUser) {
+                        currentUser.value = storedUser;
+                    }
+
+                    try {
+                        const res = await fetch('/api/auth/me', {
+                            method: 'GET',
+                            headers: {
+                                'Authorization': `Bearer ${token}`
+                            }
+                        });
+
+                        if (!res.ok) {
+                            localStorage.removeItem('token');
+                            localStorage.removeItem('user');
+                            redirectToAuth();
+                            return;
+                        }
+
+                        const data = await res.json();
+                        const user = data?.user || null;
+                        if (user) {
+                            currentUser.value = user;
+                            localStorage.setItem('user', JSON.stringify(user));
+                        }
+                    } catch (e) {
+                        localStorage.removeItem('token');
+                        localStorage.removeItem('user');
+                        redirectToAuth();
+                    }
+                };
+
+                const handleLogout = () => {
+                    showLogoutConfirm.value = true;
+                };
+
+                const confirmLogout = () => {
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('user');
+                    redirectToAuth();
+                };
+
+                const cancelLogout = () => {
+                    showLogoutConfirm.value = false;
+                };
+
                 // UI State
                 const showStatusDrawer = ref(false);
                 const showPlanDrawer = ref(false);
@@ -1819,6 +1933,9 @@
                         
                         const response = await fetch('/api/upload-screenshot', {
                             method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${getToken()}`
+                            },
                             body: formData
                         });
                         
@@ -2320,7 +2437,10 @@
                             // === 原有逻辑: 调用本地 server.py ===
                         const response = await fetch('/api/chat', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: { 
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${getToken()}`
+                            },
                             body: JSON.stringify({
                                 message: content,
                                 session_id: sessionId
@@ -2382,7 +2502,10 @@
                     try {
                         const response = await fetch('/api/complete_guide', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${getToken()}`
+                            },
                             body: JSON.stringify({
                                 guide_id: currentCompletingGuide.value.id,
                                 execution_status: completeGuideForm.value.execution_status,
@@ -2427,10 +2550,22 @@
                     }
                 };
 
+                onMounted(async () => {
+                    await checkAuth();
+                });
+
                 // --- DEBUG: Mock Assessment (Removed for production) ---
                 // window.testAssessment = ... 
 
                 return {
+                    // Auth
+                    currentUser,
+                    showLogoutConfirm,
+                    handleLogout,
+                    confirmLogout,
+                    cancelLogout,
+                    checkAuth,
+
                     // UI
                     showStatusDrawer,
                     showPlanDrawer,
