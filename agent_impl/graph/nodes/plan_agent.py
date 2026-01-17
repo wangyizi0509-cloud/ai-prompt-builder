@@ -356,16 +356,16 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
                 "action_plan": new_plan_id
             }
 
-            # === 写入 Layer 2 真源（all_action_plans）===
+            # === 写入 Layer 2 真源（current_action_plan + action_plan_history）===
             layer2_memory = state.get("layer2_memory") or create_empty_layer2_memory()
-            all_plans = list(layer2_memory.get("all_action_plans", []))
-
-            updated_plans = []
-            for p in all_plans:
-                pp = dict(p) if isinstance(p, dict) else p
-                if isinstance(pp, dict) and pp.get("is_current"):
-                    pp["is_current"] = False
-                updated_plans.append(pp)
+            
+            # 获取当前规划和历史规划
+            old_current = layer2_memory.get("current_action_plan")
+            history = list(layer2_memory.get("action_plan_history", []))
+            
+            # 将旧 current 移入历史（summary/one_liner 由异步归档补齐）
+            if old_current:
+                history.insert(0, old_current)
 
             new_plan_item = create_action_plan_item(
                 plan_content=plan_markdown,
@@ -374,11 +374,11 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
                 strategy=parsed.get("strategy", "") or "",
                 phases=parsed.get("phases", []) or [],
                 key_principles=parsed.get("key_principles", []) or [],
-                is_current=True,
             )
 
             updated_layer2 = dict(layer2_memory)
-            updated_layer2["all_action_plans"] = [new_plan_item] + updated_plans
+            updated_layer2["current_action_plan"] = new_plan_item
+            updated_layer2["action_plan_history"] = history
             updated_layer2["last_updated"] = datetime.now().isoformat()
             updated_layer2["version"] = layer2_memory.get("version", 1) + 1
             result["layer2_memory"] = updated_layer2

@@ -1,6 +1,19 @@
 # AI 军师 Agent 上下文工程技术实现 v3.1
 
-> **适用版本**：v3.1 (2025-12-30)
+> ⚠️ **DEPRECATED - 已废弃**
+> 
+> 本文档已被以下规范文档取代，请参阅：
+> - `Layer_Specs/layer1_spec_v1.0.md` - Layer 1 静态情报规范
+> - `Layer_Specs/layer2_spec_v1.0.md` - Layer 2 工作上下文规范
+> - `Layer_Specs/layer3_spec_v1.0.md` - Layer 3 对话历史规范
+> - `Task_System/task_system_spec.md` - 任务系统规范
+> - `Context_Assembly/context_assembly_spec.md` - 上下文组装规范
+>
+> 以下内容仅供历史参考，不再维护。
+
+---
+
+> **原适用版本**：v3.1 (2025-12-30)
 > **代码对应**：`graph/context_builder.py`, `graph/archive_manager.py`, `graph/context_types.py`
 
 本文档详细说明了 AI 军师 Agent 的上下文管理技术实现。核心目标是实现**分层长期记忆 (Layered Long-term Memory)**，确保 Token 消耗可控且信息不丢失。

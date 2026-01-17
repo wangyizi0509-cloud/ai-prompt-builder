@@ -1,7 +1,5 @@
-# 上下文存储与提纯策略 (Storage & Refining Strategy) v1.4
-
+# 上下文存储与提纯策略 (Storage & Refining Strategy) v1.5
 ## 1. 核心理念
-
 我们采用 **"双模态处理"** 机制：
 1.  **同步落库 (Sync Storage)**：追求**极速**。所有数据第一时间存入原生层级 (Native Layer)，确保交互不阻塞。
 2.  **异步提纯 (Async Refining)**：追求**深度**。后台回路从原生数据中提取知识，沉淀为静态情报 (L1) 或动态情报 (L2)。
@@ -41,18 +39,18 @@
 
 #### 【同步落库 (Sync Storage)】
 *   **目标层级**: **Layer 2 (Working Context)**
-*   **目标字段**: `status_reports` 或 `action_plans` (List)
-*   **写入动作**: **New Version (新增版本)**
+*   **目标字段**: `current_status_report` / `status_report_history`、`current_action_plan` / `action_plan_history`
+*   **写入动作**: **New Version (新增版本)** → 写入 `current_xxx`，旧版本进入 `xxx_history`
 *   **数据结构**: 
-    *   `content`: 完整 Markdown 内容
+    *   `report_content` / `plan_content`: 完整 Markdown 内容
     *   `created_at`: 时间戳
-    *   `is_current`: **True** (同时将列表里上一份报告设为 False)
+    *   `version`: 版本号（修改时+1）
 
 #### 【异步提纯 (Async Refining)】
 *   **触发时机**: **生成后立即触发**。
 *   **执行角色 A**: **Archiver (归档员)**
-    *   **逻辑**: 锁定**上一份**同类型报告，调用 LLM 生成 `summary` (150字) 和 `one_liner` (20字)。
-    *   *Destination*: 更新旧报告对象的 `summary` 字段。
+*   **逻辑**: 锁定**上一份**同类型报告，生成 `summary` (150字) 和 `one_liner` (20字)。
+*   *Destination*: 更新旧报告对象的 `summary` / `one_liner` / `archived_at` 字段。
 *   **执行角色 B**: **Organize Agent (整理员)**
     *   **逻辑**: 分析新报告的结论 (Conclusion)，提取关键的关系定性。
     *   *Destination*: **Layer 1 (3×3 矩阵)** -> `AI Provide` 列 (如"当前关系阶段: L2")。
@@ -66,8 +64,8 @@
 *   **目标层级**: **Layer 2 (Working Context)**
 *   **目标字段**: `action_guides` (List)
 *   **写入动作**: 
-    *   *生成时*: **Append** (状态为 `pending`)。
-    *   *反馈时*: **Update Status** (状态改为 `completed`，并追加 `feedback` 字段)。
+    *   *生成时*: **Append** (状态为 `in_progress`，可写入 `expected_start_at` / `expire_at`)。
+    *   *反馈时*: **Update Status** (状态改为 `completed`，并追加 `user_feedback` 字段)。
 
 #### 【异步提纯 (Async Refining)】
 *   **触发时机**: **用户标记完成 (Completed) 时**。

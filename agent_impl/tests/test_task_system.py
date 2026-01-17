@@ -7,6 +7,10 @@
 3. 创建新任务 D 后，任务列表新增 D 且 D 为活跃
 4. 追加任务笔记后，下一轮能在"当前活跃任务信息"中看到新增内容
 5. 任意时刻只有一个活跃任务
+
+基于 Task_System/task_system_spec.md 规范：
+- 使用 status 字段替代 is_active
+- 使用 reasoning_notes 替代 reasoning
 """
 
 import pytest
@@ -18,6 +22,7 @@ from graph.context_types import (
     create_new_task,
     create_empty_layer3_memory,
     create_empty_task_registry,
+    create_reasoning_note,
 )
 from graph.tools.task_tools import (
     switch_task_impl,
@@ -45,19 +50,19 @@ def state_with_tasks():
     state = create_initial_state("测试消息")
     
     # 创建任务 A（活跃）
-    task_a = create_new_task("分析crush态度", "分析 crush 对用户的态度")
-    task_a["is_active"] = True
+    task_a = create_new_task("分析crush态度", "分析crush态度", "分析 crush 对用户的态度")
     task_a["status"] = "active"
     
     # 创建任务 B
-    task_b = create_new_task("写开场白", "帮用户写一个开场白")
-    task_b["is_active"] = False
+    task_b = create_new_task("写开场白", "写开场白", "帮用户写一个开场白")
     task_b["status"] = "pending"
-    task_b["reasoning"] = ["用户想重新开启话题", "建议使用轻松的方式"]
+    task_b["reasoning_notes"] = [
+        create_reasoning_note("用户想重新开启话题", "写开场白"),
+        create_reasoning_note("建议使用轻松的方式", "写开场白"),
+    ]
     
     # 创建任务 C
-    task_c = create_new_task("约会规划", "规划第一次约会")
-    task_c["is_active"] = False
+    task_c = create_new_task("约会规划", "约会规划", "规划第一次约会")
     task_c["status"] = "pending"
     
     # 构建 layer3_memory
@@ -108,11 +113,11 @@ class TestSwitchTask:
         new_task_list = state_update["layer3_memory"]["task_registry"]["main_agent"]
         
         # 只有一个活跃任务
-        active_count = sum(1 for t in new_task_list if t.get("is_active", False))
+        active_count = sum(1 for t in new_task_list if t.get("status") == "active")
         assert active_count == 1
         
         # 活跃任务是 B
-        active_task_in_list = next(t for t in new_task_list if t.get("is_active", False))
+        active_task_in_list = next(t for t in new_task_list if t.get("status") == "active")
         assert active_task_in_list["task_id"] == "写开场白"
     
     def test_switch_to_nonexistent_task_fails(self, state_with_tasks):
@@ -155,7 +160,7 @@ class TestCreateTask:
         state = state_with_tasks
         
         state_update, result_json = create_task_impl(
-            state, "表白时机", "判断何时表白最合适", "main_agent"
+            state, "表白时机", "表白时机", "判断何时表白最合适", "main_agent"
         )
         result = json.loads(result_json)
         
@@ -170,20 +175,19 @@ class TestCreateTask:
         
         # 验证新任务是活跃的
         new_task = next(t for t in new_task_list if t["task_id"] == "表白时机")
-        assert new_task["is_active"] is True
         assert new_task["status"] == "active"
         assert new_task["summary"] == "判断何时表白最合适"
         
         # 验证原活跃任务 A 变为非活跃
         task_a = next(t for t in new_task_list if t["task_id"] == "分析crush态度")
-        assert task_a["is_active"] is False
+        assert task_a["status"] == "pending"
     
     def test_create_duplicate_task_fails(self, state_with_tasks):
         """尝试创建已存在的 task_id 应失败"""
         state = state_with_tasks
         
         state_update, result_json = create_task_impl(
-            state, "分析crush态度", "重复的任务", "main_agent"
+            state, "分析crush态度", "分析crush态度", "重复的任务", "main_agent"
         )
         result = json.loads(result_json)
         
@@ -199,7 +203,7 @@ class TestCreateTask:
         state = empty_state
         
         state_update, result_json = create_task_impl(
-            state, "新任务名称很长很长的ID", "", "main_agent"
+            state, "新任务名称很长很长的ID", "新任务名称很长很长的ID", "", "main_agent"
         )
         result = json.loads(result_json)
         
@@ -231,8 +235,12 @@ class TestAppendTaskNote:
         
         # 验证笔记已追加
         new_task_list = state_update["layer3_memory"]["task_registry"]["main_agent"]
-        active_task = next(t for t in new_task_list if t.get("is_active", False))
-        assert "用户情绪比较焦虑" in active_task["reasoning"][-1]
+        active_task = next(t for t in new_task_list if t.get("status") == "active")
+        
+        # 检查 reasoning_notes 而不是 reasoning
+        notes = active_task.get("reasoning_notes", [])
+        assert len(notes) >= 1
+        assert any("用户情绪比较焦虑" in n.get("content", "") for n in notes)
     
     def test_append_note_to_specific_task(self, state_with_tasks):
         """追加笔记到指定任务（非活跃）"""
@@ -248,8 +256,10 @@ class TestAppendTaskNote:
         # 验证笔记追加到了 B
         new_task_list = state_update["layer3_memory"]["task_registry"]["main_agent"]
         task_b = next(t for t in new_task_list if t["task_id"] == "写开场白")
-        assert "用户喜欢幽默风格" in task_b["reasoning"][-1]
-        assert len(task_b["reasoning"]) == 3  # 原有 2 条 + 新增 1 条
+        
+        notes = task_b.get("reasoning_notes", [])
+        assert any("用户喜欢幽默风格" in n.get("content", "") for n in notes)
+        assert len(notes) == 3  # 原有 2 条 + 新增 1 条
     
     def test_append_note_to_nonexistent_task_fails(self, state_with_tasks):
         """追加笔记到不存在的任务应失败"""
@@ -290,14 +300,13 @@ class TestTaskIndexFormat:
         
         task_index = format_task_index(task_list)
         
-        # 验证是 Markdown 表格格式
-        assert "| task_id |" in task_index
-        assert "| summary |" in task_index
-        assert "| status |" in task_index
-        assert "| active |" in task_index
-        
+        # 验证新版分区格式
+        assert "## 任务列表" in task_index
+        assert "### 当前任务" in task_index
+        assert "### 其他任务" in task_index
+        assert "| title | status | summary |" in task_index
         # 验证活跃标记
-        assert "✅" in task_index  # 活跃任务应有标记
+        assert "[active]" in task_index
     
     def test_format_empty_task_list(self):
         """空任务列表应返回提示"""
@@ -323,6 +332,7 @@ class TestActiveTaskPayload:
         assert payload["task_id"] == "分析crush态度"
         assert "分析 crush 对用户的态度" in payload["summary"]
         assert isinstance(payload["reasoning_notes"], list)
+        assert isinstance(payload["bound_contexts"], list)
     
     def test_format_none_active_task(self):
         """无活跃任务时返回空信息"""
@@ -330,6 +340,7 @@ class TestActiveTaskPayload:
         
         assert payload["task_id"] == ""
         assert payload["reasoning_notes"] == []
+        assert payload["bound_contexts"] == []
 
 
 # ============================================================
@@ -369,6 +380,10 @@ class TestToolIdentification:
         assert is_task_tool("switch_task") is True
         assert is_task_tool("create_task") is True
         assert is_task_tool("append_task_note") is True
+        assert is_task_tool("complete_task") is True
+        assert is_task_tool("bind_context") is True
+        assert is_task_tool("unbind_context") is True
+        assert is_task_tool("refresh_context") is True
         
         assert is_task_tool("load_inquiry_skill_instructions") is False
         assert is_task_tool("") is False
@@ -378,6 +393,10 @@ class TestToolIdentification:
         assert "switch_task" in TASK_TOOL_NAMES
         assert "create_task" in TASK_TOOL_NAMES
         assert "append_task_note" in TASK_TOOL_NAMES
+        assert "complete_task" in TASK_TOOL_NAMES
+        assert "bind_context" in TASK_TOOL_NAMES
+        assert "unbind_context" in TASK_TOOL_NAMES
+        assert "refresh_context" in TASK_TOOL_NAMES
 
 
 # ============================================================
@@ -397,7 +416,7 @@ class TestApplyStateUpdate:
         
         assert "layer3_memory" in update
         task_list = update["layer3_memory"]["task_registry"]["main_agent"]
-        active_task = next(t for t in task_list if t.get("is_active", False))
+        active_task = next(t for t in task_list if t.get("status") == "active")
         assert active_task["task_id"] == "写开场白"
     
     def test_apply_create_task_update(self, state_with_tasks):
@@ -405,7 +424,7 @@ class TestApplyStateUpdate:
         state = state_with_tasks
         
         update = apply_task_tool_state_update(
-            state, "create_task", {"task_id": "新任务", "summary": "新任务摘要"}, "main_agent"
+            state, "create_task", {"task_id": "新任务", "title": "新任务", "summary": "新任务摘要"}, "main_agent"
         )
         
         assert "layer3_memory" in update
@@ -438,7 +457,7 @@ class TestSingleActiveTask:
         state_update, _ = switch_task_impl(state, "写开场白", "main_agent")
         task_list = state_update["layer3_memory"]["task_registry"]["main_agent"]
         
-        active_count = sum(1 for t in task_list if t.get("is_active", False))
+        active_count = sum(1 for t in task_list if t.get("status") == "active")
         assert active_count == 1
         
         # 再次切换
@@ -446,23 +465,23 @@ class TestSingleActiveTask:
         state_update2, _ = switch_task_impl(state, "约会规划", "main_agent")
         task_list2 = state_update2["layer3_memory"]["task_registry"]["main_agent"]
         
-        active_count2 = sum(1 for t in task_list2 if t.get("is_active", False))
+        active_count2 = sum(1 for t in task_list2 if t.get("status") == "active")
         assert active_count2 == 1
     
     def test_only_one_active_after_create(self, state_with_tasks):
         """创建新任务后只有一个活跃任务"""
         state = state_with_tasks
         
-        state_update, _ = create_task_impl(state, "新任务1", "摘要1", "main_agent")
+        state_update, _ = create_task_impl(state, "新任务1", "新任务1", "摘要1", "main_agent")
         task_list = state_update["layer3_memory"]["task_registry"]["main_agent"]
         
-        active_count = sum(1 for t in task_list if t.get("is_active", False))
+        active_count = sum(1 for t in task_list if t.get("status") == "active")
         assert active_count == 1
         
         # 创建更多任务
         state["layer3_memory"] = state_update["layer3_memory"]
-        state_update2, _ = create_task_impl(state, "新任务2", "摘要2", "main_agent")
+        state_update2, _ = create_task_impl(state, "新任务2", "新任务2", "摘要2", "main_agent")
         task_list2 = state_update2["layer3_memory"]["task_registry"]["main_agent"]
         
-        active_count2 = sum(1 for t in task_list2 if t.get("is_active", False))
+        active_count2 = sum(1 for t in task_list2 if t.get("status") == "active")
         assert active_count2 == 1

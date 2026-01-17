@@ -189,7 +189,7 @@ def _run_maintenance_tasks(session_id: str) -> None:
                     # 兼容：若旧字段未同步，尝试从 Layer2 真源读取
                     if not guide_obj:
                         layer2_memory = state.get("layer2_memory") or {}
-                        guides2 = layer2_memory.get("all_action_guides", []) if isinstance(layer2_memory, dict) else []
+                        guides2 = layer2_memory.get("action_guides", []) if isinstance(layer2_memory, dict) else []
                         for g in guides2 or []:
                             if isinstance(g, dict) and g.get("id") == guide_id:
                                 guide_obj = g
@@ -215,7 +215,8 @@ def _run_maintenance_tasks(session_id: str) -> None:
                 if report_uid:
                     old_report = None
                     layer2_memory = state.get("layer2_memory") or {}
-                    reports = layer2_memory.get("all_status_reports", []) if isinstance(layer2_memory, dict) else []
+                    # 在历史报告中查找
+                    reports = layer2_memory.get("status_report_history", []) if isinstance(layer2_memory, dict) else []
                     for r in reports or []:
                         if isinstance(r, dict) and r.get("id") == report_uid:
                             old_report = r
@@ -237,7 +238,8 @@ def _run_maintenance_tasks(session_id: str) -> None:
                 if plan_uid:
                     old_plan = None
                     layer2_memory = state.get("layer2_memory") or {}
-                    plans = layer2_memory.get("all_action_plans", []) if isinstance(layer2_memory, dict) else []
+                    # 在历史规划中查找
+                    plans = layer2_memory.get("action_plan_history", []) if isinstance(layer2_memory, dict) else []
                     for p in plans or []:
                         if isinstance(p, dict) and p.get("id") == plan_uid:
                             old_plan = p
@@ -667,7 +669,7 @@ async def chat_stream(request: StreamChatRequest, background_tasks: BackgroundTa
 async def update_guide_status(request: UpdateGuideStatusRequest):
     """
     更新行动指南状态（支持 6 状态机中的可变更状态）。
-    - 写入 v3.1 真源：layer2_memory.all_action_guides
+    - 写入 v3.1 真源：layer2_memory.action_guides
     - 向后兼容：同步写回 state.action_guides
     """
     print(
@@ -689,7 +691,7 @@ async def update_guide_status(request: UpdateGuideStatusRequest):
 
     # 统一从 Layer2Memory 真源读取；若缺失则从旧字段回填
     layer2_memory = state.get("layer2_memory") or create_empty_layer2_memory()
-    all_guides = list(layer2_memory.get("all_action_guides", []))
+    all_guides = list(layer2_memory.get("action_guides", []))
     if not all_guides:
         legacy = state.get("action_guides", []) or []
         if isinstance(legacy, list) and legacy:
@@ -737,7 +739,7 @@ async def update_guide_status(request: UpdateGuideStatusRequest):
     updated_guides[guide_index] = updated_guide
 
     updated_layer2 = dict(layer2_memory)
-    updated_layer2["all_action_guides"] = updated_guides
+    updated_layer2["action_guides"] = updated_guides
     updated_layer2["last_updated"] = datetime.now().isoformat()
     updated_layer2["version"] = layer2_memory.get("version", 1) + 1
     state["layer2_memory"] = updated_layer2
@@ -869,8 +871,8 @@ async def get_debug_context(session_id: str):
                         "summary": (r.get("summary") or "").strip(),
                         "one_liner": (r.get("one_liner") or "").strip(),
                     }
-                    for r in (layer2_memory.get("all_status_reports", []) if isinstance(layer2_memory, dict) else [])
-                    if isinstance(r, dict) and not r.get("is_current")
+                    for r in (layer2_memory.get("status_report_history", []) if isinstance(layer2_memory, dict) else [])
+                    if isinstance(r, dict)
                 ][-5:]
             ),
             "layer2_action_plans_history": (
@@ -881,8 +883,8 @@ async def get_debug_context(session_id: str):
                         "summary": (p.get("summary") or "").strip(),
                         "one_liner": (p.get("one_liner") or "").strip(),
                     }
-                    for p in (layer2_memory.get("all_action_plans", []) if isinstance(layer2_memory, dict) else [])
-                    if isinstance(p, dict) and not p.get("is_current")
+                    for p in (layer2_memory.get("action_plan_history", []) if isinstance(layer2_memory, dict) else [])
+                    if isinstance(p, dict)
                 ][-5:]
             ),
             "layer2_terminal_guides": (
@@ -900,7 +902,7 @@ async def get_debug_context(session_id: str):
                         "one_liner": (g.get("one_liner") or "").strip(),
                         "summary": (g.get("summary") or "").strip(),
                     }
-                    for g in (layer2_memory.get("all_action_guides", []) if isinstance(layer2_memory, dict) else [])
+                    for g in (layer2_memory.get("action_guides", []) if isinstance(layer2_memory, dict) else [])
                     if isinstance(g, dict) and (g.get("status") in ("completed", "cancelled", "expired"))
                 ][-5:]
             ),
@@ -916,9 +918,9 @@ async def get_debug_context(session_id: str):
             "layer2": {
                 "version": layer2_memory.get("version") if isinstance(layer2_memory, dict) else None,
                 "last_updated": layer2_memory.get("last_updated") if isinstance(layer2_memory, dict) else None,
-                "status_reports_total": len(layer2_memory.get("all_status_reports", [])) if isinstance(layer2_memory, dict) else 0,
-                "action_plans_total": len(layer2_memory.get("all_action_plans", [])) if isinstance(layer2_memory, dict) else 0,
-                "action_guides_total": len(layer2_memory.get("all_action_guides", [])) if isinstance(layer2_memory, dict) else 0,
+                "status_reports_total": (1 if layer2_memory.get("current_status_report") else 0) + len(layer2_memory.get("status_report_history", [])) if isinstance(layer2_memory, dict) else 0,
+                "action_plans_total": (1 if layer2_memory.get("current_action_plan") else 0) + len(layer2_memory.get("action_plan_history", [])) if isinstance(layer2_memory, dict) else 0,
+                "action_guides_total": len(layer2_memory.get("action_guides", [])) if isinstance(layer2_memory, dict) else 0,
                 "dynamic_intels_total": len(layer2_memory.get("dynamic_intels", [])) if isinstance(layer2_memory, dict) else 0,
             },
             "layer3": {
@@ -1004,14 +1006,29 @@ async def get_status_report_detail(session_id: str, report_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
     
     layer2_memory = state.get("layer2_memory") or {}
-    all_reports = layer2_memory.get("all_status_reports", []) if isinstance(layer2_memory, dict) else []
     
-    for r in all_reports:
+    # 先检查当前报告
+    current_report = layer2_memory.get("current_status_report") if isinstance(layer2_memory, dict) else None
+    if isinstance(current_report, dict) and str(current_report.get("id")) == str(report_id):
+        return {
+            "id": current_report.get("id"),
+            "created_at": current_report.get("created_at"),
+            "is_current": True,
+            "stage": current_report.get("stage") or (current_report.get("report", {}).get("stage") if isinstance(current_report.get("report"), dict) else None),
+            "summary": current_report.get("summary"),
+            "one_liner": current_report.get("one_liner"),
+            "report_content": current_report.get("report_content") or (current_report.get("report", {}).get("report_content") if isinstance(current_report.get("report"), dict) else None),
+            "full_report": current_report.get("report") if isinstance(current_report.get("report"), dict) else current_report,
+        }
+    
+    # 再检查历史报告
+    history_reports = layer2_memory.get("status_report_history", []) if isinstance(layer2_memory, dict) else []
+    for r in history_reports:
         if isinstance(r, dict) and str(r.get("id")) == str(report_id):
             return {
                 "id": r.get("id"),
                 "created_at": r.get("created_at"),
-                "is_current": r.get("is_current"),
+                "is_current": False,
                 "stage": r.get("stage") or (r.get("report", {}).get("stage") if isinstance(r.get("report"), dict) else None),
                 "summary": r.get("summary"),
                 "one_liner": r.get("one_liner"),
@@ -1036,7 +1053,7 @@ async def get_action_guide_detail(session_id: str, guide_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
     
     layer2_memory = state.get("layer2_memory") or {}
-    all_guides = layer2_memory.get("all_action_guides", []) if isinstance(layer2_memory, dict) else []
+    all_guides = layer2_memory.get("action_guides", []) if isinstance(layer2_memory, dict) else []
     
     # 兼容旧字段
     if not all_guides:

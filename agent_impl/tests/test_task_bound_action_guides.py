@@ -33,14 +33,14 @@ def _mk_guide(guide_id: str, title: str, content_md: str, status: str = "pending
 def state_with_task_and_guides():
     """
     一个最小可用的 state：
-    - Layer2: 有 all_action_guides（用于 bind 工具读取详情）
+    - Layer2: 有 action_guides（用于 bind 工具读取详情）
     - Layer3: main_agent 有一个 active task（用于写入 bound_action_guides）
     """
     state = create_initial_state("测试 bind_action_guide_detail")
 
     # Layer2: guides
     layer2 = create_empty_layer2_memory()
-    layer2["all_action_guides"] = [
+    layer2["action_guides"] = [
         _mk_guide("g1", "指南1", "内容1"),
         _mk_guide("g2", "指南2", "内容2"),
         _mk_guide("g3", "指南3", "内容3"),
@@ -102,7 +102,7 @@ class TestTaskBoundActionGuideDetail:
 
         # 修改 Layer2 内容（模拟“刷新快照”）
         layer2 = state["layer2_memory"]
-        layer2["all_action_guides"][0] = _mk_guide("g1", "指南1", "内容1-新版")
+        layer2["action_guides"][0] = _mk_guide("g1", "指南1", "内容1-新版")
         state["layer2_memory"] = layer2
 
         # 第二次绑定同一 guide_id

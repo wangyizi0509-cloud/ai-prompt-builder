@@ -78,10 +78,11 @@ def test_enqueues_layer3_compress_at_threshold_batch_point():
 
 def test_enqueues_archive_status_for_old_report_missing_summary():
     layer2 = create_empty_layer2_memory()
-    current = create_status_report_item(report_content="new", report_id=2, is_current=True)
-    old = create_status_report_item(report_content="old", report_id=1, is_current=False)
+    current = create_status_report_item(report_content="new", report_id=2)
+    old = create_status_report_item(report_content="old", report_id=1)
     old["summary"] = None
-    layer2["all_status_reports"] = [current, old]
+    layer2["current_status_report"] = current
+    layer2["status_report_history"] = [old]
 
     state = {
         "layer2_memory": layer2,
@@ -98,10 +99,11 @@ def test_enqueues_archive_status_for_old_report_missing_summary():
 
 def test_enqueues_archive_plan_for_old_plan_missing_summary():
     layer2 = create_empty_layer2_memory()
-    current = create_action_plan_item(plan_content="new", plan_id=2, is_current=True)
-    old = create_action_plan_item(plan_content="old", plan_id=1, is_current=False)
+    current = create_action_plan_item(plan_content="new", plan_id=2)
+    old = create_action_plan_item(plan_content="old", plan_id=1)
     old["summary"] = ""
-    layer2["all_action_plans"] = [current, old]
+    layer2["current_action_plan"] = current
+    layer2["action_plan_history"] = [old]
 
     state = {
         "layer2_memory": layer2,
@@ -119,7 +121,7 @@ def test_enqueues_archive_plan_for_old_plan_missing_summary():
 def test_enqueues_archive_guide_for_completed_guide():
     layer2 = create_empty_layer2_memory()
     guide = create_action_guide_item(guide={"guide_content": "x"}, guide_id=1, status="completed")
-    layer2["all_action_guides"] = [guide]
+    layer2["action_guides"] = [guide]
 
     state = {
         "layer2_memory": layer2,
@@ -138,7 +140,7 @@ def test_enqueues_archive_guide_for_cancelled_or_expired_guide():
     layer2 = create_empty_layer2_memory()
     g1 = create_action_guide_item(guide={"guide_content": "x"}, guide_id=1, status="cancelled")
     g2 = create_action_guide_item(guide={"guide_content": "y"}, guide_id=2, status="expired")
-    layer2["all_action_guides"] = [g1, g2]
+    layer2["action_guides"] = [g1, g2]
 
     state = {
         "layer2_memory": layer2,
@@ -157,7 +159,7 @@ def test_enqueues_archive_guide_for_cancelled_or_expired_guide():
 def test_does_not_enqueue_archive_guide_for_paused_guide():
     layer2 = create_empty_layer2_memory()
     guide = create_action_guide_item(guide={"guide_content": "x"}, guide_id=1, status="paused")
-    layer2["all_action_guides"] = [guide]
+    layer2["action_guides"] = [guide]
 
     state = {
         "layer2_memory": layer2,
@@ -174,9 +176,9 @@ def test_does_not_enqueue_archive_guide_for_paused_guide():
 
 def test_finalizer_is_idempotent_no_duplicate_queue_items():
     layer2 = create_empty_layer2_memory()
-    old = create_action_plan_item(plan_content="old", plan_id=1, is_current=False)
+    old = create_action_plan_item(plan_content="old", plan_id=1)
     old["summary"] = ""
-    layer2["all_action_plans"] = [old]
+    layer2["action_plan_history"] = [old]
 
     state = {
         "layer2_memory": layer2,

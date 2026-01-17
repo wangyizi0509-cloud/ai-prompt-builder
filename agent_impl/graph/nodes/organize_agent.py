@@ -36,10 +36,15 @@ from config import get_llm
 
 
 # ============================================================
-# Prompt 模板加载（统一存放在 context_system/Prompts）
+# Prompt 模板加载（统一存放在 context_system/04_Prompts）
 # ============================================================
 
-_PROMPT_FILE = Path(__file__).resolve().parents[2] / "context_system" / "Prompts" / "organize_agent_prompts.md"
+_PROMPT_FILE = (
+    Path(__file__).resolve().parents[2]
+    / "context_system"
+    / "04_Prompts"
+    / "organize_agent_prompts.md"
+)
 _PROMPT_CACHE: dict[str, str] = {}
 
 
@@ -94,12 +99,15 @@ ArchiveType = Literal[
 ]
 
 # 动态情报默认 TTL （单位：天）
+# 注意：category 是自由文本（LLM 自定义），以下仅为常见类型的默认 TTL
+# 未在此列表中的 category 使用默认 14 天
 DEFAULT_INTEL_TTL_DAYS = {
-    "schedule": 2,  # 事件结束+1天，缺省采用2天
-    "mood": 3,
-    "status": 7,
-    "intent": 14,
+    "schedule": 2,    # 日程类：事件结束后 2 天
+    "mood": 3,        # 情绪类：3 天后
+    "status": 7,      # 临时状态类：7 天后
+    "intent": 14,     # 意向类：14 天后
 }
+DEFAULT_INTEL_TTL_FALLBACK = 14  # 其他 category 的默认 TTL
 
 
 # ============================================================
@@ -402,12 +410,13 @@ def _normalize_dynamic_intels(
         content = (item or {}).get("content", "").strip()
         category = (item or {}).get("category", "").strip()
         subject = (item or {}).get("subject", "user").strip() or "user"
-        if not content or category not in DEFAULT_INTEL_TTL_DAYS:
+        if not content or not category:
             continue
 
         valid_from = item.get("valid_from") or now.isoformat()
         expire_at = item.get("expire_at") or _calc_expire_at(category, valid_from)
         confidence = float(item.get("confidence", 0.8))
+        confidence_reason = (item or {}).get("confidence_reason", "").strip()
 
         intel = create_dynamic_intel_item(
             content=content,
@@ -415,8 +424,8 @@ def _normalize_dynamic_intels(
             subject=subject,    # type: ignore[arg-type]
             valid_from=valid_from,
             expire_at=expire_at,
-            source_msg_id=item.get("source_msg_id") or source_msg_id,
             confidence=confidence,
+            confidence_reason=confidence_reason,
         )
         normalized.append(intel)
     return normalized
@@ -424,7 +433,7 @@ def _normalize_dynamic_intels(
 
 def _calc_expire_at(category: str, valid_from: str) -> str:
     """根据类别计算默认过期时间"""
-    days = DEFAULT_INTEL_TTL_DAYS.get(category, 7)
+    days = DEFAULT_INTEL_TTL_DAYS.get(category, DEFAULT_INTEL_TTL_FALLBACK)
     try:
         start = datetime.fromisoformat(valid_from)
     except Exception:

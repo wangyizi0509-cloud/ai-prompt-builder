@@ -106,7 +106,6 @@ def _migrate_to_layered_memory(state: dict) -> dict:
             report_item = StatusReportItem(
                 id=report.get("id", "migrated_1"),
                 report_id=state.get("report_counter", {}).get("status_report", 1),
-                is_current=True,
                 stage=report.get("stage", ""),
                 stage_description=report.get("stage_description", ""),
                 acr_analysis=report.get("acr_analysis", {}),
@@ -115,7 +114,7 @@ def _migrate_to_layered_memory(state: dict) -> dict:
                 report_content=report.get("report_content", ""),
                 created_at=datetime.now().isoformat(),
             )
-            layer2["all_status_reports"] = [report_item]
+            layer2["current_status_report"] = report_item
         
         # 迁移行动规划
         if state.get("action_plan"):
@@ -123,7 +122,6 @@ def _migrate_to_layered_memory(state: dict) -> dict:
             plan_item = ActionPlanItem(
                 id=plan.get("id", "migrated_1"),
                 plan_id=state.get("report_counter", {}).get("action_plan", 1),
-                is_current=True,
                 goal=plan.get("goal", ""),
                 strategy=plan.get("strategy", ""),
                 phases=plan.get("phases", []),
@@ -131,28 +129,29 @@ def _migrate_to_layered_memory(state: dict) -> dict:
                 plan_content=plan.get("plan_content", ""),
                 created_at=datetime.now().isoformat(),
             )
-            layer2["all_action_plans"] = [plan_item]
+            layer2["current_action_plan"] = plan_item
         
         # 迁移行动指南
         if state.get("action_guides"):
-            layer2["all_action_guides"] = state["action_guides"]
+            layer2["action_guides"] = state["action_guides"]
         
         # 迁移历史摘要
         if state.get("history_archive"):
             archive = state["history_archive"]
             
             # 迁移历史现状分析
+            history_reports = []
             for i, item in enumerate(archive.get("status_history", [])):
                 report_item = StatusReportItem(
                     id=item.get("id", f"history_{i}"),
                     report_id=0,
-                    is_current=False,
                     report_content=item.get("full_content", ""),
                     summary=item.get("summary", ""),
                     one_liner=item.get("one_liner", ""),
                     created_at=item.get("created_at", ""),
                 )
-                layer2["all_status_reports"].append(report_item)
+                history_reports.append(report_item)
+            layer2["status_report_history"] = history_reports
         
         state["layer2_memory"] = layer2
     
@@ -321,14 +320,10 @@ def get_user_info(user_id: str) -> Optional[dict]:
         layer3 = state.get("layer3_memory", {})
         
         message_count = len(layer3.get("all_messages", state.get("messages", [])))
-        has_status_report = any(
-            r.get("is_current") for r in layer2.get("all_status_reports", [])
-        )
-        has_action_plan = any(
-            p.get("is_current") for p in layer2.get("all_action_plans", [])
-        )
+        has_status_report = layer2.get("current_status_report") is not None
+        has_action_plan = layer2.get("current_action_plan") is not None
         action_guides_count = len([
-            g for g in layer2.get("all_action_guides", [])
+            g for g in layer2.get("action_guides", [])
             if g.get("status") in ("pending", "in_progress", "paused")
         ])
         crush_name = layer1.get("full_data", {}).get("crush_info", {}).get("crush_name", "")

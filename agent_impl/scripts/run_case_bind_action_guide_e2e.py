@@ -4,7 +4,7 @@ E2E 测试脚本：Task-bound Action Guide Detail（按 PRD 流程多轮推进�
 特性：
 - 固定 session_id，确保跨轮次状态
 - 自动推进 Onboarding / Status / Plan 的提问（用统一的“长回答”回填）
-- 一旦产出 layer2_memory.all_action_guides，执行 bind_action_guide_detail 并校验：
+- 一旦产出 layer2_memory.action_guides，执行 bind_action_guide_detail 并校验：
   - 写入 active task.bound_action_guides
   - 重复绑定去重覆盖
   - create_task 切换隔离
@@ -85,7 +85,7 @@ def _safe_get(d: dict, path: list[str], default=None):
 
 
 def get_guides(state: dict) -> list[dict]:
-    guides = _safe_get(state, ["layer2_memory", "all_action_guides"], default=[])
+    guides = _safe_get(state, ["layer2_memory", "action_guides"], default=[])
     return guides if isinstance(guides, list) else []
 
 
@@ -348,7 +348,7 @@ def main():
                     False,
                     {
                         "blocked": True,
-                        "reason": f"layer2_memory.all_action_guides < 4（当前={len(gids)}）",
+                        "reason": f"layer2_memory.action_guides < 4（当前={len(gids)}）",
                         "turns": turns5,
                         "state_snippet": state_snippet(state5),
                     },

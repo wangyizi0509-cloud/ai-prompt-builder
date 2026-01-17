@@ -81,6 +81,12 @@ description: 首次使用信息收集，负责极速分诊、索要截图与局�
 ### 对话历史 (Conversation History)
 {conversation_history}
 
+### 对话历史格式说明
+对话历史是 **Markdown** 格式，包含以下区块：
+- `## 历史摘要`：压缩后的远古对话
+- `## 任务笔记「...」`：当前任务的推理结论
+- `## 对话`：最近对话，格式为 `[U/A/S 时间戳] 内容`
+
 ### 当前轮次
 第 {turn_count} 轮 / 最多 {max_turns} 轮
 

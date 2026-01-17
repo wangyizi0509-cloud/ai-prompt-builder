@@ -13,11 +13,18 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+import os
 
 from graph.state import sync_new_messages_to_fullstore
 from graph.archive_manager import (
     check_layer3_compression_needed,
     check_task_reasoning_compression_needed,
+    refine_on_onboarding_complete,
+    compress_layer3,
+    compress_task_reasoning,
+    archive_guide_to_layer2,
+    archive_status_to_layer2,
+    archive_plan_to_layer2,
 )
 
 
@@ -71,12 +78,157 @@ def _enqueue(queue: list[dict], *, task_type: str, task_key: str, payload: dict 
     )
 
 
+def _consume_maintenance_queue_inline(state: dict, queue: list[dict]) -> dict:
+    """
+    在 Studio 模式下同步消费维护队列（允许触发 LLM 归档）。
+    注意：仅在 STUDIO_SYNC_MAINTENANCE=1 时启用。
+    """
+    flags = state.get("maintenance_flags") if isinstance(state.get("maintenance_flags"), dict) else {}
+    updated_queue = []
+    updates: Dict[str, Any] = {}
+    working_state = dict(state)
+
+    for item in queue:
+        if not isinstance(item, dict):
+            continue
+
+        task_type = item.get("type")
+        status = item.get("status", "queued")
+        if status in ("done", "skipped"):
+            updated_queue.append(item)
+            continue
+
+        running_item = dict(item)
+        running_item["status"] = "running"
+        running_item["attempts"] = int(running_item.get("attempts", 0) or 0) + 1
+        running_item["last_error"] = None
+        updated_queue.append(running_item)
+
+        try:
+            task_updates: Dict[str, Any] = {}
+
+            if task_type == "onboarding_refine":
+                task_updates = refine_on_onboarding_complete(working_state)
+                flags = dict(flags)
+                flags["onboarding_refine_done"] = True
+                flags["onboarding_refine_queued"] = False
+                task_updates["maintenance_flags"] = flags
+
+            elif task_type == "layer3_compress":
+                task_updates = compress_layer3(working_state)
+
+            elif task_type == "task_reasoning_compress":
+                task_updates = compress_task_reasoning(working_state)
+
+            elif task_type == "archive_guide":
+                payload = item.get("payload") or {}
+                guide_id = payload.get("guide_id")
+                if guide_id:
+                    guide_obj = None
+                    for g in working_state.get("action_guides", []) or []:
+                        if isinstance(g, dict) and g.get("id") == guide_id:
+                            guide_obj = g
+                            break
+                    if not guide_obj:
+                        layer2_memory = working_state.get("layer2_memory") or {}
+                        guides2 = layer2_memory.get("action_guides", []) if isinstance(layer2_memory, dict) else []
+                        for g in guides2 or []:
+                            if isinstance(g, dict) and g.get("id") == guide_id:
+                                guide_obj = g
+                                break
+                    if guide_obj:
+                        task_updates = archive_guide_to_layer2(guide_obj, working_state)
+                        flags = dict(flags)
+                        archived = flags.get("archived_guide_ids") or []
+                        if not isinstance(archived, list):
+                            archived = []
+                        if guide_id not in archived:
+                            archived.append(guide_id)
+                        flags["archived_guide_ids"] = archived
+                        task_updates["maintenance_flags"] = flags
+
+            elif task_type == "archive_status":
+                payload = item.get("payload") or {}
+                report_uid = payload.get("report_uid")
+                if report_uid:
+                    old_report = None
+                    layer2_memory = working_state.get("layer2_memory") or {}
+                    # 在历史报告中查找
+                    reports = layer2_memory.get("status_report_history", []) if isinstance(layer2_memory, dict) else []
+                    for r in reports or []:
+                        if isinstance(r, dict) and r.get("id") == report_uid:
+                            old_report = r
+                            break
+                    if old_report:
+                        task_updates = archive_status_to_layer2(old_report, working_state)
+                        flags = dict(flags)
+                        archived = flags.get("archived_status_ids") or []
+                        if not isinstance(archived, list):
+                            archived = []
+                        if report_uid not in archived:
+                            archived.append(report_uid)
+                        flags["archived_status_ids"] = archived
+                        task_updates["maintenance_flags"] = flags
+
+            elif task_type == "archive_plan":
+                payload = item.get("payload") or {}
+                plan_uid = payload.get("plan_uid")
+                if plan_uid:
+                    old_plan = None
+                    layer2_memory = working_state.get("layer2_memory") or {}
+                    # 在历史规划中查找
+                    plans = layer2_memory.get("action_plan_history", []) if isinstance(layer2_memory, dict) else []
+                    for p in plans or []:
+                        if isinstance(p, dict) and p.get("id") == plan_uid:
+                            old_plan = p
+                            break
+                    if old_plan:
+                        task_updates = archive_plan_to_layer2(old_plan, working_state)
+                        flags = dict(flags)
+                        archived = flags.get("archived_plan_ids") or []
+                        if not isinstance(archived, list):
+                            archived = []
+                        if plan_uid not in archived:
+                            archived.append(plan_uid)
+                        flags["archived_plan_ids"] = archived
+                        task_updates["maintenance_flags"] = flags
+            else:
+                done_item = dict(running_item)
+                done_item["status"] = "skipped"
+                done_item["last_error"] = f"unknown_task_type:{task_type}"
+                updated_queue[-1] = done_item
+                continue
+
+            if task_updates:
+                working_state.update(task_updates)
+                updates.update(task_updates)
+
+            done_item = dict(updated_queue[-1])
+            done_item["status"] = "done"
+            done_item["finished_at"] = _now()
+            updated_queue[-1] = done_item
+
+        except Exception as e:
+            fail_item = dict(updated_queue[-1])
+            fail_item["status"] = "failed"
+            fail_item["last_error"] = str(e)
+            updated_queue[-1] = fail_item
+
+    updates["maintenance_queue"] = updated_queue
+    if flags:
+        updates["maintenance_flags"] = flags
+    return updates
+
+
 def post_turn_finalize_node(state: dict) -> dict:
     """
     每轮结束的 Finalizer：
     1) 同步 messages → layer3_memory.all_messages（全量存储）
     2) 评估是否需要触发维护任务（入队）
     """
+    from utils.message_utils import count_user_turns
+    from graph.archive_manager import LAYER3_ARCHIVE_CONFIG
+    
     # [DEBUG] 验证 finalizer 是否被调用
     queue_before = len(_get_queue(state))
     print(f"[Finalizer] post_turn_finalize called, queue_before={queue_before}, onboarding_completed={state.get('onboarding_completed')}")
@@ -88,24 +240,41 @@ def post_turn_finalize_node(state: dict) -> dict:
     if sync_updates:
         updates.update(sync_updates)
 
-    # 2) 维护任务入队（只打标，不执行）
-    queue = _get_queue(state)
-    flags = _get_flags(state)
+    # [FIX] 创建 working_state，合并 sync_updates 后再进行后续检查
+    # 这确保压缩检查使用的是包含最新消息的 layer3_memory
+    working_state = dict(state)
+    if sync_updates:
+        working_state.update(sync_updates)
+
+    # 2) 维护任务入队（默认只打标；Studio 可选择同步执行）
+    queue = _get_queue(working_state)
+    flags = _get_flags(working_state)
     before_len = len(queue)
 
     # 2.1 Onboarding 完成后提纯（只要没做过，就保持 queued）
-    if state.get("onboarding_completed") and state.get("onboarding_handoff"):
+    if working_state.get("onboarding_completed") and working_state.get("onboarding_handoff"):
         if not flags.get("onboarding_refine_done") and not _queue_has(queue, "onboarding_refine", "onboarding_refine"):
             _enqueue(queue, task_type="onboarding_refine", task_key="onboarding_refine")
-            _set_flag(updates, state, "onboarding_refine_queued", True)
+            _set_flag(updates, working_state, "onboarding_refine_queued", True)
 
-    # 2.2 对话压缩（Layer3）
-    if check_layer3_compression_needed(state):
+    # 2.2 对话压缩（Layer3）—— 使用 working_state 进行检查
+    # [DEBUG] 输出压缩检查的详细信息
+    layer3_mem = working_state.get("layer3_memory") or {}
+    all_msgs = layer3_mem.get("all_messages", []) if isinstance(layer3_mem, dict) else []
+    user_turns = count_user_turns(all_msgs)
+    threshold = LAYER3_ARCHIVE_CONFIG.get("compression_threshold", 4)
+    batch_size = LAYER3_ARCHIVE_CONFIG.get("compression_batch_size", 1)
+    excess = user_turns - threshold if user_turns > threshold else 0
+    should_compress = excess > 0 and excess % batch_size == 0
+    print(f"[Finalizer] Compression check: all_messages={len(all_msgs)}, user_turns={user_turns}, threshold={threshold}, batch_size={batch_size}, excess={excess}, should_compress={should_compress}")
+    
+    if check_layer3_compression_needed(working_state):
         if not _queue_has(queue, "layer3_compress", "layer3_compress"):
             _enqueue(queue, task_type="layer3_compress", task_key="layer3_compress")
+            print(f"[Finalizer] Enqueued layer3_compress task")
 
     # 2.3 任务思考过程压缩（Layer3 task_registry）
-    tasks_to_compress = check_task_reasoning_compression_needed(state)
+    tasks_to_compress = check_task_reasoning_compression_needed(working_state)
     if tasks_to_compress:
         # 任务级压缩可合并为单个任务（内部再扫描）
         if not _queue_has(queue, "task_reasoning_compress", "task_reasoning_compress"):
@@ -116,9 +285,9 @@ def post_turn_finalize_node(state: dict) -> dict:
     if not isinstance(archived_guide_ids, list):
         archived_guide_ids = []
 
-    layer2_memory = state.get("layer2_memory") or {}
-    guides_source = layer2_memory.get("all_action_guides") if isinstance(layer2_memory, dict) else None
-    guides = guides_source if isinstance(guides_source, list) and guides_source else (state.get("action_guides", []) or [])
+    layer2_memory = working_state.get("layer2_memory") or {}
+    guides_source = layer2_memory.get("action_guides") if isinstance(layer2_memory, dict) else None
+    guides = guides_source if isinstance(guides_source, list) and guides_source else (working_state.get("action_guides", []) or [])
 
     for g in guides:
         if not isinstance(g, dict):
@@ -134,20 +303,18 @@ def post_turn_finalize_node(state: dict) -> dict:
         if not _queue_has(queue, "archive_guide", task_key):
             _enqueue(queue, task_type="archive_guide", task_key=task_key, payload={"guide_id": gid})
 
-    # 2.5 旧现状报告归档（is_current=False 且缺 summary）
+    # 2.5 历史现状报告归档（缺 summary 的历史报告）
     archived_status_ids = flags.get("archived_status_ids") or []
     if not isinstance(archived_status_ids, list):
         archived_status_ids = []
 
-    reports = layer2_memory.get("all_status_reports", []) if isinstance(layer2_memory, dict) else []
-    if isinstance(reports, list):
-        for r in reports:
+    history_reports = layer2_memory.get("status_report_history", []) if isinstance(layer2_memory, dict) else []
+    if isinstance(history_reports, list):
+        for r in history_reports:
             if not isinstance(r, dict):
                 continue
             rid = r.get("id")
             if not rid:
-                continue
-            if r.get("is_current"):
                 continue
             if (r.get("summary") or "").strip():
                 continue
@@ -157,20 +324,18 @@ def post_turn_finalize_node(state: dict) -> dict:
             if not _queue_has(queue, "archive_status", task_key):
                 _enqueue(queue, task_type="archive_status", task_key=task_key, payload={"report_uid": rid})
 
-    # 2.6 旧行动规划归档（is_current=False 且缺 summary）
+    # 2.6 历史行动规划归档（缺 summary 的历史规划）
     archived_plan_ids = flags.get("archived_plan_ids") or []
     if not isinstance(archived_plan_ids, list):
         archived_plan_ids = []
 
-    plans = layer2_memory.get("all_action_plans", []) if isinstance(layer2_memory, dict) else []
-    if isinstance(plans, list):
-        for p in plans:
+    history_plans = layer2_memory.get("action_plan_history", []) if isinstance(layer2_memory, dict) else []
+    if isinstance(history_plans, list):
+        for p in history_plans:
             if not isinstance(p, dict):
                 continue
             pid = p.get("id")
             if not pid:
-                continue
-            if p.get("is_current"):
                 continue
             if (p.get("summary") or "").strip():
                 continue
@@ -181,8 +346,17 @@ def post_turn_finalize_node(state: dict) -> dict:
                 _enqueue(queue, task_type="archive_plan", task_key=task_key, payload={"plan_uid": pid})
 
     # queue 写回（仅当有变化时写）
-    if queue != state.get("maintenance_queue"):
+    if queue != working_state.get("maintenance_queue"):
         updates["maintenance_queue"] = queue
+
+    # 2.7 Studio 同步消费维护队列（可触发 LLM 归档）
+    # [FIX] 自动检测 LangGraph Studio 环境并启用同步消费
+    is_studio = os.environ.get("LANGGRAPH_API_URL") or os.environ.get("STUDIO_SYNC_MAINTENANCE") == "1"
+    if is_studio and queue:
+        print(f"[Finalizer] Studio mode detected, consuming {len(queue)} maintenance tasks inline")
+        inline_updates = _consume_maintenance_queue_inline(working_state, queue)
+        if inline_updates:
+            updates.update(inline_updates)
 
     # 最后更新时间
     updates["maintenance_last_finalized_at"] = _now()

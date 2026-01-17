@@ -40,7 +40,7 @@ def create_guide_loader_tool(state_getter: Callable[[], dict[str, Any]]):
 
         # 优先从 Layer2Memory 全量存储读取
         layer2 = state.get("layer2_memory") or {}
-        guides = layer2.get("all_action_guides") or state.get("action_guides") or []
+        guides = layer2.get("action_guides") or state.get("action_guides") or []
 
         target_id = str(guide_id or "").strip()
         if not target_id:

@@ -82,6 +82,7 @@ def router_node(state: AgentState) -> dict[str, Any]:
         "completion_status": None,  # 重置子 Agent 信号
         "result_summary": None,
         "_tool_caller": None,  # [FIX] 重置工具调用标记，防止 Skill 指令一直挂着
+        "_iteration_count": 0,  # [FIX] 重置单轮步数计数器，避免跨轮次累积导致流程被卡死（Studio 模式下不走 server.py）
     }
 
     # [v3.0] instruction 属于“主 Agent -> 专家”的临时 Brief：

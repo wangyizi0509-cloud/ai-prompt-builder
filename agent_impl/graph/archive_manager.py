@@ -79,8 +79,8 @@ LAYER2_ARCHIVE_CONFIG = {
 
 LAYER3_ARCHIVE_CONFIG = {
     "max_recent_turns": 4,          # 保留最近 N 轮完整对话
-    "compression_batch_size": 5,    # 每超出 batch_size 轮集中压缩一次
-    "compression_threshold": 45,    # 超过此轮次开始检查是否需要压缩（与测试用例对齐）
+    "compression_batch_size": 1,    # 每超出 batch_size 轮集中压缩一次（测试用）
+    "compression_threshold": 4,     # 超过此轮次开始检查是否需要压缩（测试用）
     "max_summaries": 10,            # 最多保留的对话摘要数
     "reasoning_limit": 10,          # 任务思考过程记录保留条数 (n)
     "reasoning_compression_batch": 2, # 思考过程压缩批量大小 (n-5 到 n 条一起摘要)
@@ -99,19 +99,23 @@ def check_layer3_compression_needed(state: "AgentState") -> bool:
     检查 Layer 3 是否需要触发对话压缩
     
     触发条件：
-    - 对话轮次超过 compression_threshold（25 + 5 = 30）
+    - 对话轮次超过 compression_threshold（默认 4，生产环境建议 25+）
     - 且超出部分达到 compression_batch_size 的倍数
     
-    例如：阈值 30，批量大小 5
+    例如：阈值 4，批量大小 1（测试配置）
+    - 4 轮：不压缩（刚到阈值）
+    - 5 轮：触发压缩（超出 1 轮）
+    - 6 轮：触发压缩（超出 2 轮）
+    
+    生产配置示例：阈值 30，批量大小 5
     - 29 轮：不压缩
-    - 30 轮：不压缩（刚到阈值）
     - 35 轮：触发压缩（超出 5 轮）
-    - 36-39 轮：不压缩
-    - 40 轮：触发压缩（超出 10 轮）
     """
     # 优先从 layer3_memory 获取消息
     layer3_memory = state.get("layer3_memory")
-    if layer3_memory:
+    has_layer3_memory = layer3_memory is not None and isinstance(layer3_memory, dict)
+    
+    if has_layer3_memory:
         all_messages = layer3_memory.get("all_messages", [])
     else:
         all_messages = state.get("messages", [])
@@ -122,11 +126,18 @@ def check_layer3_compression_needed(state: "AgentState") -> bool:
     threshold = LAYER3_ARCHIVE_CONFIG["compression_threshold"]
     batch_size = LAYER3_ARCHIVE_CONFIG["compression_batch_size"]
     
+    # [DEBUG] 详细日志输出
+    excess_turns = max(0, current_turns - threshold)
+    should_trigger = current_turns > threshold and excess_turns % batch_size == 0
+    print(f"[Archive] check_layer3_compression_needed: "
+          f"has_layer3_memory={has_layer3_memory}, "
+          f"all_messages_count={len(all_messages)}, "
+          f"user_turns={current_turns}, "
+          f"threshold={threshold}, batch_size={batch_size}, "
+          f"excess={excess_turns}, result={should_trigger}")
+    
     if current_turns <= threshold:
         return False
-    
-    # 计算超出的轮次
-    excess_turns = current_turns - threshold
     
     # 检查是否达到批量压缩的触发点
     return excess_turns > 0 and excess_turns % batch_size == 0
@@ -235,11 +246,17 @@ def compress_layer3(state: "AgentState") -> dict:
         
         # 3. 创建对话摘要
         conv_archive = result.get("conversation_archive", {})
+        if isinstance(conv_archive, list):
+            conv_archive = conv_archive[0] if conv_archive else {}
+        if not isinstance(conv_archive, dict):
+            print(f"[Archive] Unexpected conversation_archive type: {type(conv_archive)}")
+            conv_archive = {}
+        turn_count = conv_archive.get("turn_count", len(to_compress))
+        key_topics = conv_archive.get("key_topics", [])
         new_summary = create_conversation_summary(
             summary=conv_archive.get("summary", ""),
-            turn_count=conv_archive.get("turn_count", len(to_compress)),
-            key_topics=conv_archive.get("key_topics", []),
-            extracted_info=conv_archive.get("extracted_info", {}),
+            topics=", ".join(key_topics) if isinstance(key_topics, list) else str(key_topics),
+            turn_range=f"1-{turn_count}",
         )
         
         # 4. 通过存储策略路由到 Layer 3 并写入摘要
@@ -523,7 +540,6 @@ def archive_status_to_layer2(
     status_summary = result.get("status_summary", {})
     old_report["summary"] = status_summary.get("summary", "")
     old_report["one_liner"] = status_summary.get("one_liner", "")
-    old_report["is_current"] = False
     
     # 更新 Layer 2 长期记忆中的报告列表
     decision = _storage_router.route({"type": "status_report", "payload": old_report})
@@ -579,7 +595,6 @@ def archive_plan_to_layer2(
     plan_summary = result.get("plan_summary", {})
     old_plan["summary"] = plan_summary.get("summary", "")
     old_plan["one_liner"] = plan_summary.get("one_liner", "")
-    old_plan["is_current"] = False
 
     decision = _storage_router.route({"type": "action_plan", "payload": old_plan})
     if decision.get("target_layer") != "layer2":
@@ -703,7 +718,6 @@ def archive_status_on_replacement(
     report_item = StatusReportItem(
         id=old_report.get("id", str(uuid.uuid4())[:8]),
         report_id=old_report.get("report_id", 0),
-        is_current=False,
         stage=old_report.get("stage", ""),
         stage_description=old_report.get("stage_description", ""),
         acr_analysis=old_report.get("acr_analysis", {}),
@@ -843,19 +857,26 @@ def refine_on_onboarding_complete(state: "AgentState") -> dict:
 
     updated_layer3 = layer3_memory
     conv_archive = result.get("conversation_archive")
+    if isinstance(conv_archive, list):
+        conv_archive = conv_archive[0] if conv_archive else {}
+    if not isinstance(conv_archive, dict):
+        if conv_archive:
+            print(f"[Archive] Unexpected conversation_archive type: {type(conv_archive)}")
+        conv_archive = {}
     if conv_archive:
+        turn_count = conv_archive.get("turn_count", len(messages))
+        key_topics = conv_archive.get("key_topics", [])
         new_summary = create_conversation_summary(
             summary=conv_archive.get("summary", ""),
-            turn_count=conv_archive.get("turn_count", len(messages)),
-            key_topics=conv_archive.get("key_topics", []),
-            extracted_info=conv_archive.get("extracted_info", {}),
+            topics=", ".join(key_topics) if isinstance(key_topics, list) else str(key_topics),
+            turn_range=f"1-{turn_count}",
         )
         max_summaries = LAYER3_ARCHIVE_CONFIG["max_summaries"]
         updated_layer3 = StorageProcessor.append_conversation_summary(
             layer3_memory,
             new_summary,
             max_summaries=max_summaries,
-            total_turns_delta=conv_archive.get("turn_count", len(messages)),
+            total_turns_delta=turn_count,
         )
 
     return {
@@ -878,14 +899,15 @@ def get_archive_stats(state: "AgentState") -> dict:
     layer3_memory = state.get("layer3_memory", {})
     
     all_messages = layer3_memory.get("all_messages", state.get("messages", []))
-    all_guides = layer2_memory.get("all_action_guides", [])
-    all_reports = layer2_memory.get("all_status_reports", [])
+    all_guides = layer2_memory.get("action_guides", [])
+    current_report = layer2_memory.get("current_status_report")
+    history_reports = layer2_memory.get("status_report_history", [])
     
     return {
         "conversation_turns": len(all_messages),
         "conversation_summaries": len(layer3_memory.get("conversation_summaries", [])),
-        "status_reports_total": len(all_reports),
-        "status_reports_history": len([r for r in all_reports if not r.get("is_current")]),
+        "status_reports_total": (1 if current_report else 0) + len(history_reports),
+        "status_reports_history": len(history_reports),
         "action_guides_total": len(all_guides),
         "action_guides_terminal": len([g for g in all_guides if g.get("status") in ("completed", "cancelled", "expired")]),
         "compression_needed": check_layer3_compression_needed(state),
@@ -914,13 +936,12 @@ def get_full_history_content(
         layer2_memory = state.get("layer2_memory", {})
         
         if item_type == "status_report":
-            reports = layer2_memory.get("all_status_reports", [])
-            history = [r for r in reports if not r.get("is_current")]
+            history = layer2_memory.get("status_report_history", [])
             if 0 <= index < len(history):
                 return history[index].get("report_content")
         
         elif item_type == "action_guide":
-            guides = layer2_memory.get("all_action_guides", [])
+            guides = layer2_memory.get("action_guides", [])
             terminal = [g for g in guides if g.get("status") in ("completed", "cancelled", "expired")]
             if 0 <= index < len(terminal):
                 return terminal[index].get("guide", {}).get("guide_content")

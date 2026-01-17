@@ -15,11 +15,11 @@ LangGraph 工作流编排
 - 工具执行完成后自动返回调用它的 Agent
 
 v2.1 更新：
-- 添加 Checkpointer 支持（默认使用 MemorySaver）
-- 支持自定义 checkpointer（生产环境可替换为 PostgreSQL/Redis）
+- 添加 Checkpointer 支持（使用 MemorySaver）
 """
 
 from typing import Literal, Optional
+import os
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
@@ -64,7 +64,13 @@ def _wrap_step_counter(node_name: str, fn):
         out = fn(state) or {}
         if not isinstance(out, dict):
             out = {}
-        curr = int(state.get("_iteration_count", 0) or 0) + 1
+        # [FIX] 优先使用节点返回的 _iteration_count（支持 Router 重置），否则从 state 读取
+        if "_iteration_count" in out:
+            # 节点显式设置了值（如 Router 重置为 0），从该值 +1 开始计数
+            curr = int(out.get("_iteration_count", 0) or 0) + 1
+        else:
+            # 节点未设置，从 state 读取并 +1
+            curr = int(state.get("_iteration_count", 0) or 0) + 1
         out["_iteration_count"] = curr
         # 轻量 debug 记录，方便定位循环链路（不会爆炸）
         dbg = out.get("debug_log")
@@ -497,23 +503,28 @@ def create_workflow() -> StateGraph:
     return workflow
 
 
+def build_checkpointer_from_env():
+    """
+    返回内存 checkpointer（LangGraph Studio dev 模式使用 in-memory）
+    """
+    return MemorySaver()
+
+
 def compile_workflow(checkpointer=None):
     """
     编译工作流
     
     Args:
-        checkpointer: 可选的 checkpointer 实例
-                     - None: 使用默认的 MemorySaver（适合开发/测试）
-                     - 自定义实例: 可传入 PostgresSaver/RedisSaver 等（适合生产环境）
+        checkpointer: 可选的 checkpointer 实例，默认使用 MemorySaver
     
     Returns:
         可执行的工作流实例
     """
     workflow = create_workflow()
     
-    # 如果未提供 checkpointer，使用 MemorySaver 作为默认值
+    # 如果未提供 checkpointer，使用环境变量决定（默认 MemorySaver）
     if checkpointer is None:
-        checkpointer = MemorySaver()
+        checkpointer = build_checkpointer_from_env()
     
     return workflow.compile(checkpointer=checkpointer)
 

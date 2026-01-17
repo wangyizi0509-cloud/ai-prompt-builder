@@ -8,6 +8,10 @@ def get_msg_role_and_content(msg: Any) -> tuple[str, str]:
     if isinstance(msg, dict):
         role = msg.get("role", "")
         content = msg.get("content", "")
+        if role == "human":
+            role = "user"
+        elif role == "ai":
+            role = "assistant"
         # 处理 tool 角色可能在 content 中为空，但在其他字段中有信息的情况
         if role == "tool" and not content:
             content = msg.get("tool_output", "")

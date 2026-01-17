@@ -130,7 +130,7 @@ def bind_action_guide_detail_impl(
 
     # 2. 从 layer2_memory 查找目标指南
     layer2 = state.get("layer2_memory") or {}
-    guides = layer2.get("all_action_guides") or state.get("action_guides") or []
+    guides = layer2.get("action_guides") or state.get("action_guides") or []
     
     target_guide = None
     for g in guides:

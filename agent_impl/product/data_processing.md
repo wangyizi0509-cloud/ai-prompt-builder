@@ -22,18 +22,18 @@
 - **触发**: `Status Agent` 执行分析任务。
 - **产出动作**: 生成新的或更新 `StatusReportItem`。
 - **写入机制 (Layer 2)**:
-    - **New Version**: 生成全新报告，压入列表头部，标记 `is_current=True`。
+    - **New Version**: 生成全新报告，写入 `current_status_report`，旧报告移入 `status_report_history`。
     - **Refinement**: (未来支持) 在当前报告基础上进行字段级更新，不生成新版本，仅更新 `last_updated`。
-    - **Retire**: 旧版本报告自动标记 `is_current=False`。
+    - **Retire**: 旧版本报告自动移入 `status_report_history`。
     - **归档触发**: 旧报告退役时，触发 `Archive Manager` 规则。
 
 ### 2.2 行动规划数据流 (Action Plan Flow)
 - **触发**: `Plan Agent` 执行规划任务。
 - **产出动作**: 生成新的或更新 `ActionPlanItem` 或更新现有规划。
 - **写入机制 (Layer 2)**:
-    - **Strategy Shift**: 战略方向改变时，生成新规划，标记 `is_current=True`。
+    - **Strategy Shift**: 战略方向改变时，生成新规划，写入 `current_action_plan`，旧规划移入 `action_plan_history`。
     - **Update**: 仅调整某个阶段目标或补充原则时，在原对象上修改。
-    - **Retire**: 旧规划失效后标记 `is_current=False` 并触发归档。
+    - **Retire**: 旧规划失效后移入 `action_plan_history` 并触发归档。
 
 ### 2.3 行动指南数据流 (Action Guide Flow)
 - **触发**: `Guide Agent` 执行指南生成或状态更新任务。
@@ -67,7 +67,7 @@
 | **Layer 3** | **对话历史** (Messages/Thought) | **滚动窗口** | 提供近期交互记忆 |
 
 ### 3.2 智能加载细节
-- **现状/规划**: 仅加载 `is_current=True` 的最新版本。历史版本仅加载摘要。
+- **现状/规划**: 仅加载 `current_status_report` / `current_action_plan`。历史版本（`status_report_history` / `action_plan_history`）仅加载摘要。
 - **行动指南**: 
     - **详情加载**: 仅 `In_Progress` (进行中) 的指南。
     - **元数据加载**: `Pending`(待执行)、`Paused`(暂停) 以及所有历史终态指南，仅加载列表 (ID/Title/Status/Summary) 以节省 Token。
@@ -141,8 +141,8 @@ graph TD
 | 概念 | 对应代码结构 | 存储位置 |
 | :--- | :--- | :--- |
 | **静态情报** | `UserContext` (3x3 Dict) | `state["layer1_memory"]["full_data"]` |
-| **现状报告** | `StatusReportItem` | `state["layer2_memory"]["all_status_reports"]` |
-| **行动规划** | `ActionPlanItem` | `state["layer2_memory"]["all_action_plans"]` |
-| **行动指南** | `ActionGuideItem` | `state["layer2_memory"]["all_action_guides"]` |
+| **现状报告** | `StatusReportItem` | `state["layer2_memory"]["current_status_report"]` + `["status_report_history"]` |
+| **行动规划** | `ActionPlanItem` | `state["layer2_memory"]["current_action_plan"]` + `["action_plan_history"]` |
+| **行动指南** | `ActionGuideItem` | `state["layer2_memory"]["action_guides"]` |
 | **对话历史** | `List[Message]` | `state["layer3_memory"]["all_messages"]` |
 | **动态情报** | `DynamicIntelItem` | `state["layer2_memory"]["dynamic_intels"]` |

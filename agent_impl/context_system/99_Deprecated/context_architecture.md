@@ -1,6 +1,17 @@
 # 上下文工程架构（获取 → 存储/提纯 → 存储层 → 提取 → 消费）
 
-> 适用版本：v3.1 技术实现（`graph/context_builder.py`、`graph/storage_strategy.py`、`graph/organize_agent.py`、`graph/archive_manager.py`）
+> ⚠️ **DEPRECATED - 已废弃**
+> 
+> 本文档已被以下规范文档取代，请参阅：
+> - `Layer_Specs/` - 各层规范文档
+> - `Task_System/task_system_spec.md` - 任务系统规范
+> - `Context_Assembly/context_assembly_spec.md` - 上下文组装规范
+>
+> 以下内容仅供历史参考，不再维护。
+
+---
+
+> 原适用版本：v3.1 技术实现（`graph/context_builder.py`、`graph/storage_strategy.py`、`graph/organize_agent.py`、`graph/archive_manager.py`）
 
 ## 1. 数据流总览
 

@@ -261,14 +261,14 @@ class TestGuideAgentOutput:
         mock_llm.invoke.return_value = mock_response
         mock_get_llm.return_value = mock_llm
         
-        # 创建初始状态，预设一个已有的指南（v3.1 真源：layer2_memory.all_action_guides）
+        # 创建初始状态，预设一个已有的指南（v3.1 真源：layer2_memory.action_guides）
         state = create_initial_state("我想追一个女生")
         state["last_response_for_continuity"] = "好的，我来给你具体指导"
         state["status_report"] = "已有现状分析"
         state["action_plan"] = "已有行动规划"
         from graph.context_types import create_empty_layer2_memory
         state["layer2_memory"] = create_empty_layer2_memory()
-        state["layer2_memory"]["all_action_guides"] = [{
+        state["layer2_memory"]["action_guides"] = [{
             "id": "g_existing",
             "guide_id": 1,
             "status": "completed",
@@ -279,7 +279,7 @@ class TestGuideAgentOutput:
             "completed_at": "2025-01-02T00:00:00",
         }]
         # 向后兼容字段（可选）
-        state["action_guides"] = list(state["layer2_memory"]["all_action_guides"])
+        state["action_guides"] = list(state["layer2_memory"]["action_guides"])
         
         # 调用节点
         result = guide_agent_node(state)

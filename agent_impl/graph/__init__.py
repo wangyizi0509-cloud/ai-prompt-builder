@@ -1,23 +1,12 @@
 """
 Graph 模块 - LangGraph 工作流定义
 
-v2.0 更新：
-- 新增分层上下文架构（context_types, context_builder）
-- AgentState 支持 3×3 静态情报矩阵
-
-v2.1 更新：
-- 新增整理 Agent（organize_agent）
-- 新增归档管理器（archive_manager）
-- 对话压缩和历史摘要分级存储
-
-v2.2 更新：
-- 新增本地持久化存储（state_storage）
-- 新增 Crush 聊天记录分层存储（crush_chat_storage）
-- 新增抽屉式完整信息调用工具（tools/drawer_tools）
-
-v3.0 更新：
-- 分层长期记忆架构：删除统一 Layer 4，改为各层独立长期记忆
-- Layer 1/2/3 各自有独立的长期记忆存储和提取策略
+v3.1 更新：
+- 统一上下文系统规范
+- 删除旧版类型（HistoryArchive, ConversationArchive, HistorySummary）
+- 使用 AtomicMemory 原子记忆结构
+- 使用 current_xxx + xxx_history 替代 is_current 字段
+- 任务系统使用 status 替代 is_active
 """
 
 from .state import (
@@ -31,23 +20,31 @@ from .state import (
     sync_messages_to_layer3,
 )
 from .context_types import (
-    # Layer 1
+    # Layer 1 - 静态情报（原子记忆结构）
+    AtomicMemory,
     UserContext,
     InfoSource,
     CrushInfo,
     Layer1Memory,
     Layer1ExtractionConfig,
-    # Layer 2
+    # Layer 2 - 工作上下文
     ActionGuideItem,
     ActionGuideContent,
     StatusReportItem,
     ActionPlanItem,
+    DynamicIntelItem,
     Layer2Memory,
     Layer2ExtractionConfig,
-    # Layer 3
+    # Layer 3 - 对话历史
     Layer3Memory,
     Layer3ExtractionConfig,
     ConversationSummary,
+    # 任务系统
+    AgentTaskRegistry,
+    TaskState,
+    BoundContext,
+    ReasoningNote,
+    BOUND_CONTEXT_LIMITS,
     # 处理状态（并发控制）
     ProcessingStatus,
     create_processing_status,
@@ -57,36 +54,36 @@ from .context_types import (
     finish_layer_processing,
     check_processing_timeout,
     clear_stale_processing,
-    # 其他
+    # Crush 聊天记录
     CrushChatMetadata,
     CrushChatSummary,
     CrushChatStorage,
-    AgentTaskRegistry,
-    TaskState,
+    # 计数器
     ReportCounter,
-    # 向后兼容
-    HistoryArchive,
-    ConversationArchive,
-    HistorySummary,
     # 工厂函数
     create_empty_user_context,
     create_empty_layer1_memory,
     create_empty_layer2_memory,
     create_empty_layer3_memory,
-    create_empty_history_archive,
+    create_empty_task_registry,
     create_action_guide_item,
     create_status_report_item,
     create_action_plan_item,
     create_conversation_summary,
-    create_empty_task_registry,
     create_empty_report_counter,
+    create_dynamic_intel_item,
+    create_atomic_memory,
+    create_bound_context,
+    create_reasoning_note,
+    create_new_task,
     # Layer 2 辅助函数
-    get_current_status_report,
-    get_current_action_plan,
     get_active_action_guides as get_layer2_active_guides,
     get_completed_action_guides as get_layer2_completed_guides,
-    get_history_status_reports,
-    get_history_action_plans,
+    get_valid_dynamic_intels,
+    is_valid_action_guide_status_transition,
+    # 任务辅助函数
+    get_active_task,
+    get_task_by_id,
 )
 from .context_builder import (
     build_context,
@@ -156,6 +153,7 @@ __all__ = [
     "sync_layer1_to_user_context",
     "sync_messages_to_layer3",
     # Context Types - Layer 1
+    "AtomicMemory",
     "UserContext",
     "InfoSource",
     "CrushInfo",
@@ -166,12 +164,19 @@ __all__ = [
     "ActionGuideContent",
     "StatusReportItem",
     "ActionPlanItem",
+    "DynamicIntelItem",
     "Layer2Memory",
     "Layer2ExtractionConfig",
     # Context Types - Layer 3
     "Layer3Memory",
     "Layer3ExtractionConfig",
     "ConversationSummary",
+    # Context Types - 任务系统
+    "AgentTaskRegistry",
+    "TaskState",
+    "BoundContext",
+    "ReasoningNote",
+    "BOUND_CONTEXT_LIMITS",
     # Context Types - 处理状态（并发控制）
     "ProcessingStatus",
     "create_processing_status",
@@ -181,36 +186,36 @@ __all__ = [
     "finish_layer_processing",
     "check_processing_timeout",
     "clear_stale_processing",
-    # Context Types - 其他
+    # Context Types - Crush 聊天记录
     "CrushChatMetadata",
     "CrushChatSummary",
     "CrushChatStorage",
-    "AgentTaskRegistry",
-    "TaskState",
+    # Context Types - 计数器
     "ReportCounter",
-    # Context Types - 向后兼容
-    "HistoryArchive",
-    "ConversationArchive",
-    "HistorySummary",
     # Context Types - 工厂函数
     "create_empty_user_context",
     "create_empty_layer1_memory",
     "create_empty_layer2_memory",
     "create_empty_layer3_memory",
-    "create_empty_history_archive",
+    "create_empty_task_registry",
     "create_action_guide_item",
     "create_status_report_item",
     "create_action_plan_item",
     "create_conversation_summary",
-    "create_empty_task_registry",
     "create_empty_report_counter",
+    "create_dynamic_intel_item",
+    "create_atomic_memory",
+    "create_bound_context",
+    "create_reasoning_note",
+    "create_new_task",
     # Context Types - Layer 2 辅助函数
-    "get_current_status_report",
-    "get_current_action_plan",
     "get_layer2_active_guides",
     "get_layer2_completed_guides",
-    "get_history_status_reports",
-    "get_history_action_plans",
+    "get_valid_dynamic_intels",
+    "is_valid_action_guide_status_transition",
+    # Context Types - 任务辅助函数
+    "get_active_task",
+    "get_task_by_id",
     # Context Builder
     "build_context",
     "build_context_dict",

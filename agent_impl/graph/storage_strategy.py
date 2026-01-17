@@ -153,7 +153,7 @@ class StorageProcessor:
         - 活跃（可继续执行/可恢复）：pending / in_progress / paused
         - 终态（历史）：completed / cancelled / expired
         """
-        all_guides = list(layer2_memory.get("all_action_guides", []))
+        all_guides = list(layer2_memory.get("action_guides", []))
         for i, g in enumerate(all_guides):
             if g.get("id") == guide.get("id"):
                 all_guides[i] = guide
@@ -169,9 +169,11 @@ class StorageProcessor:
         merged = active + archived
 
         return Layer2Memory(
-            all_status_reports=layer2_memory.get("all_status_reports", []),
-            all_action_plans=layer2_memory.get("all_action_plans", []),
-            all_action_guides=merged,
+            current_status_report=layer2_memory.get("current_status_report"),
+            status_report_history=layer2_memory.get("status_report_history", []),
+            current_action_plan=layer2_memory.get("current_action_plan"),
+            action_plan_history=layer2_memory.get("action_plan_history", []),
+            action_guides=merged,
             extraction_config=layer2_memory.get("extraction_config", {}),
             processing_status=None,
             last_updated=datetime.now().isoformat(),
@@ -187,23 +189,24 @@ class StorageProcessor:
         max_one_liner: int,
     ) -> Layer2Memory:
         """在 Layer2 中更新现状报告并做摘要降级"""
-        all_reports = list(layer2_memory.get("all_status_reports", []))
-        for i, r in enumerate(all_reports):
+        # 更新历史报告列表中的报告
+        history = list(layer2_memory.get("status_report_history", []))
+        for i, r in enumerate(history):
             if r.get("id") == report.get("id"):
-                all_reports[i] = report
+                history[i] = report
                 break
         else:
-            all_reports.append(report)
+            # 如果不在历史中，添加到历史列表
+            history.insert(0, report)
 
-        history = [r for r in all_reports if not r.get("is_current")]
         history = downgrade_layer2_summaries(history, recent_count=recent_count, max_one_liner=max_one_liner)
-        current = [r for r in all_reports if r.get("is_current")]
-        merged = current + history
 
         return Layer2Memory(
-            all_status_reports=merged,
-            all_action_plans=layer2_memory.get("all_action_plans", []),
-            all_action_guides=layer2_memory.get("all_action_guides", []),
+            current_status_report=layer2_memory.get("current_status_report"),
+            status_report_history=history,
+            current_action_plan=layer2_memory.get("current_action_plan"),
+            action_plan_history=layer2_memory.get("action_plan_history", []),
+            action_guides=layer2_memory.get("action_guides", []),
             dynamic_intels=layer2_memory.get("dynamic_intels", []),
             extraction_config=layer2_memory.get("extraction_config", {}),
             processing_status=None,
@@ -220,23 +223,24 @@ class StorageProcessor:
         max_one_liner: int,
     ) -> Layer2Memory:
         """在 Layer2 中更新行动规划并做摘要降级"""
-        all_plans = list(layer2_memory.get("all_action_plans", []))
-        for i, p in enumerate(all_plans):
+        # 更新历史规划列表中的规划
+        history = list(layer2_memory.get("action_plan_history", []))
+        for i, p in enumerate(history):
             if p.get("id") == plan.get("id"):
-                all_plans[i] = plan
+                history[i] = plan
                 break
         else:
-            all_plans.append(plan)
+            # 如果不在历史中，添加到历史列表
+            history.insert(0, plan)
 
-        history = [p for p in all_plans if not p.get("is_current")]
         history = downgrade_layer2_summaries(history, recent_count=recent_count, max_one_liner=max_one_liner)
-        current = [p for p in all_plans if p.get("is_current")]
-        merged = current + history
 
         return Layer2Memory(
-            all_status_reports=layer2_memory.get("all_status_reports", []),
-            all_action_plans=merged,
-            all_action_guides=layer2_memory.get("all_action_guides", []),
+            current_status_report=layer2_memory.get("current_status_report"),
+            status_report_history=layer2_memory.get("status_report_history", []),
+            current_action_plan=layer2_memory.get("current_action_plan"),
+            action_plan_history=history,
+            action_guides=layer2_memory.get("action_guides", []),
             dynamic_intels=layer2_memory.get("dynamic_intels", []),
             extraction_config=layer2_memory.get("extraction_config", {}),
             processing_status=None,
@@ -277,9 +281,11 @@ class StorageProcessor:
             intels = intels[-max_items:]
 
         return Layer2Memory(
-            all_status_reports=layer2_memory.get("all_status_reports", []),
-            all_action_plans=layer2_memory.get("all_action_plans", []),
-            all_action_guides=layer2_memory.get("all_action_guides", []),
+            current_status_report=layer2_memory.get("current_status_report"),
+            status_report_history=layer2_memory.get("status_report_history", []),
+            current_action_plan=layer2_memory.get("current_action_plan"),
+            action_plan_history=layer2_memory.get("action_plan_history", []),
+            action_guides=layer2_memory.get("action_guides", []),
             dynamic_intels=intels,
             extraction_config=layer2_memory.get("extraction_config", {}),
             processing_status=None,

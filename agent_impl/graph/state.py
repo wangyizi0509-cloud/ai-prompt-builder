@@ -421,10 +421,10 @@ def migrate_to_layered_memory(state: AgentState) -> AgentState:
             key_issues=state["status_report"].get("key_issues", []),
             risk_points=state["status_report"].get("risk_points", []),
         )
-        layer2["all_status_reports"] = [report_item]
+        layer2["current_status_report"] = report_item
     
     if state.get("action_guides"):
-        layer2["all_action_guides"] = state["action_guides"]
+        layer2["action_guides"] = state["action_guides"]
     
     # 迁移 Layer 3
     layer3 = create_empty_layer3_memory()

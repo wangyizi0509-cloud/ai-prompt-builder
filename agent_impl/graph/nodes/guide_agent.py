@@ -329,7 +329,7 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
     # === 处理 guide_status_updates（状态机）===
     status_updates = parsed.get("guide_status_updates", []) or []
     layer2_memory = state.get("layer2_memory") or create_empty_layer2_memory()
-    all_guides = list(layer2_memory.get("all_action_guides", []))
+    all_guides = list(layer2_memory.get("action_guides", []))
     did_update_status = False
 
     if isinstance(status_updates, list) and status_updates:
@@ -374,7 +374,7 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
 
         if did_update_status:
             updated_layer2 = dict(layer2_memory)
-            updated_layer2["all_action_guides"] = all_guides
+            updated_layer2["action_guides"] = all_guides
             updated_layer2["last_updated"] = datetime.now().isoformat()
             updated_layer2["version"] = layer2_memory.get("version", 1) + 1
             layer2_memory = updated_layer2
@@ -394,7 +394,7 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
     }
     if did_update_status:
         result["layer2_memory"] = layer2_memory
-        result["action_guides"] = layer2_memory.get("all_action_guides", [])
+        result["action_guides"] = layer2_memory.get("action_guides", [])
     
     # 检查是否需要提问
     need_questions = bool(parsed.get("need_questions", False))
@@ -506,16 +506,16 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
             one_liner=one_liner,
         )
         
-        # 写入 Layer2 真源（all_action_guides）——优先基于前面可能已更新过状态的 layer2_memory
-        all_guides = list(layer2_memory.get("all_action_guides", []))
+        # 写入 Layer2 真源（action_guides）——优先基于前面可能已更新过状态的 layer2_memory
+        all_guides = list(layer2_memory.get("action_guides", []))
         updated_layer2 = dict(layer2_memory)
-        updated_layer2["all_action_guides"] = all_guides + [new_guide_item]
+        updated_layer2["action_guides"] = all_guides + [new_guide_item]
         updated_layer2["last_updated"] = datetime.now().isoformat()
         updated_layer2["version"] = layer2_memory.get("version", 1) + 1
         result["layer2_memory"] = updated_layer2
 
         # 向后兼容：同时更新旧字段 action_guides
-        result["action_guides"] = updated_layer2["all_action_guides"]
+        result["action_guides"] = updated_layer2["action_guides"]
         
         # 兼容旧版：保留单个字段
         result["action_guide"] = guide_content

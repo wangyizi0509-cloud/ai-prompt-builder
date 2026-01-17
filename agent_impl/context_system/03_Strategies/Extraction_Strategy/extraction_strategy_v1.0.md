@@ -6,9 +6,11 @@
 
 ---
 
-## 2. Token 预算分配 (总预算基准: 70k)
+## 2. Token 预算分配
 
-> 与 `context_strategy_v3.1.md` 保持一致，适用于 Claude 3.5 / GPT-4o 等主流模型。
+> 总预算基准：~70,000 tokens（适用于 Claude 3.5 / GPT-4o 等主流模型）
+> 
+> 与 `context_assembly_spec.md` 保持一致。
 
 | 模块 | 预估 Tokens | 说明 |
 | :--- | :--- | :--- |
@@ -18,6 +20,7 @@
 | **Layer 3 (Chat)** | ~15k | 最近 25 轮对话 + 历史摘要 |
 | **预留输出** | ~8k | 模型生成空间 |
 | **弹性空间** | ~8k | 工具结果、OCR内容、临时推理 |
+| **总计** | ~70k | 总预算基准 |
 
 ---
 
@@ -95,3 +98,4 @@
 对于超出 Context Window 的长期记忆（如半年前的聊天细节）：
 *   不直接加载到 Context。
 *   通过 `Tool Call` (如 `search_memory(query)`) 按需调取，调取结果作为 `Tool Message` 插入当前对话流。
+

@@ -140,12 +140,10 @@ def test_layer2_extraction():
     # 构造 Mock 数据
     current_report = create_status_report_item(
         report_content="当前报告内容...",
-        is_current=True,
         report_id=2
     )
     history_report = create_status_report_item(
         report_content="历史报告内容...",
-        is_current=False,
         report_id=1
     )
     history_report["summary"] = "这是历史报告的摘要"
@@ -157,9 +155,11 @@ def test_layer2_extraction():
     )
     
     layer2 = Layer2Memory(
-        all_status_reports=[current_report, history_report],
-        all_action_plans=[],
-        all_action_guides=[active_guide],
+        current_status_report=current_report,
+        status_report_history=[history_report],
+        current_action_plan=None,
+        action_plan_history=[],
+        action_guides=[active_guide],
         extraction_config=Layer2ExtractionConfig(recent_summary_count=2, max_one_liner_count=10, include_active_guides=True),
         last_updated=datetime.now().isoformat()
     )

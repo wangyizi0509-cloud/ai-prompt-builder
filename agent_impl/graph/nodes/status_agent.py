@@ -444,17 +444,16 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
             "status_report": new_report_id
         }
 
-        # === 写入 Layer 2 真源（all_status_reports）===
+        # === 写入 Layer 2 真源（current_status_report + status_report_history）===
         layer2_memory = state.get("layer2_memory") or create_empty_layer2_memory()
-        all_reports = list(layer2_memory.get("all_status_reports", []))
-
-        # 将旧 current 标记为历史版本（summary/one_liner 由异步归档补齐）
-        updated_reports = []
-        for r in all_reports:
-            rr = dict(r) if isinstance(r, dict) else r
-            if isinstance(rr, dict) and rr.get("is_current"):
-                rr["is_current"] = False
-            updated_reports.append(rr)
+        
+        # 获取当前报告和历史报告
+        old_current = layer2_memory.get("current_status_report")
+        history = list(layer2_memory.get("status_report_history", []))
+        
+        # 将旧 current 移入历史（summary/one_liner 由异步归档补齐）
+        if old_current:
+            history.insert(0, old_current)
 
         new_report_item = create_status_report_item(
             report_content=report_content,
@@ -464,11 +463,11 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
             acr_analysis=parsed.get("acr_analysis", {}) or {},
             key_issues=parsed.get("key_issues", []) or [],
             risk_points=parsed.get("risk_points", []) or [],
-            is_current=True,
         )
 
         updated_layer2 = dict(layer2_memory)
-        updated_layer2["all_status_reports"] = [new_report_item] + updated_reports
+        updated_layer2["current_status_report"] = new_report_item
+        updated_layer2["status_report_history"] = history
         updated_layer2["last_updated"] = datetime.now().isoformat()
         updated_layer2["version"] = layer2_memory.get("version", 1) + 1
         result["layer2_memory"] = updated_layer2

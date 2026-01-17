@@ -94,10 +94,10 @@ class TestOutputFormatIntegration:
         新版：只有 in_progress 指南完整展开，其他状态输出元数据表格并提示可用工具加载详情。
         """
         state = create_initial_state("测试渐进式披露")
-        # 使用 v3.1 真源：layer2_memory.all_action_guides
+        # 使用 v3.1 真源：layer2_memory.action_guides
         from graph.context_types import create_empty_layer2_memory
         layer2 = create_empty_layer2_memory()
-        layer2["all_action_guides"] = [
+        layer2["action_guides"] = [
             {
                 "id": "g_inp",
                 "guide_id": 3,

@@ -1465,8 +1465,7 @@
                                     },
                                     organized_outputs: {
                                         layer3_conversation_summaries: (layer3_memory.conversation_summaries || []).slice(-5),
-                                        layer2_status_reports_history: (layer2_memory.all_status_reports || [])
-                                            .filter(r => r && !r.is_current)
+                                        layer2_status_reports_history: (layer2_memory.status_report_history || [])
                                             .slice(-5)
                                             .map(r => ({
                                                 id: r.id,
@@ -1475,8 +1474,7 @@
                                                 summary: r.summary || '',
                                                 one_liner: r.one_liner || '',
                                             })),
-                                        layer2_action_plans_history: (layer2_memory.all_action_plans || [])
-                                            .filter(p => p && !p.is_current)
+                                        layer2_action_plans_history: (layer2_memory.action_plan_history || [])
                                             .slice(-5)
                                             .map(p => ({
                                                 id: p.id,
@@ -1484,7 +1482,7 @@
                                                 summary: p.summary || '',
                                                 one_liner: p.one_liner || '',
                                             })),
-                                        layer2_terminal_guides: (layer2_memory.all_action_guides || state.action_guides || [])
+                                        layer2_terminal_guides: (layer2_memory.action_guides || state.action_guides || [])
                                             .filter(g => g && ['completed', 'cancelled', 'expired'].includes(g.status))
                                             .slice(-5)
                                             .map(g => ({
@@ -1506,9 +1504,9 @@
                                         layer2: {
                                             version: layer2_memory.version,
                                             last_updated: layer2_memory.last_updated,
-                                            status_reports_total: (layer2_memory.all_status_reports || []).length,
-                                            action_plans_total: (layer2_memory.all_action_plans || []).length,
-                                            action_guides_total: (layer2_memory.all_action_guides || []).length,
+                                            status_reports_total: (layer2_memory.current_status_report ? 1 : 0) + (layer2_memory.status_report_history || []).length,
+                                            action_plans_total: (layer2_memory.current_action_plan ? 1 : 0) + (layer2_memory.action_plan_history || []).length,
+                                            action_guides_total: (layer2_memory.action_guides || []).length,
                                             dynamic_intels_total: (layer2_memory.dynamic_intels || []).length,
                                         },
                                         layer3: {
@@ -1610,14 +1608,25 @@
                             
                             if (type === 'status_report') {
                                 const layer2 = state.layer2_memory || {};
-                                const reports = layer2.all_status_reports || [];
-                                const report = reports.find(r => String(r?.id) === String(id));
+                                // 先查当前报告
+                                const currentReport = layer2.current_status_report;
+                                // 再查历史报告
+                                const historyReports = layer2.status_report_history || [];
+                                let report = null;
+                                let isCurrent = false;
+                                if (currentReport && String(currentReport.id) === String(id)) {
+                                    report = currentReport;
+                                    isCurrent = true;
+                                } else {
+                                    report = historyReports.find(r => String(r?.id) === String(id));
+                                    isCurrent = false;
+                                }
                                 if (report) {
                                     content = report.report_content || (report.report || {}).report_content || JSON.stringify(report, null, 2);
                                     metadata = {
                                         id: report.id,
                                         stage: report.stage || (report.report || {}).stage,
-                                        is_current: report.is_current,
+                                        is_current: isCurrent,
                                         created_at: report.created_at,
                                         summary: report.summary,
                                         one_liner: report.one_liner,
@@ -1627,7 +1636,7 @@
                                 }
                             } else if (type === 'action_guide') {
                                 const layer2 = state.layer2_memory || {};
-                                const guides = layer2.all_action_guides || state.action_guides || [];
+                                const guides = layer2.action_guides || state.action_guides || [];
                                 const guide = guides.find(g => String(g?.id) === String(id));
                                 if (guide) {
                                     const guideContent = guide.guide || {};

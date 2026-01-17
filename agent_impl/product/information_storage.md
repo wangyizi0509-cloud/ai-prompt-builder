@@ -37,7 +37,6 @@
 | 字段 (Field) | 类型 | 说明 |
 | :--- | :--- | :--- |
 | `id` | UUID | 唯一标识 |
-| `is_current` | Bool | **是否当前生效** |
 | `stage` | String | L/T 阶段 |
 | `stage_description` | String | 阶段描述 |
 | `report_content` / `plan_content` | Markdown | 完整分析报告/规划 |
@@ -48,8 +47,10 @@
 | `one_liner` | String | 一句话摘要 |
 | `summary` | String | 中等摘要 |
 
+> **存储结构**：使用 `current_status_report` / `current_action_plan` 存储当前生效版本，`status_report_history` / `action_plan_history` 存储历史版本。
+
 *   **更新策略 (Update Policy)**：
-    1.  **换代 (Archive Mode)**：当战略阶段发生根本改变（如 L2 -> L3），原记录 `is_current` 置为 `False`，**新增**一条记录 `is_current` 置为 `True`。
+    1.  **换代 (Archive Mode)**：当战略阶段发生根本改变（如 L2 -> L3），原记录移入 `xxx_history` 列表，**新增**记录写入 `current_xxx`。
     2.  **微调 (Patch Mode)**：当仅修正细节（如补充一个风险点），**原地更新**当前记录的内容字段，ID 不变。
 
 #### 2.2 行动指南 (Action Guide)
