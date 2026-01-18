@@ -276,7 +276,9 @@ class StorageProcessor:
             intels.append(intel)
 
         # 过滤过期并裁剪长度
-        intels = filter_expired_intels(intels)
+        # filter_expired_intels 返回 (valid, expired)，这里只需要 valid
+        valid_intels, _expired = filter_expired_intels(intels)
+        intels = valid_intels
         if len(intels) > max_items:
             intels = intels[-max_items:]
 
