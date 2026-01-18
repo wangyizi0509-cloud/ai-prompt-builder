@@ -17,6 +17,10 @@ class LoginRequest(BaseModel):
     password: str
 
 
+from utils.logger import get_logger
+
+logger = get_logger("auth")
+
 @router.post("/register")
 async def register(request: RegisterRequest):
     """
@@ -86,15 +90,18 @@ async def get_user_thread_info(current_user = Depends(get_current_user)):
     """
     获取当前登录用户的 Thread 信息
     """
+    logger.debug(f"get_user_thread_info request for user: {current_user['user_id']}")
     from supabase_service.client import get_thread_by_user
     user_thread = await get_thread_by_user(current_user['user_id'])
     
     if not user_thread:
+        logger.info(f"No thread bound for user: {current_user['user_id']}")
         return {
             'success': True,
             'thread_id': None
         }
     
+    logger.info(f"Found thread {user_thread['thread_id']} for user: {current_user['user_id']}")
     return {
         'success': True,
         'thread_id': user_thread['thread_id']

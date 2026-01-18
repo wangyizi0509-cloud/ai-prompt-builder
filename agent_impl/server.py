@@ -11,6 +11,10 @@ from langgraph_sdk import get_sync_client
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
+from utils.logger import get_logger
+
+logger = get_logger("server")
+
 app = FastAPI(title="Crushe AI Agent")
 
 app.add_middleware(
@@ -45,8 +49,8 @@ frontend_path = os.path.join(current_dir, "frontend")
 if os.path.exists(frontend_path):
     app.mount("/", StaticFiles(directory=frontend_path, html=True), name="static")
 else:
-    print(f"Warning: Frontend path not found: {frontend_path}")
+    logger.warning(f"Frontend path not found: {frontend_path}")
 
 if __name__ == "__main__":
-    print("Starting server on http://0.0.0.0:8000")
+    logger.info("Starting server on http://0.0.0.0:8000")
     uvicorn.run(app, host="0.0.0.0", port=8000)

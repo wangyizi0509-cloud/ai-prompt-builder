@@ -1488,43 +1488,56 @@
 
                 const loadUserHistory = async () => {
                     const token = getToken();
-                    if (!token) return;
+                    if (!token) {
+                        console.log('[History] No token, skipping history load');
+                        return;
+                    }
 
                     try {
+                        console.log('[History] Loading user thread info...');
                         // 1. 获取用户的 Thread ID
                         const threadRes = await fetch('/api/auth/me/thread', {
                             headers: { 'Authorization': `Bearer ${token}` }
                         });
                         const threadData = await threadRes.json();
+                        console.log('[History] Thread info response:', threadData);
                         
                         if (threadData.success && threadData.thread_id) {
                             const threadId = threadData.thread_id;
-                            console.log('Restoring user thread:', threadId);
+                            console.log('[History] Found thread_id:', threadId);
                             
                             // 设置 thread_id 和 session_id
                             studioThreadId.value = threadId;
                             sessionId.value = threadId;
                             
                             // 2. 获取聊天历史
+                            console.log('[History] Fetching history for thread:', threadId);
                             const historyRes = await fetch(`/api/chat/history/${threadId}`, {
                                 headers: { 'Authorization': `Bearer ${token}` }
                             });
                             const historyData = await historyRes.json();
+                            console.log('[History] Chat history response:', historyData);
                             
                             if (historyData.success) {
-                                // 3. 填充消息列表（后端已过滤好）
+                                // 3. 填充消息列表
                                 messages.value = historyData.messages || [];
+                                console.log('[History] Loaded messages count:', messages.value.length);
                                 
                                 // 4. 填充状态看板
                                 if (historyData.state) {
+                                    console.log('[History] Restoring dashboard state');
                                     processStateUpdate(historyData.state);
                                 }
                                 
                                 await scrollToBottom();
+                            } else {
+                                console.error('[History] Failed to get history data:', historyData.error);
                             }
+                        } else {
+                            console.log('[History] No existing thread_id found for this user');
                         }
                     } catch (e) {
-                        console.error('Failed to load user history:', e);
+                        console.error('[History] Error during history restoration:', e);
                     }
                 };
 

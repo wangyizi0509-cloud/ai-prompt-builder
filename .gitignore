@@ -21,6 +21,10 @@ checkpoints.db
 checkpoints.db-shm
 checkpoints.db-wal
 
+# 忽略日志文件
+agent_impl/logs/
+*.log
+
 # 保留重要文件
 !index.html
 !prompt_builder.html

@@ -1,6 +1,6 @@
 ---
 name: service-manager
-description: "Manage local LangGraph and FastAPI services. Use when user wants to start, restart, or stop the agent services running on ports 2024 (LangGraph) and 8000 (FastAPI). Supports starting both services together or managing them individually."
+description: "Manage local LangGraph (Dev/Docker) and FastAPI services. Supports 'dev' (lightweight) and 'up' (Docker Stack) modes. Manages ports 2024/8123 and 8000."
 ---
 
 # Service Manager
@@ -9,102 +9,74 @@ Manage the LangGraph and FastAPI services for the Crushe AI Agent project.
 
 ## Overview
 
-This skill provides tools to start, restart, and stop the local development services:
-- **LangGraph service**: Runs on port 2024
-- **FastAPI service**: Runs on port 8000
+This skill provides tools to start, restart, and stop local services in two modes:
+- **Dev Mode (Local)**: Lightweight, runs on port 2024.
+- **Up Mode (Docker)**: Production-like, runs on port 8123 with full Postgres/Redis stack.
 
 ## Quick Start
 
-To start all services:
-```
-scripts/start_services.py
-```
-
-To restart all services:
-```
-scripts/restart_services.py
+### Start in Dev Mode (Recommended for rapid iteration)
+```bash
+python3 scripts/start_services.py --mode dev
 ```
 
-To stop all services:
+### Start in Up Mode (Recommended for production-readiness validation)
+```bash
+python3 scripts/start_services.py --mode up
 ```
-scripts/stop_services.py
+
+### Stop All Services
+```bash
+python3 scripts/stop_services.py
+```
+
+### Restart Services
+```bash
+python3 scripts/restart_services.py
 ```
 
 ## Service Management
 
 ### Start Services
 
-Start both LangGraph and FastAPI services in the background.
-
 **Usage:**
 ```bash
-scripts/start_services.py
+python3 scripts/start_services.py [--mode {dev,up}]
 ```
 
 **What it does:**
-1. Checks for existing services on ports 2024 and 8000
-2. Stops any existing services to avoid conflicts
-3. Starts LangGraph service using `agent_impl/start.sh`
+1. Checks for existing services on relevant ports (2024/8123 and 8000)
+2. Stops existing services to avoid conflicts
+3. Starts LangGraph service (via `start_dev.sh` or `start_up.sh`)
 4. Starts FastAPI service
 5. Reports service status and access URLs
 
-**Output:**
-- LangGraph PID
-- FastAPI PID
-- Access URLs:
-  - FastAPI: http://localhost:8000
-  - LangGraph: http://127.0.0.1:2024
-  - LangSmith Studio: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
-
-### Restart Services
-
-Restart all running services.
-
-**Usage:**
-```bash
-scripts/restart_services.py
-```
-
-**What it does:**
-1. Stops all existing services
-2. Waits for processes to terminate
-3. Starts services again
+**URLs:**
+- **FastAPI**: http://localhost:8000
+- **LangGraph Dev**: http://127.0.0.1:2024
+- **LangGraph Up**: http://127.0.0.1:8123
 
 ### Stop Services
 
-Stop all running services.
-
 **Usage:**
 ```bash
-scripts/stop_services.py
+python3 scripts/stop_services.py
 ```
 
 **What it does:**
-1. Finds processes using ports 2024 and 8000
-2. Kills them gracefully
+1. Runs `langgraph down` to stop Docker containers (if any)
+2. Kills processes on ports 2024, 8123, and 8000
 
 ## Troubleshooting
 
-### Port Already in Use
+### Docker Issues (Up Mode only)
+1. Ensure Docker Desktop is running
+2. Run `docker ps` to verify connection
 
-If you see "Address already in use" errors:
-1. Run `scripts/stop_services.py` to clear ports
-2. Verify no processes are using the ports: `lsof -i :2024 -i :8000`
-3. Try starting again
-
-### Services Not Responding
-
-If services start but don't respond:
-1. Check process status: `ps aux | grep -E "langgraph|uvicorn"`
-2. Check logs in the terminal where services are running
-3. Verify environment variables in `.env` file
-
-### Service Startup Failures
-
-If services fail to start:
-1. Check Python dependencies: `pip install -r agent_impl/requirements.txt`
-2. Verify LangGraph CLI is installed: `which langgraph`
-3. Check `.env` file has required variables
+### Port Conflicts
+If you see "Address already in use":
+1. Run `python3 scripts/stop_services.py`
+2. Manually check: `lsof -i :2024 -i :8123 -i :8000`
 
 ## Resources
 

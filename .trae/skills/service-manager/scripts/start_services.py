@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import os
+import argparse
 
 
 def get_processes_on_port(port):
@@ -44,7 +45,16 @@ def stop_service(port, service_name):
 
 
 def main():
-    print("🚀 Starting Services")
+    parser = argparse.ArgumentParser(description="Start Crushe AI Agent services")
+    parser.add_argument(
+        "--mode", 
+        choices=["dev", "up"], 
+        default="dev", 
+        help="Startup mode: 'dev' (lightweight) or 'up' (Docker Stack)"
+    )
+    args = parser.parse_args()
+
+    print(f"🚀 Starting Services (Mode: {args.mode.upper()})")
     print("=" * 50)
     
     # Get to project root directory
@@ -55,10 +65,14 @@ def main():
     trae_dir = os.path.dirname(skills_dir)
     project_root = os.path.dirname(trae_dir)
     
+    # Determine port and script based on mode
+    lg_port = 2024 if args.mode == "dev" else 8123
+    start_script_name = "start_dev.sh" if args.mode == "dev" else "start_up.sh"
+    
     # Check and stop existing services
     print("\n🔍 Checking for existing services...")
     has_existing = False
-    has_existing = has_existing or stop_service(2024, "LangGraph")
+    has_existing = has_existing or stop_service(lg_port, f"LangGraph ({args.mode})")
     has_existing = has_existing or stop_service(8000, "FastAPI")
     
     if has_existing:
@@ -67,14 +81,15 @@ def main():
         print("✅ No existing services found\n")
     
     # Start services
-    start_script = os.path.join(project_root, 'agent_impl', 'start.sh')
+    start_script = os.path.join(project_root, 'agent_impl', start_script_name)
     
     if not os.path.exists(start_script):
         print(f"❌ Error: Start script not found at {start_script}")
         return 1
     
-    print("🚀 Starting services using agent_impl/start.sh...")
+    print(f"🚀 Starting services using agent_impl/{start_script_name}...")
     try:
+        # 使用 Popen 运行以保持在后台
         process = subprocess.Popen(
             ['bash', start_script],
             cwd=project_root,
@@ -84,12 +99,17 @@ def main():
             bufsize=1
         )
         
-        print("✅ Services started successfully!")
+        print(f"✅ Services start command issued successfully! (Mode: {args.mode})")
         print("\n📊 Service Information:")
         print("   - FastAPI: http://localhost:8000")
-        print("   - LangGraph: http://127.0.0.1:2024")
-        print("   - LangSmith Studio: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024")
-        print("\n💡 Services are running in the background.")
+        print(f"   - LangGraph: http://127.0.0.1:{lg_port} ({'Local' if args.mode == 'dev' else 'Docker'})")
+        print(f"   - LangSmith Studio: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:{lg_port}")
+        
+        if args.mode == "up":
+            print("\n💡 Services are running in the background via Docker Stack.")
+        else:
+            print("\n💡 Services are running in the background (Local Dev).")
+            
         print("   Use 'scripts/stop_services.py' to stop them.")
         print("   Use 'scripts/restart_services.py' to restart them.")
         
