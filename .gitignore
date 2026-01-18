@@ -20,6 +20,8 @@ Thumbs.db
 checkpoints.db
 checkpoints.db-shm
 checkpoints.db-wal
+.langgraph_api/
+*.pckl
 
 # 忽略日志文件
 agent_impl/logs/
