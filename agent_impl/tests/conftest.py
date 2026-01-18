@@ -14,7 +14,6 @@ sys.path.insert(0, str(AGENT_IMPL_DIR))
 
 from graph.workflow import get_workflow
 from graph.state import create_initial_state, AgentState, convert_message_to_dict
-from graph.state_storage import save_state, load_state, delete_state, DATA_DIR
 from graph.crush_chat_storage import CrushChatManager, create_crush_chat_manager
 
 
@@ -84,25 +83,6 @@ def initial_state():
 def test_user_id():
     """测试用户 ID"""
     return TEST_USER_ID
-
-
-@pytest.fixture
-def clean_test_user(test_user_id):
-    """
-    清理测试用户数据（测试前后）
-    
-    使用方式：
-        def test_xxx(clean_test_user):
-            user_id = clean_test_user
-            # ... 测试代码
-    """
-    # 测试前清理
-    delete_state(test_user_id)
-    
-    yield test_user_id
-    
-    # 测试后清理
-    delete_state(test_user_id)
 
 
 @pytest.fixture

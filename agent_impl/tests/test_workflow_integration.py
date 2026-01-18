@@ -105,35 +105,6 @@ class TestWorkflowIntegration:
                 # 已经完成，清除恢复状态
                 assert result.get("current_agent") is None or result.get("current_agent") == "", "应该清除恢复状态"
     
-    def test_workflow_state_persistence(self, workflow):
-        """测试状态持久化"""
-        from graph.state_storage import save_state, load_state, delete_state
-        
-        test_user_id = "test_workflow_persistence"
-        
-        try:
-            # 清理旧数据
-            delete_state(test_user_id)
-            
-            # 创建并执行工作流
-            state = create_initial_state("测试消息")
-            result = workflow.invoke(state)
-            
-            # 保存状态
-            save_state(test_user_id, result)
-            
-            # 加载状态
-            loaded_state = load_state(test_user_id)
-            assert loaded_state is not None, "应该能加载状态"
-            
-            # 验证关键字段
-            assert loaded_state.get("user_message") == result.get("user_message"), "user_message 应该一致"
-            assert len(loaded_state.get("messages", [])) == len(result.get("messages", [])), "messages 数量应该一致"
-            
-        finally:
-            # 清理测试数据
-            delete_state(test_user_id)
-    
     def test_workflow_error_handling(self, workflow):
         """测试错误处理"""
         # 测试空消息
