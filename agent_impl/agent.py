@@ -3,6 +3,12 @@ LangGraph Agent 入口文件
 用于 LangGraph CLI 和 LangSmith Studio 部署
 """
 
+import sys
+from pathlib import Path
+
+# 将当前目录添加到 Python 路径，使 from graph.xxx import 能够工作
+sys.path.insert(0, str(Path(__file__).parent))
+
 from graph.workflow import create_workflow
 
 # 重要提示：
