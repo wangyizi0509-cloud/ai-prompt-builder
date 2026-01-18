@@ -9,8 +9,8 @@ LANGGRAPH_PID=$!
 echo "⏳ 等待服务启动..."
 sleep 5
 
-echo "🚀 启动 FastAPI 服务 (使用 SDK 调用 LangGraph)..."
-python server.py &
+echo "🚀 启动 FastAPI 服务 (SDK 版本)..."
+python server_sdk.py &
 FASTAPI_PID=$!
 
 echo "✅ 服务已启动"
