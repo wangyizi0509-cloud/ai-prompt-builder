@@ -23,6 +23,9 @@ import os
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.sqlite import SqliteSaver
+from psycopg_pool import ConnectionPool
 
 from graph.state import AgentState
 from graph.state import convert_message_to_dict
@@ -503,10 +506,66 @@ def create_workflow() -> StateGraph:
     return workflow
 
 
+# 全局数据库连接池（仅在 PostgresSaver 模式下使用）
+_db_pool = None
+# 全局 SQLite 连接（仅在 SqliteSaver 模式下使用）
+_sqlite_conn = None
+
 def build_checkpointer_from_env():
     """
-    返回内存 checkpointer（LangGraph Studio dev 模式使用 in-memory）
+    根据环境变量构建 checkpointer
+    优先级：
+    1. SQLITE_DB_PATH: 使用 SqliteSaver (用于本地持久化验证)
+    2. DATABASE_URL: 使用 PostgresSaver (用于生产/Supabase 持久化)
+    3. 默认: 使用 MemorySaver (内存存储，重启丢失)
     """
+    global _db_pool, _sqlite_conn
+    
+    # 1. 优先尝试 SQLite (如果指定了路径)
+    sqlite_path = os.getenv("SQLITE_DB_PATH")
+    if sqlite_path:
+        print(f"[INFO] Using SqliteSaver with {sqlite_path}")
+        try:
+            import sqlite3
+            # 确保目录存在
+            db_dir = os.path.dirname(os.path.abspath(sqlite_path))
+            if db_dir and not os.path.exists(db_dir):
+                os.makedirs(db_dir)
+            
+            # SqliteSaver 需要一个同步连接
+            # checkpointer.from_conn_string(sqlite_path) 是异步的，
+            # 这里我们使用同步构造函数 SqliteSaver(conn)
+            if _sqlite_conn is None:
+                _sqlite_conn = sqlite3.connect(sqlite_path, check_same_thread=False)
+            
+            checkpointer = SqliteSaver(_sqlite_conn)
+            return checkpointer
+        except Exception as e:
+            print(f"[ERROR] Failed to initialize SqliteSaver: {e}")
+            # 继续尝试 Postgres
+            
+    # 2. 尝试 PostgreSQL
+    db_url = os.getenv("DATABASE_URL")
+    if db_url and "postgres" in db_url and "[YOUR-PASSWORD]" not in db_url:
+        print(f"[INFO] Using PostgresSaver with {db_url.split('@')[-1]}")
+        try:
+            # 初始化连接池
+            if _db_pool is None:
+                _db_pool = ConnectionPool(conninfo=db_url, max_size=20, min_size=5)
+            
+            # 创建 PostgresSaver
+            checkpointer = PostgresSaver(_db_pool)
+            
+            # 确保表已创建（仅在第一次连接时执行）
+            # PostgresSaver.setup() 是同步的，可以直接调用
+            checkpointer.setup()
+            
+            return checkpointer
+        except Exception as e:
+            print(f"[ERROR] Failed to initialize PostgresSaver: {e}")
+            print("[INFO] Falling back to MemorySaver")
+            return MemorySaver()
+            
     return MemorySaver()
 
 
