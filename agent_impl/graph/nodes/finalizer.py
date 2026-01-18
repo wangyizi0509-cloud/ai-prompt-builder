@@ -115,7 +115,12 @@ def _consume_maintenance_queue_inline(state: dict, queue: list[dict]) -> dict:
                 task_updates["maintenance_flags"] = flags
 
             elif task_type == "layer3_compress":
+                # [DEBUG] 检查压缩输入状态
+                l3_mem = working_state.get("layer3_memory") or {}
+                all_msgs = l3_mem.get("all_messages", [])
+                print(f"[Finalizer] layer3_compress: working_state has layer3_memory={bool(l3_mem)}, all_messages={len(all_msgs)}")
                 task_updates = compress_layer3(working_state)
+                print(f"[Finalizer] layer3_compress returned: {list(task_updates.keys()) if task_updates else 'empty'}")
 
             elif task_type == "task_reasoning_compress":
                 task_updates = compress_task_reasoning(working_state)
@@ -350,13 +355,40 @@ def post_turn_finalize_node(state: dict) -> dict:
         updates["maintenance_queue"] = queue
 
     # 2.7 Studio 同步消费维护队列（可触发 LLM 归档）
-    # [FIX] 自动检测 LangGraph Studio 环境并启用同步消费
-    is_studio = os.environ.get("LANGGRAPH_API_URL") or os.environ.get("STUDIO_SYNC_MAINTENANCE") == "1"
+    # [FIX] 检测 LangGraph Studio 环境：检查多个特征
+    is_studio = False
+    try:
+        import sys
+        # Studio dev 模式会加载这些模块
+        is_studio = (
+            "langgraph_runtime_inmem" in sys.modules or 
+            "langgraph_api" in sys.modules or
+            os.environ.get("STUDIO_SYNC_MAINTENANCE") == "1"
+        )
+    except:
+        pass
+    
+    # [DEBUG] 记录 Studio 模式检测结果到 debug_log
+    if "debug_log" not in updates:
+        updates["debug_log"] = []
+    updates["debug_log"].append({
+        "node": "post_turn_finalize",
+        "step": "Studio mode check",
+        "is_studio": is_studio,
+        "queue_len": len(queue),
+    })
+    
     if is_studio and queue:
         print(f"[Finalizer] Studio mode detected, consuming {len(queue)} maintenance tasks inline")
         inline_updates = _consume_maintenance_queue_inline(working_state, queue)
         if inline_updates:
             updates.update(inline_updates)
+            # 记录消费结果
+            updates["debug_log"].append({
+                "node": "post_turn_finalize", 
+                "step": "Inline consume done",
+                "queue_after": len(inline_updates.get("maintenance_queue", [])),
+            })
 
     # 最后更新时间
     updates["maintenance_last_finalized_at"] = _now()
@@ -368,13 +400,16 @@ def post_turn_finalize_node(state: dict) -> dict:
         for t in queue[-min(enqueued, 5):]:
             if isinstance(t, dict):
                 preview.append({"type": t.get("type"), "task_key": t.get("task_key")})
-        updates["debug_log"] = [{
+        # [FIX] 使用 append 而不是赋值，避免覆盖之前的日志
+        if "debug_log" not in updates:
+            updates["debug_log"] = []
+        updates["debug_log"].append({
             "node": "post_turn_finalize",
             "step": "Enqueue maintenance tasks",
             "enqueued": enqueued,
             "queue_size": len(queue),
             "preview": preview,
-        }]
+        })
 
     return updates
 

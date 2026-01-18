@@ -8,7 +8,17 @@
 3. Layer 1 更新：从归档内容中提取高价值信息
 4. 任务推理归档：任务思考过程 (Rolling Scratchpad) 的滚动摘要
 
-基于 context_strategy.md v3.0 策略文档
+策略文档参考：
+- 综合压缩策略：context_system/03_Strategies/Compression_Strategy/compression_strategy_v1.0.md
+- Organize Agent Prompt：context_system/03_Strategies/Compression_Strategy/organize_agent_prompts.md
+- 提纯策略：context_system/03_Strategies/Refining_Strategy/refining_strategy_v1.0.md
+- 存储策略：context_system/03_Strategies/Storage_Strategy/storage_strategy_v1.0.md
+
+规范文档参考：
+- Layer 1 规范：context_system/02_Specs/layer1_spec_v1.0.md
+- Layer 2 规范：context_system/02_Specs/layer2_spec_v1.0.md
+- Layer 3 规范：context_system/02_Specs/layer3_spec_v1.0.md
+- 组装规范：context_system/02_Specs/context_assembly_spec.md
 """
 
 from typing import TYPE_CHECKING, Optional
@@ -242,10 +252,13 @@ def compress_layer3(state: "AgentState") -> dict:
     
     try:
         # 2. 调用整理 Agent 处理对话归档（这里会调用 LLM）
+        print(f"[Archive] Calling archive_conversation_batch with {len(to_compress)} messages")
         result = archive_conversation_batch(to_compress, existing_context)
+        print(f"[Archive] archive_conversation_batch returned keys: {list(result.keys()) if isinstance(result, dict) else type(result)}")
         
         # 3. 创建对话摘要
         conv_archive = result.get("conversation_archive", {})
+        print(f"[Archive] conversation_archive type: {type(conv_archive)}")
         if isinstance(conv_archive, list):
             conv_archive = conv_archive[0] if conv_archive else {}
         if not isinstance(conv_archive, dict):
@@ -253,11 +266,13 @@ def compress_layer3(state: "AgentState") -> dict:
             conv_archive = {}
         turn_count = conv_archive.get("turn_count", len(to_compress))
         key_topics = conv_archive.get("key_topics", [])
+        print(f"[Archive] Creating summary with turn_count={turn_count}, key_topics type={type(key_topics)}")
         new_summary = create_conversation_summary(
             summary=conv_archive.get("summary", ""),
             topics=", ".join(key_topics) if isinstance(key_topics, list) else str(key_topics),
             turn_range=f"1-{turn_count}",
         )
+        print(f"[Archive] Summary created successfully")
         
         # 4. 通过存储策略路由到 Layer 3 并写入摘要
         decision = _storage_router.route({"type": "conversation_summary", "payload": conv_archive})
@@ -270,17 +285,28 @@ def compress_layer3(state: "AgentState") -> dict:
             max_summaries=max_summaries,
             total_turns_delta=len(to_compress),
         )
+        print(f"[Archive] Layer3 updated with new summary")
         
         # 更新 Layer 1 长期记忆（如有提取的信息）
         updated_context = result.get("updated_context", existing_context)
+        print(f"[Archive] updated_context type: {type(updated_context)}")
         updated_layer1 = StorageProcessor.save_layer1(
             updated_context,
             layer1_memory,
         )
+        print(f"[Archive] Layer1 saved")
 
         # 5. 写入动态情报
         updated_layer2 = layer2_memory
-        for intel in result.get("dynamic_intels", []):
+        dynamic_intels = result.get("dynamic_intels", [])
+        print(f"[Archive] dynamic_intels type: {type(dynamic_intels)}, count: {len(dynamic_intels) if isinstance(dynamic_intels, list) else 'N/A'}")
+        # [FIX] 确保 dynamic_intels 是列表，并且每个元素是 dict
+        if not isinstance(dynamic_intels, list):
+            dynamic_intels = []
+        for intel in dynamic_intels:
+            if not isinstance(intel, dict):
+                print(f"[Archive] WARNING: Skipping invalid intel type: {type(intel)}")
+                continue
             updated_layer2 = StorageProcessor.upsert_dynamic_intel(
                 updated_layer2,
                 intel,
@@ -297,10 +323,13 @@ def compress_layer3(state: "AgentState") -> dict:
         }
     
     # 使用 RemoveMessage 删除工作区中的旧消息（全量存储已保留）
+    # 仅删除当前 messages 中真实存在的消息，避免 id 不存在导致报错
+    messages_in_state = state.get("messages", []) or []
+    existing_ids = {get_message_id(m) for m in messages_in_state if get_message_id(m)}
     remove_ops = []
     for m in to_compress:
         mid = get_message_id(m)
-        if mid:
+        if mid and mid in existing_ids:
             remove_ops.append(RemoveMessage(id=mid))
     
     messages_update = remove_ops if remove_ops else []

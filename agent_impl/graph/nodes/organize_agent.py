@@ -325,6 +325,14 @@ def _process_conversation(
     response = llm.invoke(prompt)
     parsed = _parse_json_response(response.content)
     
+    # [FIX] 确保 extracted_info 和 key_topics 是正确的类型
+    extracted_info = parsed.get("extracted_info", {})
+    if not isinstance(extracted_info, dict):
+        extracted_info = {}
+    key_topics = parsed.get("key_topics", [])
+    if not isinstance(key_topics, list):
+        key_topics = [str(key_topics)] if key_topics else []
+    
     # 构建 ConversationArchive
     conversation_archive = ConversationArchive(
         id=str(uuid.uuid4())[:8],
@@ -332,13 +340,13 @@ def _process_conversation(
         start_time=datetime.now().isoformat(),  # 实际应该从消息中提取
         end_time=datetime.now().isoformat(),
         turn_count=count_user_turns(messages),  # 以用户消息为基准计算轮次
-        key_topics=parsed.get("key_topics", []),
-        extracted_info=parsed.get("extracted_info", {}),
+        key_topics=key_topics,
+        extracted_info=extracted_info,
     )
     
     return {
         "summary": conversation_archive,
-        "extracted_info": parsed.get("extracted_info", {}),
+        "extracted_info": extracted_info,
         "archive_type": "conversation_archive",
     }
 
@@ -407,6 +415,9 @@ def _normalize_dynamic_intels(
     now = datetime.now()
 
     for item in items or []:
+        # [FIX] 跳过非 dict 类型的元素
+        if not isinstance(item, dict):
+            continue
         content = (item or {}).get("content", "").strip()
         category = (item or {}).get("category", "").strip()
         subject = (item or {}).get("subject", "user").strip() or "user"
@@ -447,7 +458,7 @@ def _calc_expire_at(category: str, valid_from: str) -> str:
 # ============================================================
 
 def _parse_json_response(content: str) -> dict:
-    """解析 LLM 的 JSON 输出"""
+    """解析 LLM 的 JSON 输出，始终返回 dict"""
     try:
         if "```json" in content:
             json_str = content.split("```json")[1].split("```")[0].strip()
@@ -461,7 +472,13 @@ def _parse_json_response(content: str) -> dict:
             else:
                 json_str = content
         
-        return json.loads(json_str)
+        result = json.loads(json_str)
+        # [FIX] 确保返回 dict，如果 LLM 返回了 list 则取第一个元素或返回空 dict
+        if isinstance(result, list):
+            return result[0] if result and isinstance(result[0], dict) else {}
+        if not isinstance(result, dict):
+            return {}
+        return result
     except (json.JSONDecodeError, IndexError):
         return {}
 
@@ -497,7 +514,8 @@ def merge_extracted_info_to_context(
     Returns:
         更新后的 UserContext
     """
-    if not extracted_info:
+    # [FIX] 防御性检查：确保 extracted_info 是 dict
+    if not extracted_info or not isinstance(extracted_info, dict):
         return existing_context
     
     # 深拷贝避免修改原对象
@@ -680,12 +698,25 @@ def archive_conversation_batch(
             "updated_context": UserContext,
         }
     """
+    print(f"[OrganizeAgent] archive_conversation_batch called with {len(messages_to_archive)} messages")
     result = organize_and_archive(messages_to_archive, "conversation", existing_context)
+    print(f"[OrganizeAgent] organize_and_archive returned: {list(result.keys()) if isinstance(result, dict) else type(result)}")
+    
+    extracted_info = result.get("extracted_info", {})
+    print(f"[OrganizeAgent] extracted_info type: {type(extracted_info)}")
+    
+    # [FIX] 确保 extracted_info 是 dict
+    if not isinstance(extracted_info, dict):
+        print(f"[OrganizeAgent] WARNING: extracted_info is not dict, using empty dict")
+        extracted_info = {}
+    
     updated_context = merge_extracted_info_to_context(
         existing_context,
-        result.get("extracted_info", {})
+        extracted_info
     )
+    print(f"[OrganizeAgent] updated_context type: {type(updated_context)}")
     dynamic_intels = extract_dynamic_intel_from_messages(messages_to_archive)
+    print(f"[OrganizeAgent] dynamic_intels type: {type(dynamic_intels)}")
     
     return {
         "conversation_archive": result["summary"],

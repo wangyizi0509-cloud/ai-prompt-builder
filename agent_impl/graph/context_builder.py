@@ -2,12 +2,17 @@
 上下文组装器
 实现分层长期记忆架构，从各层长期记忆中提取信息输入到 Agent
 
-基于最新规范文档：
-- Layer_Specs/layer1_spec_v1.0.md
-- Layer_Specs/layer2_spec_v1.0.md
-- Layer_Specs/layer3_spec_v1.0.md
-- Task_System/task_system_spec.md
-- Context_Assembly/context_assembly_spec.md
+策略文档参考：
+- 综合压缩策略：context_system/03_Strategies/Compression_Strategy/compression_strategy_v1.0.md
+- 提取策略：context_system/03_Strategies/Extraction_Strategy/extraction_strategy_v1.0.md
+- 存储策略：context_system/03_Strategies/Storage_Strategy/storage_strategy_v1.0.md
+
+规范文档参考：
+- Layer 1 规范：context_system/02_Specs/layer1_spec_v1.0.md
+- Layer 2 规范：context_system/02_Specs/layer2_spec_v1.0.md
+- Layer 3 规范：context_system/02_Specs/layer3_spec_v1.0.md
+- 组装规范：context_system/02_Specs/context_assembly_spec.md
+- 任务系统：context_system/02_Specs/task_system_spec.md
 
 分层长期记忆架构：
 - Layer 0: 系统指令区（只读常驻）
