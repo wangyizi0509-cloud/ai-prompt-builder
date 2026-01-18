@@ -1,7 +1,10 @@
 import os
 import bcrypt
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from supabase import create_client, Client
+from datetime import datetime
+from pathlib import Path
+import uuid
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -207,3 +210,98 @@ async def get_or_create_user_thread(user_id: str, thread_id: str) -> Dict[str, A
         }
     
     return await create_user_thread(user_id, thread_id)
+
+
+# ============================================================
+# 图片存储 (Supabase Storage)
+# ============================================================
+
+async def upload_user_image(
+    user_id: str, 
+    image_data: bytes, 
+    filename: str, 
+    bucket_name: str = "images"
+) -> Dict[str, Any]:
+    """
+    上传用户图片到 Supabase Storage
+    
+    Args:
+        user_id: 用户 ID
+        image_data: 图片二进制数据
+        filename: 原始文件名
+        bucket_name: 存储桶名称
+        
+    Returns:
+        {
+            'success': bool,
+            'url': str,  # 公开访问 URL
+            'path': str, # 存储路径
+            'error': str | None
+        }
+    """
+    if not is_supabase_configured():
+        return {
+            'success': False,
+            'error': 'Supabase not configured'
+        }
+    
+    try:
+        # 生成唯一路径: {user_id}/{timestamp}_{uuid}_{filename}
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = str(uuid.uuid4())[:8]
+        ext = Path(filename).suffix or ".png"
+        safe_filename = f"{timestamp}_{unique_id}{ext}"
+        storage_path = f"{user_id}/{safe_filename}"
+        
+        # 1. 上传到 Storage
+        # 注意: 如果 bucket 不存在，这里可能会报错，通常需要预先创建 bucket
+        supabase.storage.from_(bucket_name).upload(
+            path=storage_path,
+            file=image_data,
+            file_options={"content-type": f"image/{ext.lstrip('.')}"}
+        )
+        
+        # 2. 获取公开 URL
+        # 注意: 假设 bucket 是 public 的
+        response = supabase.storage.from_(bucket_name).get_public_url(storage_path)
+        public_url = response
+        
+        # 3. 在数据库中记录元数据 (可选)
+        try:
+            supabase.table('user_images').insert({
+                'user_id': user_id,
+                'storage_path': storage_path,
+                'public_url': public_url,
+                'original_filename': filename
+            }).execute()
+        except Exception as db_err:
+            print(f"Warning: Failed to record image metadata in DB: {db_err}")
+            # 即使数据库记录失败，只要上传成功也返回成功
+            
+        return {
+            'success': True,
+            'url': public_url,
+            'path': storage_path
+        }
+        
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+async def list_user_images_from_supabase(user_id: str, bucket_name: str = "images") -> List[Dict[str, Any]]:
+    """
+    从 Supabase 获取用户的所有图片信息
+    """
+    if not is_supabase_configured():
+        return []
+    
+    try:
+        response = supabase.table('user_images').select('*').eq('user_id', user_id).execute()
+        return response.data or []
+    except Exception as e:
+        print(f"Error listing user images from Supabase: {e}")
+        return []
+
