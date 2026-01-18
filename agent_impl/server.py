@@ -53,4 +53,9 @@ else:
 
 if __name__ == "__main__":
     logger.info("Starting server on http://0.0.0.0:8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    debug_mode = os.getenv("DEBUG_MODE", "0") == "1"
+    if debug_mode:
+        logger.info("DEBUG_MODE=1: Running with auto-reload enabled")
+        uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    else:
+        uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)

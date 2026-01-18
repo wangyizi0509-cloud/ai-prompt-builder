@@ -1423,7 +1423,7 @@
                 // 如果你想配合 LangGraph Studio 使用，请将 useStudioMode 设为 true
                 // 并确保 Studio 正在运行（默认端口 2024）
                 // 默认关闭 Studio Mode，避免 2024 未启动时前端直接报 “Failed to fetch”
-                const useStudioMode = ref(true); // 启用 Studio Mode 以在 Studio 中查看运行记录
+                const useStudioMode = ref(false); // 修改为 false，默认使用本地后端
                 const studioBaseUrl = ref('http://127.0.0.1:2024'); // Studio 默认端口
                 const assistantId = ref('crushe_agent'); // 对应 langgraph.json 中的名称
                 // --------------------------
@@ -2505,12 +2505,24 @@
                         if (!response.ok) throw new Error('Network response was not ok');
 
                         const data = await response.json();
-                        if (data.response) {
+                        
+                        // 统一处理响应逻辑：优先使用结构化的 pending_responses
+                        if (data.pending_responses && Array.isArray(data.pending_responses) && data.pending_responses.length > 0) {
+                            data.pending_responses.forEach(resp => {
+                                if (resp && resp.content) {
+                                    messages.value.push({ role: 'assistant', content: resp.content });
+                                }
+                            });
+                        } 
+                        // 如果 pending_responses 为空，但有 response 字符串（后端 Fallback），则使用它
+                        else if (data.response) {
                             messages.value.push({ role: 'assistant', content: data.response });
                         }
+                        
+                        // 3. 更新状态
                         if (data.state) {
                             processStateUpdate(data.state);
-                            }
+                        }
                         }
                         
                         if (showContext.value) {

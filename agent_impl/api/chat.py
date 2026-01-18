@@ -15,7 +15,7 @@ from api.sdk_client import (
     run_assistant,
 )
 
-router = APIRouter()
+router = APIRouter(prefix="/api")
 
 LOG_PATH = Path("/Users/ant/Desktop/Crushe/模型策略/.cursor/debug.log")
 
@@ -302,6 +302,8 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks, current_
         
         pending_responses = final_state.get("pending_responses", [])
         
+        # 兼容旧逻辑：如果 pending_responses 为空，但有 response 字段（虽然这种情况在 SDK 模式下较少见）
+        # 或者为了前端兼容性，我们仍然构建一个 response 字符串
         if pending_responses:
             combined_response = "\n\n".join([r["content"] for r in pending_responses if r.get("content")])
         else:
@@ -322,9 +324,12 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks, current_
             },
         )
         
+        # 构造标准响应
+        # 优先使用 pending_responses (结构化消息)
+        # 同时也填充 response 字段作为 fallback
         return {
-            "response": combined_response,
-            "pending_responses": pending_responses,
+            "response": combined_response,  # Fallback for legacy clients
+            "pending_responses": pending_responses, # Structured messages
             "state": final_state
         }
     except Exception as e:
@@ -333,7 +338,7 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks, current_
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/history/{thread_id}")
+@router.get("/chat/history/{thread_id}")
 async def get_chat_history(thread_id: str, current_user = Depends(get_optional_user)):
     """
     获取指定 Thread 的聊天历史（仅包含用户和 AI 的对话）
