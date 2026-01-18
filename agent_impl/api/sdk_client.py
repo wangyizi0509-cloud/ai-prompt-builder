@@ -17,6 +17,7 @@ from utils.langgraph_config import (
 from utils.logger import get_logger
 
 logger = get_logger("sdk_client")
+import time
 
 def get_client():
     """获取 LangGraph SDK 客户端"""
@@ -78,11 +79,24 @@ def get_thread_state(thread_id: str):
     """获取 thread 的当前状态"""
     client = get_client()
     try:
+        t0 = time.perf_counter()
         state_snapshot = client.threads.get_state(thread_id)
-        if state_snapshot.values:
-            return dict(state_snapshot.values)
+        t1 = time.perf_counter()
+        logger.info(f"threads.get_state: thread={thread_id} took {int((t1 - t0)*1000)}ms")
+        values = None
+        if isinstance(state_snapshot, dict):
+            values = state_snapshot.get("values")
+        else:
+            v_attr = getattr(state_snapshot, "values", None)
+            values = v_attr if isinstance(v_attr, dict) else (v_attr() if callable(v_attr) else v_attr)
+        if isinstance(values, dict):
+            msg_count = len(values.get("messages", [])) if isinstance(values.get("messages"), list) else 0
+            keys = list(values.keys())
+            logger.info(f"threads.get_state: thread={thread_id} state_keys={keys} messages={msg_count}")
+            return values if keys else None
         return None
-    except Exception:
+    except Exception as e:
+        logger.error(f"threads.get_state failed for thread {thread_id}: {e}", exc_info=True)
         return None
 
 

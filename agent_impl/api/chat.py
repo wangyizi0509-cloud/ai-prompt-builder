@@ -23,6 +23,7 @@ LOG_PATH = Path("/Users/ant/Desktop/Crushe/模型策略/.cursor/debug.log")
 from utils.logger import get_logger
 
 logger = get_logger("chat")
+import time
 
 class ChatRequest(BaseModel):
     message: str
@@ -324,6 +325,39 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks, current_
             },
         )
         
+        try:
+            normalized = []
+            fs_msgs = final_state.get("messages")
+            if isinstance(fs_msgs, list) and fs_msgs:
+                for m in fs_msgs:
+                    if isinstance(m, dict):
+                        role = m.get("role") or (m.get("type") if m.get("type") in ["human", "ai"] else "")
+                        content = m.get("content")
+                    else:
+                        role = "user" if getattr(m, "type", "") == "human" else ("assistant" if getattr(m, "type", "") == "ai" else "")
+                        content = getattr(m, "content", "")
+                    if content and role in ["user", "assistant", "human", "ai"]:
+                        normalized.append({"role": "user" if role in ["user", "human"] else "assistant", "content": content})
+            if not normalized and isinstance(final_state.get("layer3_memory"), dict):
+                alt = final_state["layer3_memory"].get("all_messages")
+                if isinstance(alt, list):
+                    for m in alt:
+                        if isinstance(m, dict):
+                            role = m.get("role")
+                            content = m.get("content")
+                            if content and role in ["user", "assistant"]:
+                                normalized.append({"role": role, "content": content})
+            if not normalized and pending_responses:
+                normalized.append({"role": "user", "content": request.message})
+                first = next((r for r in pending_responses if r.get("content")), None)
+                if first:
+                    normalized.append({"role": "assistant", "content": first["content"]})
+            if normalized:
+                update_thread_state(thread_id, {"messages": normalized})
+                logger.info(f"Persisted {len(normalized)} messages to thread {thread_id}")
+        except Exception as e:
+            logger.error(f"Persist messages failed for thread {thread_id}: {e}", exc_info=True)
+        
         # 构造标准响应
         # 优先使用 pending_responses (结构化消息)
         # 同时也填充 response 字段作为 fallback
@@ -340,10 +374,7 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks, current_
 
 @router.get("/chat/history/{thread_id}")
 async def get_chat_history(thread_id: str, current_user = Depends(get_optional_user)):
-    """
-    获取指定 Thread 的聊天历史（仅包含用户和 AI 的对话）
-    """
-    logger.debug(f"get_chat_history request: thread_id={thread_id}, user={current_user['user_id'] if current_user else 'anonymous'}")
+    logger.info(f"get_chat_history request: thread_id={thread_id}, user={current_user['user_id'] if current_user else 'anonymous'}")
     
     if current_user:
         from supabase_service.client import get_thread_by_user
@@ -352,19 +383,24 @@ async def get_chat_history(thread_id: str, current_user = Depends(get_optional_u
             logger.warning(f"Security: User {current_user['user_id']} accessing thread {thread_id} not bound to them.")
     
     try:
-        # 获取最新状态
+        t0 = time.perf_counter()
         state = get_thread_state(thread_id)
+        t1 = time.perf_counter()
+        logger.info(f"State fetched for thread {thread_id} in {int((t1 - t0)*1000)}ms")
         if not state:
-            logger.debug(f"No state found for thread {thread_id}")
+            logger.info(f"No state found for thread {thread_id}")
             return {"success": True, "messages": [], "state": None}
             
-        if "messages" not in state:
-            logger.debug(f"State found but no 'messages' key for thread {thread_id}")
+        if "messages" not in state and not (isinstance(state.get("layer3_memory"), dict) and isinstance(state["layer3_memory"].get("all_messages"), list)):
+            logger.info(f"State found but no messages for thread {thread_id}")
             return {"success": True, "messages": [], "state": state}
         
-        # 过滤消息
+        messages = state["messages"] if isinstance(state.get("messages"), list) else []
+        if not messages and isinstance(state.get("layer3_memory"), dict):
+            alt = state["layer3_memory"].get("all_messages")
+            messages = alt if isinstance(alt, list) else []
         clean_messages = []
-        for msg in state["messages"]:
+        for msg in messages:
             role = ""
             content = ""
             if isinstance(msg, dict):
@@ -376,7 +412,26 @@ async def get_chat_history(thread_id: str, current_user = Depends(get_optional_u
 
             if content and role in ["user", "assistant", "human", "ai"]:
                 normalized_role = "user" if role in ["user", "human"] else "assistant"
-                clean_messages.append({"role": normalized_role, "content": content})
+                cleaned_content = content
+                if isinstance(content, str):
+                    s = content.strip()
+                    if s.startswith("```"):
+                        try:
+                            first_nl = s.find("\n")
+                            body = s[first_nl + 1 :] if first_nl != -1 else s
+                            end_idx = body.rfind("```")
+                            if end_idx != -1:
+                                body = body[:end_idx]
+                            s = body.strip()
+                        except Exception:
+                            pass
+                    try:
+                        obj = json.loads(s)
+                        if isinstance(obj, dict) and isinstance(obj.get("response"), str):
+                            cleaned_content = obj.get("response")
+                    except Exception:
+                        cleaned_content = content
+                clean_messages.append({"role": normalized_role, "content": cleaned_content})
         
         logger.info(f"Returning {len(clean_messages)} messages for thread {thread_id}")
         return {
