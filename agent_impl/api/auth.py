@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from auth_utils import create_jwt_token, verify_jwt_token, get_current_user
@@ -21,11 +22,16 @@ from utils.logger import get_logger
 
 logger = get_logger("auth")
 
+ALLOW_REGISTRATION = os.getenv("ALLOW_REGISTRATION", "false").lower() == "true"
+
 @router.post("/register")
 async def register(request: RegisterRequest):
     """
     用户注册接口
     """
+    if not ALLOW_REGISTRATION:
+        raise HTTPException(status_code=403, detail="Registration is currently disabled")
+    
     if not request.email or not request.password or not request.username:
         raise HTTPException(status_code=400, detail="All fields are required")
     
