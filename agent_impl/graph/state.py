@@ -9,7 +9,8 @@ AgentState 状态定义
 - v3.1: 将模型推理 (Rolling Scratchpad) 移入 Layer 3，增加滚动摘要
 """
 
-from typing import TypedDict, Literal, Optional, Annotated
+from typing import Literal, Optional, Annotated
+from typing_extensions import TypedDict
 from datetime import datetime
 import uuid
 from operator import add

@@ -7,7 +7,8 @@
 - 提供可复用的写入辅助，减少各处重复的 upsert 代码
 """
 
-from typing import TypedDict, Literal, Optional
+from typing import Literal, Optional
+from typing_extensions import TypedDict
 from datetime import datetime
 
 from graph.context_types import (

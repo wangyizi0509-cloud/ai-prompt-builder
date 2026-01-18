@@ -19,6 +19,7 @@ pydantic>=2.0.0
 
 # Utilities
 rich>=13.0.0  # 美化终端输出
+typing-extensions>=4.0.0  # Python 3.11 compatibility for TypedDict
 
 # Web Server
 fastapi>=0.100.0

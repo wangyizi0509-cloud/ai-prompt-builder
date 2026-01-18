@@ -16,7 +16,8 @@
 - Layer 3: 对话历史（摘要/任务笔记/最近对话）
 """
 
-from typing import TypedDict, Literal, Optional
+from typing import Literal, Optional
+from typing_extensions import TypedDict
 import os
 from datetime import datetime
 
