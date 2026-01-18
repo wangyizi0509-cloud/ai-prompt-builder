@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crushe-agent"
+version = "0.1.0"
+description = "AI恋爱军师 Agent - 智能对话助手"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph==1.0.5",
+    "langchain==1.0.5",
+    "langchain-openai>=0.2.0",
+    "langgraph-cli>=0.4.0",
+    "langgraph-sdk>=0.2.0",
+    "langsmith>=0.1.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+    "langgraph-checkpoint-postgres>=0.2.0",
+    "psycopg[binary]>=3.2.0",
+    "psycopg-pool>=3.2.0",
+    "rich>=13.0.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "python-multipart>=0.0.6",
+    "httpx>=0.25.0",
+    "supabase>=2.0.0",
+    "PyJWT>=2.8.0",
+    "bcrypt>=4.0.0",
+    "typing-extensions>=4.0.0",
+]
+
+[tool.setuptools]
+packages = ["agent_impl.graph", "agent_impl.api", "agent_impl.onboarding", "agent_impl.skills", "agent_impl.utils", "agent_impl.supabase_service"]
+package-dir = {"" = "."}
+
+[tool.pytest.ini_options]
+markers = [
+    "api_test: marks tests as requiring real API calls"
+]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
