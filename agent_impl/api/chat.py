@@ -327,3 +327,50 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks, current_
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/history/{thread_id}")
+async def get_chat_history(thread_id: str, current_user = Depends(get_optional_user)):
+    """
+    获取指定 Thread 的聊天历史（仅包含用户和 AI 的对话）
+    """
+    if current_user:
+        from supabase_service.client import get_thread_by_user
+        user_thread = await get_thread_by_user(current_user['user_id'])
+        if not user_thread or user_thread['thread_id'] != thread_id:
+            print(f"Warning: User {current_user['user_id']} accessing thread {thread_id}")
+    
+    try:
+        # 获取最新状态，里面包含了完整的累积消息列表
+        state = get_thread_state(thread_id)
+        if not state or "messages" not in state:
+            return {"success": True, "messages": [], "state": state}
+        
+        # 过滤消息：只保留人类和 AI 的文本对话
+        clean_messages = []
+        for msg in state["messages"]:
+            # 处理不同格式的消息对象
+            role = ""
+            content = ""
+            
+            if isinstance(msg, dict):
+                role = msg.get("role") or (msg.get("type") if msg.get("type") in ["human", "ai"] else "")
+                content = msg.get("content")
+            else:
+                # 兼容 LangChain 消息对象
+                role = "user" if msg.type == "human" else ("assistant" if msg.type == "ai" else "")
+                content = getattr(msg, "content", "")
+
+            # 只保留有内容且角色明确的消息
+            if content and role in ["user", "assistant", "human", "ai"]:
+                normalized_role = "user" if role in ["user", "human"] else "assistant"
+                clean_messages.append({"role": normalized_role, "content": content})
+        
+        return {
+            "success": True, 
+            "messages": clean_messages, 
+            "state": state
+        }
+    except Exception as e:
+        print(f"Error fetching history: {e}")
+        return {"success": False, "error": str(e)}

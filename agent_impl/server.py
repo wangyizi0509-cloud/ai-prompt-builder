@@ -31,35 +31,11 @@ from utils.langgraph_config import (
 print_config()
 
 
-def get_client():
-    return get_sync_client(url=LANGGRAPH_URL, api_key=LANGGRAPH_API_KEY)
-
-
-def session_to_thread_id(session_id: str) -> str:
-    try:
-        uuid.UUID(session_id)
-        return session_id
-    except ValueError:
-        hash_obj = hashlib.md5(session_id.encode())
-        hex_digest = hash_obj.hexdigest()
-        return str(uuid.UUID(hex=hex_digest[:32]))
-
-
-async def ensure_thread_exists(session_id: str, user_id: str = None) -> str:
-    client = get_client()
-    thread_id = session_to_thread_id(session_id)
-    
-    try:
-        client.threads.get(thread_id)
-    except Exception:
-        client.threads.create(thread_id=thread_id)
-    
-    if user_id:
-        from supabase_service.client import get_or_create_user_thread
-        await get_or_create_user_thread(user_id, thread_id)
-    
-    return thread_id
-
+from api.sdk_client import (
+    get_client,
+    session_to_thread_id,
+    ensure_thread_exists,
+)
 
 from api import api_router
 app.include_router(api_router)

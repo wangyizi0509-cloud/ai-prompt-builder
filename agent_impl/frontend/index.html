@@ -1482,9 +1482,51 @@
                     feedback: ''
                 });
 
-                const sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+                const sessionId = ref('session_' + Math.random().toString(36).substr(2, 9));
                 // Studio thread_id（需要符合 UUID，否则会报 400）
                 const studioThreadId = ref(null);
+
+                const loadUserHistory = async () => {
+                    const token = getToken();
+                    if (!token) return;
+
+                    try {
+                        // 1. 获取用户的 Thread ID
+                        const threadRes = await fetch('/api/auth/me/thread', {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        const threadData = await threadRes.json();
+                        
+                        if (threadData.success && threadData.thread_id) {
+                            const threadId = threadData.thread_id;
+                            console.log('Restoring user thread:', threadId);
+                            
+                            // 设置 thread_id 和 session_id
+                            studioThreadId.value = threadId;
+                            sessionId.value = threadId;
+                            
+                            // 2. 获取聊天历史
+                            const historyRes = await fetch(`/api/chat/history/${threadId}`, {
+                                headers: { 'Authorization': `Bearer ${token}` }
+                            });
+                            const historyData = await historyRes.json();
+                            
+                            if (historyData.success) {
+                                // 3. 填充消息列表（后端已过滤好）
+                                messages.value = historyData.messages || [];
+                                
+                                // 4. 填充状态看板
+                                if (historyData.state) {
+                                    processStateUpdate(historyData.state);
+                                }
+                                
+                                await scrollToBottom();
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Failed to load user history:', e);
+                    }
+                };
 
                 // ============ 选项格式适配 ============
                 // 支持两种格式：
@@ -1674,7 +1716,7 @@
                             }
                         } else {
                             // 非 Studio Mode: 调用本地 server.py
-                            const response = await fetch(`/api/debug/context/${sessionId}`);
+                            const response = await fetch(`/api/debug/context/${sessionId.value}`);
                             if (response.ok) {
                                 contextData.value = await response.json();
                                 console.log('[Context] Refreshed:', contextData.value);
@@ -1800,7 +1842,7 @@
                         }
                         
                         // 非 Studio Mode: 调用本地 server.py API
-                        const endpoint = `/api/debug/detail/${type}/${sessionId}/${id}`;
+                        const endpoint = `/api/debug/detail/${type}/${sessionId.value}/${id}`;
                         const response = await fetch(endpoint);
                         
                         if (!response.ok) {
@@ -1929,7 +1971,7 @@
                         const formData = new FormData();
                         formData.append('file', file);
                         formData.append('screenshot_type', screenshotType);
-                        formData.append('session_id', sessionId);
+                        formData.append('session_id', sessionId.value);
                         
                         const response = await fetch('/api/upload-screenshot', {
                             method: 'POST',
@@ -2443,7 +2485,7 @@
                             },
                             body: JSON.stringify({
                                 message: content,
-                                session_id: sessionId
+                                session_id: sessionId.value
                             })
                         });
 
@@ -2510,7 +2552,7 @@
                                 guide_id: currentCompletingGuide.value.id,
                                 execution_status: completeGuideForm.value.execution_status,
                                 feedback: completeGuideForm.value.feedback,
-                                session_id: sessionId
+                                session_id: sessionId.value
                             })
                         });
                         
@@ -2552,6 +2594,7 @@
 
                 onMounted(async () => {
                     await checkAuth();
+                    await loadUserHistory();
                 });
 
                 // --- DEBUG: Mock Assessment (Removed for production) ---

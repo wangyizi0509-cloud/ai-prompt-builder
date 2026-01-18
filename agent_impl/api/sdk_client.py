@@ -35,12 +35,28 @@ async def ensure_thread_exists(session_id: str, user_id: str = None) -> str:
     
     Args:
         session_id: 会话 ID
-        user_id: 用户 ID (可选)，如果提供则创建用户-thread 映射
+        user_id: 用户 ID (可选)，如果提供则优先从数据库获取已绑定的 thread
     
     Returns:
         thread_id: 线程 ID
     """
     client = get_client()
+    
+    # 1. 如果有 user_id，优先从数据库获取已绑定的 thread_id
+    if user_id:
+        from supabase_service.client import get_thread_by_user
+        user_thread_data = await get_thread_by_user(user_id)
+        if user_thread_data:
+            thread_id = user_thread_data['thread_id']
+            # 确保这个 thread 在 LangGraph 中也存在
+            try:
+                client.threads.get(thread_id)
+                return thread_id
+            except Exception:
+                # 数据库有记录但 LangGraph 没记录，可能是环境迁移，继续执行默认逻辑
+                print(f"Warning: Thread {thread_id} found in DB but not in LangGraph. Creating new.")
+    
+    # 2. 如果没有绑定或绑定失效，根据 session_id 生成（确定性映射）
     thread_id = session_to_thread_id(session_id)
     
     try:
@@ -48,6 +64,7 @@ async def ensure_thread_exists(session_id: str, user_id: str = None) -> str:
     except Exception:
         client.threads.create(thread_id=thread_id)
     
+    # 3. 如果有 user_id，建立或更新绑定关系
     if user_id:
         from supabase_service.client import get_or_create_user_thread
         await get_or_create_user_thread(user_id, thread_id)

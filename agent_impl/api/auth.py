@@ -79,3 +79,23 @@ async def get_current_user_info(current_user = Depends(get_current_user)):
         'success': True,
         'user': user_info
     }
+
+
+@router.get("/me/thread")
+async def get_user_thread_info(current_user = Depends(get_current_user)):
+    """
+    获取当前登录用户的 Thread 信息
+    """
+    from supabase_service.client import get_thread_by_user
+    user_thread = await get_thread_by_user(current_user['user_id'])
+    
+    if not user_thread:
+        return {
+            'success': True,
+            'thread_id': None
+        }
+    
+    return {
+        'success': True,
+        'thread_id': user_thread['thread_id']
+    }
