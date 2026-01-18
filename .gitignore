@@ -16,6 +16,11 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+# 忽略本地数据库
+checkpoints.db
+checkpoints.db-shm
+checkpoints.db-wal
+
 # 保留重要文件
 !index.html
 !prompt_builder.html
