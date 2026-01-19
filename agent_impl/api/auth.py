@@ -1,9 +1,9 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from auth_utils import create_jwt_token, verify_jwt_token, get_current_user
-from supabase_service.client import create_user, authenticate_user, get_user_by_id
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 router = APIRouter()
+security = HTTPBearer()
 
 
 class RegisterRequest(BaseModel):
@@ -22,6 +22,9 @@ async def register(request: RegisterRequest):
     """
     用户注册接口
     """
+    from auth_utils import create_jwt_token
+    from supabase_service.client import create_user
+
     if not request.email or not request.password or not request.username:
         raise HTTPException(status_code=400, detail="All fields are required")
     
@@ -47,6 +50,9 @@ async def login(request: LoginRequest):
     """
     用户登录接口
     """
+    from auth_utils import create_jwt_token
+    from supabase_service.client import authenticate_user
+
     if not request.email or not request.password:
         raise HTTPException(status_code=400, detail="Email and password are required")
     
@@ -65,11 +71,20 @@ async def login(request: LoginRequest):
     }
 
 
+async def get_current_user_dep(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    from auth_utils import get_current_user
+    return await get_current_user(credentials)
+
+
 @router.get("/me")
-async def get_current_user_info(current_user = Depends(get_current_user)):
+async def get_current_user_info(current_user=Depends(get_current_user_dep)):
     """
     获取当前登录用户信息
     """
+    from supabase_service.client import get_user_by_id
+
     user_info = await get_user_by_id(current_user['user_id'])
     
     if not user_info:

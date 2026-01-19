@@ -1,5 +1,4 @@
 import os
-import jwt
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from fastapi import HTTPException, Depends, status
@@ -24,6 +23,7 @@ def is_jwt_configured() -> bool:
 def create_jwt_token(user_id: str, email: str, username: str, expires_days: int = 7) -> str:
     if not is_jwt_configured():
         raise ValueError("JWT_SECRET not configured")
+    import jwt
     
     expire = datetime.utcnow() + timedelta(days=expires_days)
     payload = {
@@ -42,6 +42,7 @@ def verify_jwt_token(token: str) -> Dict[str, Any]:
             'valid': False,
             'error': 'JWT not configured'
         }
+    import jwt
     
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=['HS256'])

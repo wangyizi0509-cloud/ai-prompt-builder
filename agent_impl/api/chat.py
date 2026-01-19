@@ -2,20 +2,12 @@ import json
 from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional
-from langgraph.errors import GraphRecursionError
-from auth_utils import get_current_user, get_optional_user
-from api.sdk_client import (
-    get_client,
-    session_to_thread_id,
-    ensure_thread_exists,
-    get_thread_state,
-    update_thread_state,
-    run_assistant,
-)
 
 router = APIRouter()
+security = HTTPBearer(auto_error=False)
 
 LOG_PATH = Path("/Users/ant/Desktop/Crushe/模型策略/.cursor/debug.log")
 
@@ -23,6 +15,15 @@ LOG_PATH = Path("/Users/ant/Desktop/Crushe/模型策略/.cursor/debug.log")
 class ChatRequest(BaseModel):
     message: str
     session_id: str
+
+
+async def get_optional_user_dep(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+):
+    if credentials is None:
+        return None
+    from auth_utils import get_optional_user
+    return await get_optional_user(credentials)
 
 
 def _append_debug_log(run_id: str, hypothesis_id: str, location: str, message: str, data: dict):
@@ -49,6 +50,7 @@ def _run_maintenance_tasks_sdk(session_id: str, thread_id: str) -> None:
     - 读取最新 state（避免拿到过期的 final_state）
     - best-effort 执行：失败记录在 queue item 里，下一轮可重试
     """
+    from api.sdk_client import get_thread_state, update_thread_state
     from graph.archive_manager import (
         refine_on_onboarding_complete,
         compress_layer3,
@@ -249,9 +251,18 @@ def _run_maintenance_tasks_sdk(session_id: str, thread_id: str) -> None:
 
 
 @router.post("/chat")
-async def chat(request: ChatRequest, background_tasks: BackgroundTasks, current_user = Depends(get_optional_user)):
+async def chat(
+    request: ChatRequest,
+    background_tasks: BackgroundTasks,
+    current_user=Depends(get_optional_user_dep),
+):
     print(f"Received message from session {request.session_id}: {request.message}")
-    
+
+    from api.sdk_client import (
+        ensure_thread_exists,
+        get_thread_state,
+        run_assistant,
+    )
     from graph.state import create_initial_state
     
     user_id = current_user['user_id'] if current_user else None

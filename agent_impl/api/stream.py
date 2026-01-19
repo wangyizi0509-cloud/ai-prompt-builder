@@ -2,20 +2,12 @@ import json
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Literal, Optional
 
-from auth_utils import get_optional_user
-from .sdk_client import (
-    get_client,
-    session_to_thread_id,
-    ensure_thread_exists,
-    get_thread_state,
-    update_thread_state,
-    run_assistant,
-)
-
 router = APIRouter()
+security = HTTPBearer(auto_error=False)
 
 LOG_PATH = Path("/Users/ant/Desktop/Crushe/模型策略/.cursor/debug.log")
 
@@ -24,6 +16,15 @@ class StreamChatRequest(BaseModel):
     message: str
     session_id: str
     stream_mode: Optional[Literal["values", "updates", "messages", "debug"]] = "updates"
+
+
+async def get_optional_user_dep(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+):
+    if credentials is None:
+        return None
+    from auth_utils import get_optional_user
+    return await get_optional_user(credentials)
 
 
 def _append_debug_log(run_id: str, hypothesis_id: str, location: str, message: str, data: dict):
@@ -60,6 +61,7 @@ def _run_maintenance_tasks_sdk(session_id: str, thread_id: str) -> None:
     )
     from datetime import datetime
 
+    from api.sdk_client import get_thread_state, update_thread_state
     state = get_thread_state(thread_id)
     if not state:
         return
@@ -251,7 +253,11 @@ def _run_maintenance_tasks_sdk(session_id: str, thread_id: str) -> None:
 
 
 @router.post("/chat/stream")
-async def chat_stream(request: StreamChatRequest, background_tasks: BackgroundTasks, current_user = Depends(get_optional_user)):
+async def chat_stream(
+    request: StreamChatRequest,
+    background_tasks: BackgroundTasks,
+    current_user=Depends(get_optional_user_dep),
+):
     """
     流式聊天接口 - 实时查看 Agent 执行过程（通过 SDK）
     
@@ -266,6 +272,11 @@ async def chat_stream(request: StreamChatRequest, background_tasks: BackgroundTa
     print(f"[Stream SDK] Received message from session {request.session_id}: {request.message}")
     print(f"[Stream SDK] Stream mode: {request.stream_mode}")
     
+    from api.sdk_client import (
+        ensure_thread_exists,
+        get_thread_state,
+        run_assistant,
+    )
     from graph.state import create_initial_state
     
     user_id = current_user['user_id'] if current_user else None

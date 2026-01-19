@@ -1,10 +1,5 @@
 from fastapi import APIRouter, HTTPException
 
-from .sdk_client import (
-    session_to_thread_id,
-    get_thread_state,
-)
-
 router = APIRouter()
 
 
@@ -22,6 +17,7 @@ async def get_debug_context(session_id: str):
         check_layer3_compression_needed,
     )
     
+    from api.sdk_client import session_to_thread_id, get_thread_state
     thread_id = session_to_thread_id(session_id)
     state = get_thread_state(thread_id)
     
@@ -192,6 +188,7 @@ async def get_status_report_detail(session_id: str, report_id: str):
     """
     获取现状报告全文（用于调试面板展开查看）- 使用 SDK 版本
     """
+    from api.sdk_client import session_to_thread_id, get_thread_state
     thread_id = session_to_thread_id(session_id)
     state = get_thread_state(thread_id)
     
@@ -235,6 +232,7 @@ async def get_action_guide_detail(session_id: str, guide_id: str):
     """
     获取行动指南全文（用于调试面板展开查看）- 使用 SDK 版本
     """
+    from api.sdk_client import session_to_thread_id, get_thread_state
     thread_id = session_to_thread_id(session_id)
     state = get_thread_state(thread_id)
     
@@ -276,6 +274,7 @@ async def get_compressed_messages_detail(session_id: str, summary_index: int):
     如果需要保留原始消息，需要在 compress_layer3 里额外存储。
     这里返回 summary 的详细信息 + 相关元数据。
     """
+    from api.sdk_client import session_to_thread_id, get_thread_state
     thread_id = session_to_thread_id(session_id)
     state = get_thread_state(thread_id)
     

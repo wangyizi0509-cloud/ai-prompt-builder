@@ -61,7 +61,9 @@ async def ensure_thread_exists(session_id: str, user_id: str = None) -> str:
     return thread_id
 
 
+print("Importing API routers...", flush=True)
 from api import api_router
+print("API routers loaded", flush=True)
 app.include_router(api_router)
 
 

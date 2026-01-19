@@ -3,12 +3,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Literal, Optional
 
-from .sdk_client import (
-    session_to_thread_id,
-    get_thread_state,
-    update_thread_state,
-)
-
 router = APIRouter()
 
 
@@ -44,6 +38,7 @@ async def update_guide_status(request: UpdateGuideStatusRequest):
     )
     from graph.archive_manager import archive_guide_on_completion
     
+    from api.sdk_client import session_to_thread_id, get_thread_state, update_thread_state
     thread_id = session_to_thread_id(request.session_id)
     state = get_thread_state(thread_id)
     

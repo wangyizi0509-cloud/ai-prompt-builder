@@ -191,12 +191,30 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
 """
     # 注入工具指令（如果刚从工具返回）
     if from_tool_call and not last_tool_content:
-        # 兜底：回溯查找最近一次 tool 输出
-        for msg in reversed(messages or []):
-            r, c = get_msg_role_and_content(msg)
-            if r == "tool" and c:
-                last_tool_content = c
-                break
+        # [FIX] 优先检查 _last_tool_content（skill_tools_node 直接设置的，最可靠）
+        cached_content = state.get("_last_tool_content")
+        if cached_content:
+            last_tool_content = cached_content
+        
+        # 其次回溯 messages 查找 tool 消息
+        if not last_tool_content:
+            for msg in reversed(messages or []):
+                r, c = get_msg_role_and_content(msg)
+                if r == "tool" and c:
+                    last_tool_content = c
+                    break
+        
+        # 最后从 _last_tool_outputs 列表中提取
+        if not last_tool_content:
+            cached_tool_outputs = state.get("_last_tool_outputs")
+            if isinstance(cached_tool_outputs, list):
+                for item in reversed(cached_tool_outputs):
+                    if not isinstance(item, dict):
+                        continue
+                    cached_content = item.get("content") or item.get("tool_output") or ""
+                    if cached_content:
+                        last_tool_content = cached_content
+                        break
 
     if from_tool_call and last_tool_content:
         inquiry_metadata = f"""
