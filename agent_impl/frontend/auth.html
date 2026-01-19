@@ -3,18 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登录/注册 - Crushe AI Agent</title>
+    <title>登录/注册 - Crushe AI</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap');
+
+        :root {
+            --primary-gradient: linear-gradient(135deg, #a855f7 0%, #8b5cf6 100%);
+            --bg-gradient: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            --text-main: #1f2937;
+            --text-secondary: #6b7280;
+            --purple-light: #f5f3ff;
+            --purple-primary: #8b5cf6;
+            --border-color: #e5e7eb;
+        }
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--bg-gradient);
             min-height: 100vh;
             display: flex;
             align-items: center;
@@ -24,180 +36,227 @@
 
         .container {
             background: white;
-            border-radius: 16px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            border-radius: 32px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
             width: 100%;
-            max-width: 400px;
+            max-width: 440px;
             overflow: hidden;
+            padding: 40px;
+            position: relative;
         }
 
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 30px;
+        .logo-section {
             text-align: center;
+            margin-bottom: 32px;
         }
 
-        .header h1 {
-            color: white;
-            font-size: 24px;
-            margin-bottom: 8px;
+        .logo-circle {
+            width: 80px;
+            height: 80px;
+            background: var(--primary-gradient);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 16px;
+            box-shadow: 0 10px 20px rgba(139, 92, 246, 0.3);
         }
 
-        .header p {
-            color: rgba(255, 255, 255, 0.9);
-            font-size: 14px;
+        .logo-circle svg {
+            width: 40px;
+            height: 40px;
+            fill: white;
+        }
+
+        .logo-section h1 {
+            color: var(--text-main);
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            margin-bottom: 4px;
+        }
+
+        .logo-section p {
+            color: var(--text-secondary);
+            font-size: 15px;
+            font-weight: 500;
         }
 
         .tabs {
             display: flex;
-            border-bottom: 2px solid #f0f0f0;
+            margin-bottom: 32px;
+            border-bottom: 1px solid var(--border-color);
+            position: relative;
         }
 
         .tab {
             flex: 1;
-            padding: 16px;
+            padding: 12px 0;
             text-align: center;
             cursor: pointer;
             font-weight: 600;
-            color: #666;
+            font-size: 16px;
+            color: var(--text-secondary);
             transition: all 0.3s ease;
-        }
-
-        .tab:hover {
-            background: #f8f9fa;
+            position: relative;
         }
 
         .tab.active {
-            color: #667eea;
-            border-bottom: 2px solid #667eea;
+            color: var(--purple-primary);
+        }
+
+        .tab-underline {
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            width: 50%;
+            height: 3px;
+            background: var(--purple-primary);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 3px;
+        }
+
+        .tab-underline.register {
+            transform: translateX(100%);
         }
 
         .form-container {
-            padding: 30px;
+            min-height: 280px;
         }
 
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 24px;
         }
 
         .form-group label {
             display: block;
             margin-bottom: 8px;
-            color: #333;
-            font-weight: 500;
+            color: var(--text-main);
+            font-weight: 600;
             font-size: 14px;
         }
 
         .form-group input {
             width: 100%;
-            padding: 12px 16px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 14px;
-            transition: all 0.3s ease;
+            padding: 14px 18px;
+            border: 1.5px solid var(--border-color);
+            border-radius: 12px;
+            font-size: 15px;
+            background: #f9fafb;
+            transition: all 0.2s ease;
+            color: var(--text-main);
+        }
+
+        .form-group input::placeholder {
+            color: #9ca3af;
         }
 
         .form-group input:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-        .form-group input:disabled {
-            background: #f5f5f5;
-            cursor: not-allowed;
+            background: white;
+            border-color: var(--purple-primary);
+            box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.1);
         }
 
         .button {
             width: 100%;
-            padding: 14px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 16px;
+            background: var(--primary-gradient);
             color: white;
             border: none;
-            border-radius: 8px;
+            border-radius: 14px;
             font-size: 16px;
-            font-weight: 600;
+            font-weight: 700;
             cursor: pointer;
             transition: all 0.3s ease;
+            box-shadow: 0 10px 15px -3px rgba(139, 92, 246, 0.3);
+            margin-top: 8px;
         }
 
         .button:hover:not(:disabled) {
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 15px 25px -5px rgba(139, 92, 246, 0.4);
+            filter: brightness(1.05);
+        }
+
+        .button:active:not(:disabled) {
+            transform: translateY(0);
         }
 
         .button:disabled {
-            opacity: 0.6;
+            opacity: 0.7;
             cursor: not-allowed;
+            transform: none;
+        }
+
+        .message {
+            padding: 14px;
+            border-radius: 12px;
+            margin-bottom: 24px;
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            animation: slideDown 0.3s ease;
+        }
+
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
         .error {
-            background: #fee;
-            color: #c33;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            font-size: 14px;
-            border-left: 4px solid #c33;
+            background: #fef2f2;
+            color: #dc2626;
+            border: 1px solid #fecaca;
         }
 
         .success {
-            background: #efe;
-            color: #3c3;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            font-size: 14px;
-            border-left: 4px solid #3c3;
+            background: #f0fdf4;
+            color: #16a34a;
+            border: 1px solid #bbf7d0;
         }
 
-        .loading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-        }
-
-        .loading::after {
-            content: '';
-            width: 16px;
-            height: 16px;
-            border: 2px solid #ffffff;
-            border-top-color: transparent;
+        .loading-spinner {
+            width: 20px;
+            height: 20px;
+            border: 2.5px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
 
         @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
+            to { transform: rotate(360deg); }
         }
 
         .footer {
             text-align: center;
-            padding: 20px;
-            color: #999;
-            font-size: 12px;
+            margin-top: 32px;
+            color: var(--text-secondary);
+            font-size: 13px;
         }
 
-        .fade-enter-active,
-        .fade-leave-active {
-            transition: opacity 0.3s ease;
+        /* Vue Transitions */
+        .fade-enter-active, .fade-leave-active {
+            transition: opacity 0.2s ease, transform 0.2s ease;
         }
-
-        .fade-enter-from,
-        .fade-leave-to {
-            opacity: 0;
-        }
+        .fade-enter-from { opacity: 0; transform: translateX(10px); }
+        .fade-leave-to { opacity: 0; transform: translateX(-10px); }
     </style>
 </head>
 <body>
     <div id="app">
         <div class="container">
-            <div class="header">
-                <h1>Crushe AI Agent</h1>
-                <p>欢迎使用智能情感咨询系统</p>
+            <div class="logo-section">
+                <div class="logo-circle">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                    </svg>
+                </div>
+                <h1>Crushe AI</h1>
+                <p>你的 AI 恋爱军师</p>
             </div>
 
             <div class="tabs">
@@ -215,16 +274,23 @@
                 >
                     注册
                 </div>
+                <div class="tab-underline" :class="currentTab"></div>
             </div>
 
             <div class="form-container">
                 <transition name="fade" mode="out-in">
                     <div :key="currentTab">
-                        <div v-if="errorMessage" class="error">
+                        <div v-if="errorMessage" class="message error">
+                            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+                            </svg>
                             {{ errorMessage }}
                         </div>
 
-                        <div v-if="successMessage" class="success">
+                        <div v-if="successMessage" class="message success">
+                            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
+                            </svg>
                             {{ successMessage }}
                         </div>
 
@@ -270,7 +336,10 @@
                                 class="button"
                                 :disabled="loading"
                             >
-                                <span v-if="loading" class="loading"></span>
+                                <div v-if="loading" style="display: flex; justify-content: center; align-items: center; gap: 8px;">
+                                    <div class="loading-spinner"></div>
+                                    <span>处理中...</span>
+                                </div>
                                 <span v-else>{{ currentTab === 'login' ? '登录' : '注册' }}</span>
                             </button>
                         </form>
@@ -279,7 +348,7 @@
             </div>
 
             <div class="footer">
-                <p>Crushe AI Agent &copy; 2025</p>
+                <p>Crushe AI &copy; 2026</p>
             </div>
         </div>
     </div>

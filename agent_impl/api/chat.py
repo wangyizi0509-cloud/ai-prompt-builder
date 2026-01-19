@@ -6,11 +6,16 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional
 
-router = APIRouter()
+router = APIRouter(prefix="/api")
 security = HTTPBearer(auto_error=False)
 
 LOG_PATH = Path("/Users/ant/Desktop/Crushe/模型策略/.cursor/debug.log")
 
+
+from utils.logger import get_logger
+
+logger = get_logger("chat")
+import time
 
 class ChatRequest(BaseModel):
     message: str
@@ -256,7 +261,7 @@ async def chat(
     background_tasks: BackgroundTasks,
     current_user=Depends(get_optional_user_dep),
 ):
-    print(f"Received message from session {request.session_id}: {request.message}")
+    logger.info(f"Received message from session {request.session_id}: {request.message[:50]}...")
 
     from api.sdk_client import (
         ensure_thread_exists,
@@ -271,7 +276,7 @@ async def chat(
     base_state = get_thread_state(thread_id)
     
     if base_state is None:
-        print("Creating new session (checkpointer empty)")
+        logger.info(f"Creating new session for thread {thread_id} (checkpointer empty)")
         state = create_initial_state(request.message)
     else:
         state = dict(base_state)
@@ -284,7 +289,7 @@ async def chat(
         state["last_response_for_continuity"] = None
 
     try:
-        print("Invoking workflow via SDK...")
+        logger.debug(f"Invoking workflow via SDK for thread {thread_id}...")
         _append_debug_log(
             run_id="sdk-version",
             hypothesis_id="H3",
@@ -309,6 +314,8 @@ async def chat(
         
         pending_responses = final_state.get("pending_responses", [])
         
+        # 兼容旧逻辑：如果 pending_responses 为空，但有 response 字段（虽然这种情况在 SDK 模式下较少见）
+        # 或者为了前端兼容性，我们仍然构建一个 response 字符串
         if pending_responses:
             combined_response = "\n\n".join([r["content"] for r in pending_responses if r.get("content")])
         else:
@@ -329,12 +336,121 @@ async def chat(
             },
         )
         
+        try:
+            normalized = []
+            fs_msgs = final_state.get("messages")
+            if isinstance(fs_msgs, list) and fs_msgs:
+                for m in fs_msgs:
+                    if isinstance(m, dict):
+                        role = m.get("role") or (m.get("type") if m.get("type") in ["human", "ai"] else "")
+                        content = m.get("content")
+                    else:
+                        role = "user" if getattr(m, "type", "") == "human" else ("assistant" if getattr(m, "type", "") == "ai" else "")
+                        content = getattr(m, "content", "")
+                    if content and role in ["user", "assistant", "human", "ai"]:
+                        normalized.append({"role": "user" if role in ["user", "human"] else "assistant", "content": content})
+            if not normalized and isinstance(final_state.get("layer3_memory"), dict):
+                alt = final_state["layer3_memory"].get("all_messages")
+                if isinstance(alt, list):
+                    for m in alt:
+                        if isinstance(m, dict):
+                            role = m.get("role")
+                            content = m.get("content")
+                            if content and role in ["user", "assistant"]:
+                                normalized.append({"role": role, "content": content})
+            if not normalized and pending_responses:
+                normalized.append({"role": "user", "content": request.message})
+                first = next((r for r in pending_responses if r.get("content")), None)
+                if first:
+                    normalized.append({"role": "assistant", "content": first["content"]})
+            if normalized:
+                update_thread_state(thread_id, {"messages": normalized})
+                logger.info(f"Persisted {len(normalized)} messages to thread {thread_id}")
+        except Exception as e:
+            logger.error(f"Persist messages failed for thread {thread_id}: {e}", exc_info=True)
+        
+        # 构造标准响应
+        # 优先使用 pending_responses (结构化消息)
+        # 同时也填充 response 字段作为 fallback
         return {
-            "response": combined_response,
-            "pending_responses": pending_responses,
+            "response": combined_response,  # Fallback for legacy clients
+            "pending_responses": pending_responses, # Structured messages
             "state": final_state
         }
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/chat/history/{thread_id}")
+async def get_chat_history(thread_id: str, current_user=Depends(get_optional_user_dep)):
+    logger.info(f"get_chat_history request: thread_id={thread_id}, user={current_user['user_id'] if current_user else 'anonymous'}")
+    
+    if current_user:
+        from supabase_service.client import get_thread_by_user
+        user_thread = await get_thread_by_user(current_user['user_id'])
+        if not user_thread or user_thread['thread_id'] != thread_id:
+            logger.warning(f"Security: User {current_user['user_id']} accessing thread {thread_id} not bound to them.")
+    
+    try:
+        from api.sdk_client import get_thread_state
+        t0 = time.perf_counter()
+        state = get_thread_state(thread_id)
+        t1 = time.perf_counter()
+        logger.info(f"State fetched for thread {thread_id} in {int((t1 - t0)*1000)}ms")
+        if not state:
+            logger.info(f"No state found for thread {thread_id}")
+            return {"success": True, "messages": [], "state": None}
+            
+        if "messages" not in state and not (isinstance(state.get("layer3_memory"), dict) and isinstance(state["layer3_memory"].get("all_messages"), list)):
+            logger.info(f"State found but no messages for thread {thread_id}")
+            return {"success": True, "messages": [], "state": state}
+        
+        messages = state["messages"] if isinstance(state.get("messages"), list) else []
+        if not messages and isinstance(state.get("layer3_memory"), dict):
+            alt = state["layer3_memory"].get("all_messages")
+            messages = alt if isinstance(alt, list) else []
+        clean_messages = []
+        for msg in messages:
+            role = ""
+            content = ""
+            if isinstance(msg, dict):
+                role = msg.get("role") or (msg.get("type") if msg.get("type") in ["human", "ai"] else "")
+                content = msg.get("content")
+            else:
+                role = "user" if msg.type == "human" else ("assistant" if msg.type == "ai" else "")
+                content = getattr(msg, "content", "")
+
+            if content and role in ["user", "assistant", "human", "ai"]:
+                normalized_role = "user" if role in ["user", "human"] else "assistant"
+                cleaned_content = content
+                if isinstance(content, str):
+                    s = content.strip()
+                    if s.startswith("```"):
+                        try:
+                            first_nl = s.find("\n")
+                            body = s[first_nl + 1 :] if first_nl != -1 else s
+                            end_idx = body.rfind("```")
+                            if end_idx != -1:
+                                body = body[:end_idx]
+                            s = body.strip()
+                        except Exception:
+                            pass
+                    try:
+                        obj = json.loads(s)
+                        if isinstance(obj, dict) and isinstance(obj.get("response"), str):
+                            cleaned_content = obj.get("response")
+                    except Exception:
+                        cleaned_content = content
+                clean_messages.append({"role": normalized_role, "content": cleaned_content})
+        
+        logger.info(f"Returning {len(clean_messages)} messages for thread {thread_id}")
+        return {
+            "success": True, 
+            "messages": clean_messages, 
+            "state": state
+        }
+    except Exception as e:
+        logger.error(f"get_chat_history failed: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}

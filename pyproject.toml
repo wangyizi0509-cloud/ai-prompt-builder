@@ -31,7 +31,8 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["graph", "api", "onboarding", "skills", "utils", "supabase_service"]
+packages = ["agent_impl.graph", "agent_impl.api", "agent_impl.onboarding", "agent_impl.skills", "agent_impl.utils", "agent_impl.supabase_service"]
+package-dir = {"" = "."}
 
 [tool.pytest.ini_options]
 markers = [

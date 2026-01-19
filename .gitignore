@@ -16,6 +16,17 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+# 忽略本地数据库
+checkpoints.db
+checkpoints.db-shm
+checkpoints.db-wal
+.langgraph_api/
+*.pckl
+
+# 忽略日志文件
+agent_impl/logs/
+*.log
+
 # 保留重要文件
 !index.html
 !prompt_builder.html

@@ -26,7 +26,6 @@ from tests.conftest import (
 )
 
 from graph.state import create_initial_state
-from graph.state_storage import save_state, load_state, delete_state
 from graph.crush_chat_storage import CrushChatManager, create_crush_chat_manager
 from graph.archive_manager import check_conversation_compression_needed, check_layer3_compression_needed, LAYER3_ARCHIVE_CONFIG
 
@@ -256,44 +255,6 @@ class TestConversationCompression:
 
 
 # ============================================================
-# 测试 7: 本地持久化
-# ============================================================
-
-class TestLocalPersistence:
-    """测试本地 JSON 持久化"""
-    
-    def test_save_and_load_state(self, clean_test_user):
-        """
-        保存状态后重新加载，数据应该完整恢复
-        """
-        user_id = clean_test_user
-        
-        # 创建测试状态
-        original_state = create_initial_state("测试消息")
-        original_state["user_context"]["user_info"]["user_provide"] = "测试用户信息"
-        original_state["user_context"]["crush_info"]["crush_name"] = "测试Crush"
-        original_state["status_report"] = {"stage": "L2", "summary": "测试报告"}
-        
-        # 保存
-        save_state(user_id, original_state)
-        print(f"已保存状态到用户 {user_id}")
-        
-        # 加载
-        loaded_state = load_state(user_id)
-        assert loaded_state is not None, "应该能加载状态"
-        
-        # 验证关键字段
-        assert loaded_state.get("user_context", {}).get("user_info", {}).get("user_provide") == "测试用户信息"
-        assert loaded_state.get("user_context", {}).get("crush_info", {}).get("crush_name") == "测试Crush"
-        assert loaded_state.get("status_report", {}).get("stage") == "L2"
-        
-        # 验证 messages
-        assert len(loaded_state.get("messages", [])) == len(original_state.get("messages", []))
-        
-        print("✅ 本地持久化测试通过")
-
-
-# ============================================================
 # 测试 8: Crush 聊天记录
 # ============================================================
 
@@ -370,12 +331,10 @@ class TestCrushChatStorage:
 class TestFullFlow:
     """完整流程集成测试"""
     
-    def test_multi_turn_conversation(self, workflow, clean_test_user):
+    def test_multi_turn_conversation(self, workflow):
         """
         测试多轮对话的完整流程
         """
-        user_id = clean_test_user
-        
         # 第一轮：自我介绍
         state = create_initial_state("我叫小明，25岁，在互联网公司工作")
         state = workflow.invoke(state)
@@ -388,9 +347,6 @@ class TestFullFlow:
         # 第三轮：描述关系
         state = run_workflow_turn(workflow, state, "我们认识三个月了，经常一起吃饭")
         print(f"\n第3轮 AI 回复: {get_ai_response(state)[:150]}...")
-        
-        # 保存状态
-        save_state(user_id, state)
         
         # 打印最终状态摘要
         print_state_summary(state, "多轮对话完整流程测试")

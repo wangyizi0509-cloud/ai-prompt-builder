@@ -7,13 +7,13 @@ import pytest
 from graph.state import (
     create_initial_state,
     AgentState,
+    migrate_to_layered_memory,
     migrate_user_profile_to_context,
     get_active_action_guides,
     get_completed_action_guides,
 )
-from graph.state_storage import save_state, load_state, delete_state
 from graph.context_types import create_empty_user_context, create_empty_history_archive
-from tests.conftest import create_test_state, assert_state_valid, clean_test_user
+from tests.conftest import create_test_state, assert_state_valid
 
 
 class TestStateManagement:
@@ -63,54 +63,6 @@ class TestStateManagement:
         assert state["next_action"] == "call_status", "next_action 应该更新"
         assert state["current_agent"] == "status_agent", "current_agent 应该更新"
         assert state["question_count"] == 1, "question_count 应该更新"
-    
-    def test_state_persistence(self, clean_test_user):
-        """测试状态持久化"""
-        user_id = clean_test_user
-        
-        # 创建测试状态
-        original_state = create_initial_state("测试消息")
-        original_state["user_context"]["user_info"]["user_provide"] = "测试用户信息"
-        original_state["user_context"]["crush_info"]["crush_name"] = "测试Crush"
-        original_state["status_report"] = {"stage": "L2", "summary": "测试报告"}
-        original_state["action_plan"] = {"goal": "测试目标", "strategy": "测试策略"}
-        
-        # 保存状态
-        save_state(user_id, original_state)
-        
-        # 加载状态
-        loaded_state = load_state(user_id)
-        assert loaded_state is not None, "应该能加载状态"
-        
-        # 验证关键字段
-        assert loaded_state.get("user_message") == original_state.get("user_message"), "user_message 应该一致"
-        assert loaded_state.get("user_context", {}).get("user_info", {}).get("user_provide") == "测试用户信息", "user_info 应该一致"
-        assert loaded_state.get("user_context", {}).get("crush_info", {}).get("crush_name") == "测试Crush", "crush_name 应该一致"
-        assert loaded_state.get("status_report", {}).get("stage") == "L2", "status_report 应该一致"
-        assert loaded_state.get("action_plan", {}).get("goal") == "测试目标", "action_plan 应该一致"
-        
-        # 验证 messages
-        assert len(loaded_state.get("messages", [])) == len(original_state.get("messages", [])), "messages 数量应该一致"
-    
-    def test_state_restore(self, clean_test_user):
-        """测试状态恢复"""
-        user_id = clean_test_user
-        
-        # 创建并保存状态
-        original_state = create_initial_state("原始消息")
-        original_state["user_context"]["user_info"]["user_provide"] = "原始信息"
-        save_state(user_id, original_state)
-        
-        # 修改状态
-        original_state["user_message"] = "修改后的消息"
-        original_state["user_context"]["user_info"]["user_provide"] = "修改后的信息"
-        
-        # 从存储恢复
-        restored_state = load_state(user_id)
-        
-        # 验证恢复的状态是原始状态，不是修改后的
-        assert restored_state.get("user_message") == "原始消息", "应该恢复原始消息"
-        assert restored_state.get("user_context", {}).get("user_info", {}).get("user_provide") == "原始信息", "应该恢复原始信息"
     
     def test_state_resume_agent(self):
         """测试 Agent 恢复执行状态"""
@@ -163,7 +115,7 @@ class TestStateManagement:
         history_archive = state.get("history_archive", {})
         assert "status_history" in history_archive, "应该有 status_history"
         assert "guide_history" in history_archive, "应该有 guide_history"
-        assert "conversation_archive" in history_archive, "应该有 conversation_archive"
+        assert "conversation_archives" in history_archive, "应该有 conversation_archives"
     
     def test_state_migration(self):
         """测试状态迁移（UserProfile -> UserContext）"""

@@ -4,18 +4,19 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from typing import Literal, Optional
+from typing import Literal
 
-router = APIRouter()
+router = APIRouter(prefix="/api")
 security = HTTPBearer(auto_error=False)
-
-LOG_PATH = Path("/Users/ant/Desktop/Crushe/模型策略/.cursor/debug.log")
 
 
 class StreamChatRequest(BaseModel):
     message: str
     session_id: str
-    stream_mode: Optional[Literal["values", "updates", "messages", "debug"]] = "updates"
+    stream_mode: Literal["values", "updates", "messages", "debug"] = "updates"
+
+
+LOG_PATH = Path("/Users/ant/Desktop/Crushe/模型策略/.cursor/debug.log")
 
 
 async def get_optional_user_dep(
@@ -48,8 +49,6 @@ def _append_debug_log(run_id: str, hypothesis_id: str, location: str, message: s
 def _run_maintenance_tasks_sdk(session_id: str, thread_id: str) -> None:
     """
     后台消费 maintenance_queue - 使用 SDK 版本
-    - 读取最新 state（避免拿到过期的 final_state）
-    - best-effort 执行：失败记录在 queue item 里，下一轮可重试
     """
     from graph.archive_manager import (
         refine_on_onboarding_complete,
@@ -60,7 +59,6 @@ def _run_maintenance_tasks_sdk(session_id: str, thread_id: str) -> None:
         archive_plan_to_layer2,
     )
     from datetime import datetime
-
     from api.sdk_client import get_thread_state, update_thread_state
     state = get_thread_state(thread_id)
     if not state:
@@ -260,14 +258,6 @@ async def chat_stream(
 ):
     """
     流式聊天接口 - 实时查看 Agent 执行过程（通过 SDK）
-    
-    支持多种流模式：
-    - values: 每个步骤后的完整状态
-    - updates: 每个步骤的状态更新（推荐）
-    - messages: LLM tokens 和元数据
-    - debug: 最详细的调试信息
-    
-    使用 Server-Sent Events (SSE) 格式返回数据
     """
     print(f"[Stream SDK] Received message from session {request.session_id}: {request.message}")
     print(f"[Stream SDK] Stream mode: {request.stream_mode}")
@@ -301,122 +291,17 @@ async def chat_stream(
         final_state = None
         try:
             for chunk in run_assistant(thread_id, state, stream_mode=request.stream_mode):
-                event_name = request.stream_mode or "values"
-                chunk_data = {
-                    "event": event_name,
-                    "data": chunk.data if hasattr(chunk, 'data') else chunk,
-                    "stream_mode": request.stream_mode
-                }
+                final_state = chunk.data
+                yield f"data: {json.dumps(chunk.dict(), ensure_ascii=False)}\n\n"
+            
+            # 后台运行维护任务
+            if final_state:
+                background_tasks.add_task(_run_maintenance_tasks_sdk, request.session_id, thread_id)
                 
-                _append_debug_log(
-                    run_id="sdk-version",
-                    hypothesis_id="H3",
-                    location="api/stream.py:chat_stream:chunk",
-                    message="Stream chunk via SDK",
-                    data={
-                        "event": event_name,
-                        "has_inquiry_card": bool(chunk.data.get("inquiry_card")) if hasattr(chunk, 'data') and isinstance(chunk.data, dict) else False,
-                        "has_pending_responses": bool(chunk.data.get("pending_responses")) if hasattr(chunk, 'data') and isinstance(chunk.data, dict) else False,
-                        "pending_resp_count": len(chunk.data.get("pending_responses", []) or []) if hasattr(chunk, 'data') and isinstance(chunk.data, dict) else None,
-                        "nodes": list(chunk.data.keys()) if hasattr(chunk, 'data') and isinstance(chunk.data, dict) else None,
-                    },
-                )
-
-                yield f"data: {json.dumps(chunk_data, ensure_ascii=False, default=str)}\n\n"
-                
-                if request.stream_mode == "values":
-                    final_state = chunk.data if hasattr(chunk, 'data') else chunk
-                elif request.stream_mode == "updates":
-                    if isinstance(chunk.data, dict):
-                        for node_name, node_update in chunk.data.items():
-                            if isinstance(node_update, dict):
-                                state.update(node_update)
-                                _append_debug_log(
-                                    run_id="sdk-version",
-                                    hypothesis_id="H2",
-                                    location="api/stream.py:chat_stream:updates_merge",
-                                    message="Merging stream update via SDK",
-                                    data={
-                                        "node": node_name,
-                                        "has_inquiry_card": bool(node_update.get("inquiry_card")),
-                                        "pending_resp_count": len(node_update.get("pending_responses", []) or []),
-                                        "onboarding_completed": node_update.get("onboarding_completed"),
-                                        "next_action": node_update.get("next_action"),
-                                    },
-                                )
-                    final_state = state
-                    
-                    if isinstance(chunk.data, dict):
-                        for node_name, node_update in chunk.data.items():
-                            if isinstance(node_update, dict) and "messages" in node_update:
-                                messages = node_update["messages"]
-                                if messages:
-                                    last_msg = messages[-1]
-                                    if hasattr(last_msg, "content") and last_msg.content:
-                                        info = {
-                                            "type": "info",
-                                            "node": node_name,
-                                            "message": f"Agent 回复: {last_msg.content[:100]}..."
-                                        }
-                                        yield f"data: {json.dumps(info, ensure_ascii=False)}\n\n"
-                                    elif hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-                                        tool_names = [tc.get("name", "unknown") for tc in last_msg.tool_calls]
-                                        info = {
-                                            "type": "info",
-                                            "node": node_name,
-                                            "message": f"调用工具: {', '.join(tool_names)}"
-                                        }
-                                        yield f"data: {json.dumps(info, ensure_ascii=False)}\n\n"
-            
-            if final_state is None:
-                final_state = state
-            
-            background_tasks.add_task(_run_maintenance_tasks_sdk, request.session_id, thread_id)
-            
-            _append_debug_log(
-                run_id="sdk-version",
-                hypothesis_id="H2",
-                location="api/stream.py:chat_stream:final_state",
-                message="Final state before stream completion via SDK",
-                data={
-                    "has_pending_responses": bool(final_state.get("pending_responses")),
-                    "pending_resp_count": len(final_state.get("pending_responses", []) or []),
-                    "pending_first_has_card": bool(final_state.get("pending_responses", [{}])[0].get("inquiry_card")) if final_state.get("pending_responses") else False,
-                    "state_has_inquiry_card": bool(final_state.get("inquiry_card")),
-                    "onboarding_completed": final_state.get("onboarding_completed"),
-                    "next_action": final_state.get("next_action"),
-                },
-            )
-            
-            completion = {
-                "type": "done",
-                "message": "流式执行完成",
-                "final_state": {
-                    "message_count": len(final_state.get("messages", [])),
-                    "has_response": bool(final_state.get("pending_responses")),
-                }
-            }
-            yield f"data: {json.dumps(completion, ensure_ascii=False, default=str)}\n\n"
-            
+            yield "data: [DONE]\n\n"
         except Exception as e:
             import traceback
-            error_trace = traceback.format_exc()
-            print(f"[Stream SDK] Error: {error_trace}")
-            
-            error_data = {
-                "type": "error",
-                "error": str(e),
-                "traceback": error_trace
-            }
-            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
-    
-    return StreamingResponse(
-        generate_stream(),
-        media_type="text/event-stream",
-        background=background_tasks,
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
-    )
+            traceback.print_exc()
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(generate_stream(), media_type="text/event-stream")

@@ -1,4 +1,5 @@
-from typing import TypedDict, Optional, Any
+from typing import Optional, Any
+from typing_extensions import TypedDict
 
 
 class OnboardingHandoff(TypedDict, total=False):

@@ -22,7 +22,6 @@ from typing import Literal, Optional
 import os
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
-from langgraph.checkpoint.memory import MemorySaver
 
 from graph.state import AgentState
 from graph.state import convert_message_to_dict
@@ -503,55 +502,32 @@ def create_workflow() -> StateGraph:
     return workflow
 
 
-def build_checkpointer_from_env():
-    """
-    返回内存 checkpointer（LangGraph Studio dev 模式使用 in-memory）
-    """
-    return MemorySaver()
-
-
-def compile_workflow(checkpointer=None):
+def compile_workflow():
     """
     编译工作流
-    
-    Args:
-        checkpointer: 可选的 checkpointer 实例，默认使用 MemorySaver
     
     Returns:
         可执行的工作流实例
     """
     workflow = create_workflow()
-    
-    # 如果未提供 checkpointer，使用环境变量决定（默认 MemorySaver）
-    if checkpointer is None:
-        checkpointer = build_checkpointer_from_env()
-    
-    return workflow.compile(checkpointer=checkpointer)
+    return workflow.compile()
 
 
 # 创建全局工作流实例（单例模式）
 _compiled_workflow = None
-_current_checkpointer = None
 
 
-def get_workflow(checkpointer=None):
+def get_workflow():
     """
     获取编译后的工作流（单例模式）
-    
-    Args:
-        checkpointer: 可选的 checkpointer 实例
-                     - 如果提供新的 checkpointer，会重新编译工作流
-                     - 如果为 None 且之前已编译，返回缓存的实例
     
     Returns:
         编译后的工作流实例
     """
-    global _compiled_workflow, _current_checkpointer
+    global _compiled_workflow
     
-    # 如果提供了新的 checkpointer 或首次调用，重新编译
-    if _compiled_workflow is None or (checkpointer is not None and checkpointer is not _current_checkpointer):
-        _current_checkpointer = checkpointer
-        _compiled_workflow = compile_workflow(checkpointer)
+    if _compiled_workflow is None:
+        _compiled_workflow = compile_workflow()
     
     return _compiled_workflow
 
@@ -559,10 +535,7 @@ def get_workflow(checkpointer=None):
 def reset_workflow():
     """
     重置工作流实例
-    
-    用于测试或需要重新初始化工作流的场景
     """
-    global _compiled_workflow, _current_checkpointer
+    global _compiled_workflow
     _compiled_workflow = None
-    _current_checkpointer = None
 

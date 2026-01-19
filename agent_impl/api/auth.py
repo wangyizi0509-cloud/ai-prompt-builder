@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -17,6 +18,12 @@ class LoginRequest(BaseModel):
     password: str
 
 
+from utils.logger import get_logger
+
+logger = get_logger("auth")
+
+ALLOW_REGISTRATION = os.getenv("ALLOW_REGISTRATION", "false").lower() == "true"
+
 @router.post("/register")
 async def register(request: RegisterRequest):
     """
@@ -24,6 +31,8 @@ async def register(request: RegisterRequest):
     """
     from auth_utils import create_jwt_token
     from supabase_service.client import create_user
+    if not ALLOW_REGISTRATION:
+        raise HTTPException(status_code=403, detail="Registration is currently disabled")
 
     if not request.email or not request.password or not request.username:
         raise HTTPException(status_code=400, detail="All fields are required")
@@ -93,4 +102,27 @@ async def get_current_user_info(current_user=Depends(get_current_user_dep)):
     return {
         'success': True,
         'user': user_info
+    }
+
+
+@router.get("/me/thread")
+async def get_user_thread_info(current_user=Depends(get_current_user_dep)):
+    """
+    获取当前登录用户的 Thread 信息
+    """
+    logger.debug(f"get_user_thread_info request for user: {current_user['user_id']}")
+    from supabase_service.client import get_thread_by_user
+    user_thread = await get_thread_by_user(current_user['user_id'])
+    
+    if not user_thread:
+        logger.info(f"No thread bound for user: {current_user['user_id']}")
+        return {
+            'success': True,
+            'thread_id': None
+        }
+    
+    logger.info(f"Found thread {user_thread['thread_id']} for user: {current_user['user_id']}")
+    return {
+        'success': True,
+        'thread_id': user_thread['thread_id']
     }

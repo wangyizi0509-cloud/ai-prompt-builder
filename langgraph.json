@@ -1,7 +1,7 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "crushe_agent": "./agent.py:graph"
+    "crushe_agent": "./agent_impl/agent.py:graph"
   },
   "python_version": "3.11",
   "image_distro": "wolfi",

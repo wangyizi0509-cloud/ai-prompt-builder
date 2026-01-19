@@ -25,12 +25,12 @@ api_router = APIRouter()
 if auth_router is not None:
     api_router.include_router(auth_router, prefix="/api/auth", tags=["认证"])
 if upload_router is not None:
-    api_router.include_router(upload_router, tags=["上传"])
+    api_router.include_router(upload_router, prefix="/api/upload", tags=["上传"])
 if chat_router is not None:
     api_router.include_router(chat_router, tags=["聊天"])
 if stream_router is not None:
     api_router.include_router(stream_router, tags=["流式聊天"])
 if guide_router is not None:
-    api_router.include_router(guide_router, tags=["指南"])
+    api_router.include_router(guide_router, prefix="/api/guide", tags=["指南"])
 if debug_router is not None:
     api_router.include_router(debug_router, prefix="/api/debug", tags=["调试"])
