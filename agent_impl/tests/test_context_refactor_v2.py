@@ -14,7 +14,7 @@ from graph.context_types import (
 )
 from graph.context_builder import extract_layer1, extract_layer2, extract_layer3
 from graph.tools.task_tools import append_task_note_impl, complete_task_impl, format_task_index
-from graph.tools.bind_context_tools import bind_context_impl
+from graph.tools.context_loader import create_context_loader
 from graph.layer1_writer import save_atomic_memory
 
 
@@ -91,21 +91,19 @@ class TestBoundContext:
         state = _base_state()
         task = create_new_task("任务A", "摘要")
         state["layer3_memory"]["task_registry"]["main_agent"] = [task]
+        state["layer2_memory"]["action_guides"] = [{
+            "id": "g1",
+            "title": "指南A",
+            "status": "pending",
+            "created_at": "2026-01-10T10:00:00",
+            "guide_content": "内容1",
+            "guide": {"current_task": "指南A", "guide_content": "内容1"},
+        }]
 
-        _, _ = bind_context_impl(
-            state,
-            context_type="custom",
-            title="A",
-            content_md="内容1",
-            ref_id="ref-1",
-        )
-        _, _ = bind_context_impl(
-            state,
-            context_type="custom",
-            title="A2",
-            content_md="内容2",
-            ref_id="ref-1",
-        )
+        tool = create_context_loader(lambda: state, "main_agent")
+        tool.invoke({"action": "bind", "context_type": "action_guide", "context_id": "g1"})
+        state["layer2_memory"]["action_guides"][0]["guide_content"] = "内容2"
+        tool.invoke({"action": "bind", "context_type": "action_guide", "context_id": "g1"})
         active = state["layer3_memory"]["task_registry"]["main_agent"][0]
         bound = active.get("bound_contexts", [])
         assert len(bound) == 1
@@ -148,8 +146,8 @@ class TestMarkdownHistory:
         ]
         text = extract_layer3(state)
         assert "## 对话" in text
-        assert "[U 01-15 14:30]" in text
-        assert "[A 01-15 14:31]" in text
+        assert "[01-15 14:30]" in text
+        assert "[01-15 14:31]" in text
 
     def test_no_thought_in_output(self):
         state = _base_state()

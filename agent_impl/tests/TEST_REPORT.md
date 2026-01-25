@@ -27,10 +27,10 @@
 
 **结果**: 8/8 通过 ✅
 
-#### 3. Skills 元数据测试 (`test_skills.py`)
-- ✅ `test_inquiry_skill_metadata` - Inquiry Skill 元数据
-- ✅ `test_consult_skill_metadata` - Consult Answer Skill 元数据
-- ✅ `test_emotion_skill_metadata` - Emotion Support Skill 元数据
+#### 3. Skills 注册与加载测试 (`test_skills.py`)
+- ✅ `test_registry_contains_core_skills` - 核心 Skill 发现
+- ✅ `test_registry_metadata_fields` - 元数据字段完整
+- ✅ `test_load_skill_returns_content` - 指令可加载
 
 **结果**: 3/3 通过 ✅
 
@@ -78,9 +78,8 @@
 - Guide Agent 功能 ✅
 
 #### ✅ Skills
-- Inquiry Skill ✅
-- Consult Answer Skill ✅
-- Emotion Support Skill ✅
+- registry 扫描 ✅
+- 指令加载 ✅
 
 #### ✅ 工作流
 - 节点编排 ✅

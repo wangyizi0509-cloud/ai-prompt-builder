@@ -51,11 +51,9 @@ class TestMainAgent:
         assert_agent_output(result)
         
         # 可能需要提问（取决于模型判断）
-        # 如果有提问，应该设置相关字段
-        if result.get("next_action") == "ask_user":
+        if result.get("inquiry_card") or result.get("pending_questions"):
             assert result.get("current_agent") == "main_agent", "current_agent 应该是 main_agent"
             assert result.get("agent_resume_point") == "continue_decision", "应该有恢复点"
-            assert result.get("inquiry_card") is not None or result.get("pending_questions"), "应该有提问卡片或问题列表"
     
     def test_main_agent_call_sub_agent(self, workflow):
         """测试调用子 Agent 决策"""
@@ -69,10 +67,11 @@ class TestMainAgent:
         assert_state_valid(result)
         assert_agent_output(result)
         
-        # 可能调用 status_agent（取决于模型判断）
-        next_action = result.get("next_action")
-        if next_action in ["call_status", "call_plan", "call_guide"]:
-            assert next_action in ["call_status", "call_plan", "call_guide"], "应该调用子 Agent"
+        # 可能调用子 Agent（取决于模型判断）
+        if result.get("completion_status") == "COMPLETED":
+            assert any(
+                key in result for key in ("status_report", "action_plan", "action_guides", "action_guide")
+            ), "调用子 Agent 后应产生报告或指南"
     
     def test_main_agent_resume_after_question(self, workflow):
         """测试提问后恢复执行"""
@@ -90,8 +89,8 @@ class TestMainAgent:
         assert_state_valid(result)
         assert_agent_output(result)
         
-        # 恢复后应该继续决策
-        assert "next_action" in result, "应该有下一步动作"
+        # 恢复后应该继续决策（至少保持有消息或响应）
+        assert result.get("messages") is not None, "应该有消息输出"
     
     def test_main_agent_redecision_after_sub_agent(self, workflow):
         """测试子 Agent 返回后再决策"""

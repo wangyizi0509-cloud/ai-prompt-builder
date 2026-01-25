@@ -32,8 +32,8 @@ class TestWorkflowIntegration:
         response = get_ai_response(result)
         assert len(response) > 0, "应该有 AI 回复"
         
-        # 简单咨询应该直接结束
-        assert result.get("next_action") in ["end_turn", "ask_user"], "应该结束或提问"
+        # 简单咨询应该直接结束或进入提问
+        assert result.get("pending_questions") or result.get("pending_responses"), "应该有回复或提问"
     
     def test_workflow_full_onboarding(self, workflow):
         """测试完整首次进入流程"""
@@ -67,18 +67,10 @@ class TestWorkflowIntegration:
         result = workflow.invoke(state)
         assert_state_valid(result)
         
-        # 验证可能触发的 Agent 调用
-        next_action = result.get("next_action")
-        if next_action == "call_status":
-            # 继续执行到 status_agent
+        # 如果 status_agent 完成，可能继续调用 plan_agent
+        if result.get("completion_status") == "COMPLETED":
             result = workflow.invoke(result)
             assert_state_valid(result)
-            
-            # 如果 status_agent 完成，可能继续调用 plan_agent
-            if result.get("completion_status") == "COMPLETED":
-                # 回到主 Agent 再决策
-                result = workflow.invoke(result)
-                assert_state_valid(result)
     
     def test_workflow_resume_mechanism(self, workflow):
         """测试恢复执行机制"""
@@ -88,7 +80,7 @@ class TestWorkflowIntegration:
         assert_state_valid(result)
         
         # 如果需要提问
-        if result.get("next_action") == "ask_user" and result.get("current_agent"):
+        if result.get("pending_questions") and result.get("current_agent"):
             current_agent = result.get("current_agent")
             resume_point = result.get("agent_resume_point")
             

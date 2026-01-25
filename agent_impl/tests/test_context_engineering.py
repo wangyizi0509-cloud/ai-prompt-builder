@@ -236,13 +236,23 @@ class TestConversationCompression:
         
         print(f"配置: threshold={threshold}, batch_size={batch_size}")
         
-        # 测试不同消息数量
+        # 测试不同消息数量（基于配置动态生成，避免硬编码失配）
+        threshold = int(threshold or 0)
+        batch_size = int(batch_size or 1)
+        base = max(threshold, 1)
+        msg_counts = [
+            max(base - 1, 1),          # 低于阈值
+            base,                      # 刚到阈值，不触发
+            base + batch_size,         # 超出 1 个 batch
+            base + batch_size + 1,     # 再多 1 条
+            base + 2 * batch_size,     # 超出 2 个 batch
+        ]
         test_cases = [
-            (44, False),
-            (45, False),  # 刚到阈值，不触发
-            (50, True),   # 超出 5 轮，触发
-            (51, False),
-            (55, True),   # 超出 10 轮，触发
+            (
+                msg_count,
+                (msg_count > threshold) and ((msg_count - threshold) % batch_size == 0),
+            )
+            for msg_count in msg_counts
         ]
         
         for msg_count, expected in test_cases:

@@ -12,6 +12,7 @@ from graph.state import (
     get_active_action_guides,
     get_completed_action_guides,
 )
+from graph.workflow import _wrap_step_counter
 from graph.context_types import create_empty_user_context, create_empty_history_archive
 from tests.conftest import create_test_state, assert_state_valid
 
@@ -28,6 +29,8 @@ class TestStateManagement:
         assert len(state["messages"]) == 1, "应该有1条初始消息"
         assert state["messages"][0]["role"] == "user", "第一条消息应该是用户消息"
         assert state["messages"][0]["content"] == "测试消息", "消息内容应该正确"
+        assert state.get("current_message_id"), "current_message_id 应该存在"
+        assert state["messages"][0].get("id") == state["current_message_id"], "首条消息 id 应与 current_message_id 一致"
         
         # 验证上下文字段
         assert "user_context" in state, "应该有 user_context"
@@ -38,8 +41,6 @@ class TestStateManagement:
         
         # 验证流程控制字段
         assert "intent_type" in state, "应该有 intent_type"
-        assert "next_action" in state, "应该有 next_action"
-        assert state["next_action"] == "end_turn", "初始 next_action 应该是 end_turn"
         
         # 验证 Agent 执行状态字段
         assert "current_agent" in state, "应该有 current_agent"
@@ -54,13 +55,11 @@ class TestStateManagement:
         
         # 更新状态
         state["user_message"] = "新消息"
-        state["next_action"] = "call_status"
         state["current_agent"] = "status_agent"
         state["question_count"] = 1
         
         # 验证更新
         assert state["user_message"] == "新消息", "user_message 应该更新"
-        assert state["next_action"] == "call_status", "next_action 应该更新"
         assert state["current_agent"] == "status_agent", "current_agent 应该更新"
         assert state["question_count"] == 1, "question_count 应该更新"
     
@@ -174,6 +173,22 @@ class TestStateManagement:
         completed_guides = get_completed_action_guides(state["action_guides"])
         assert len(completed_guides) == 2, "应该有2个终态指南"
         assert all(g.get("status") in ["completed", "cancelled", "expired"] for g in completed_guides), "终态指南状态应该正确"
+
+    def test_wrap_step_counter_adds_message_id(self):
+        """测试统一 wrapper 会为 messages 补 id 且不覆盖已有 id"""
+        def dummy_node(_state):
+            return {"messages": [{"role": "assistant", "content": "hi"}]}
+
+        wrapped = _wrap_step_counter("dummy", dummy_node)
+        out = wrapped({})
+        assert out["messages"][0].get("id"), "wrapper 应该为消息补 id"
+
+        def dummy_node_with_id(_state):
+            return {"messages": [{"role": "assistant", "content": "ok", "id": "fixed-id"}]}
+
+        wrapped_with_id = _wrap_step_counter("dummy_with_id", dummy_node_with_id)
+        out_with_id = wrapped_with_id({})
+        assert out_with_id["messages"][0].get("id") == "fixed-id", "wrapper 不应覆盖已有 id"
 
 
 

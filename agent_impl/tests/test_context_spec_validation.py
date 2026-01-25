@@ -308,7 +308,7 @@ def create_test_messages() -> list[dict]:
         "created_at": (base_time + timedelta(minutes=1)).isoformat(),
     }
     msg3 = {
-        "role": "system",
+        "role": "assistant",
         "content": "现状报告已更新",
         "created_at": (base_time + timedelta(minutes=2)).isoformat(),
     }
@@ -365,10 +365,8 @@ class TestLayer2Format:
         output = extract_layer2(state)
 
         assert "## 行动指南" in output
-        assert "🔥 进行中" in output
-        assert "⏸️ 已暂停" in output
-        assert "📋 待执行" in output
-        assert "📁 其他记录" in output
+        assert "🔥 当前进行中" in output
+        assert "📋 其他指南" in output
         assert "首次破冰对话" in output
 
     def test_layer2_history_summaries_format(self):
@@ -391,9 +389,9 @@ class TestLayer3Format:
         assert "## 任务笔记" in output
         assert "## 对话" in output
 
-        assert "[U " in output
-        assert "[A " in output
-        assert "[S " in output
+        assert "[01-15 14:30]" in output
+        assert "[01-15 14:31]" in output
+        assert "[01-15 14:32]" in output
 
     def test_layer3_assistant_message_slimming(self):
         state = {
@@ -404,6 +402,7 @@ class TestLayer3Format:
         output = extract_layer3(state)
         assert "我理解你的焦虑" in output
         assert "【提问】" in output
+        assert "Q1:" in output
 
 
 class TestAssemblyOrder:

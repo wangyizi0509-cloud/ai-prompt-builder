@@ -96,15 +96,14 @@ class TestSwitchTask:
         state = state_with_tasks
         
         # 切换到任务 B
-        state_update, result_json = switch_task_impl(state, "写开场白", "main_agent")
-        result = json.loads(result_json)
+        state_update, result = switch_task_impl(state, "写开场白", "main_agent")
         
         # 验证切换成功
         assert result["success"] is True
         assert "写开场白" in result["message"]
         
         # 验证活跃任务变为 B
-        active_task = result["active_task"]
+        active_task = result["current_task"]
         assert active_task["task_id"] == "写开场白"
         assert len(active_task["reasoning_notes"]) == 2  # B 有 2 条笔记
         
@@ -124,12 +123,11 @@ class TestSwitchTask:
         """切换到不存在的任务应失败"""
         state = state_with_tasks
         
-        state_update, result_json = switch_task_impl(state, "不存在的任务", "main_agent")
-        result = json.loads(result_json)
+        state_update, result = switch_task_impl(state, "不存在的任务", "main_agent")
         
         assert result["success"] is False
-        assert "不存在" in result["error"]
-        assert "hint" in result
+        assert "不存在" in result["message"]
+        assert "hint" in (result.get("data") or {})
         
         # 状态不应有更新
         assert state_update == {}
@@ -159,10 +157,9 @@ class TestCreateTask:
         """US2: 创建新任务 D，应新增到列表且设为活跃"""
         state = state_with_tasks
         
-        state_update, result_json = create_task_impl(
+        state_update, result = create_task_impl(
             state, "表白时机", "表白时机", "判断何时表白最合适", "main_agent"
         )
-        result = json.loads(result_json)
         
         # 验证创建成功
         assert result["success"] is True
@@ -186,14 +183,13 @@ class TestCreateTask:
         """尝试创建已存在的 task_id 应失败"""
         state = state_with_tasks
         
-        state_update, result_json = create_task_impl(
+        state_update, result = create_task_impl(
             state, "分析crush态度", "分析crush态度", "重复的任务", "main_agent"
         )
-        result = json.loads(result_json)
         
         assert result["success"] is False
-        assert "已存在" in result["error"]
-        assert "switch_task" in result["hint"]
+        assert "已存在" in result["message"]
+        assert "task_manager" in (result.get("data", {}).get("hint") or "")
         
         # 状态不应有更新
         assert state_update == {}
@@ -202,10 +198,9 @@ class TestCreateTask:
         """创建任务时不提供 summary 应使用默认值"""
         state = empty_state
         
-        state_update, result_json = create_task_impl(
+        state_update, result = create_task_impl(
             state, "新任务名称很长很长的ID", "新任务名称很长很长的ID", "", "main_agent"
         )
-        result = json.loads(result_json)
         
         assert result["success"] is True
         
@@ -225,10 +220,9 @@ class TestAppendTaskNote:
         """追加笔记到当前活跃任务"""
         state = state_with_tasks
         
-        state_update, result_json = append_task_note_impl(
+        state_update, result = append_task_note_impl(
             state, "用户情绪比较焦虑，需要先安抚", None, "main_agent"
         )
-        result = json.loads(result_json)
         
         assert result["success"] is True
         assert result["note_count"] >= 1
@@ -246,10 +240,9 @@ class TestAppendTaskNote:
         """追加笔记到指定任务（非活跃）"""
         state = state_with_tasks
         
-        state_update, result_json = append_task_note_impl(
+        state_update, result = append_task_note_impl(
             state, "补充：用户喜欢幽默风格", "写开场白", "main_agent"
         )
-        result = json.loads(result_json)
         
         assert result["success"] is True
         
@@ -265,25 +258,23 @@ class TestAppendTaskNote:
         """追加笔记到不存在的任务应失败"""
         state = state_with_tasks
         
-        state_update, result_json = append_task_note_impl(
+        state_update, result = append_task_note_impl(
             state, "一些笔记", "不存在的任务", "main_agent"
         )
-        result = json.loads(result_json)
         
         assert result["success"] is False
-        assert "不存在" in result["error"]
+        assert "不存在" in result["message"]
     
     def test_append_note_without_active_task_fails(self, empty_state):
         """没有活跃任务时追加笔记（不指定 task_id）应失败"""
         state = empty_state
         
-        state_update, result_json = append_task_note_impl(
+        state_update, result = append_task_note_impl(
             state, "一些笔记", None, "main_agent"
         )
-        result = json.loads(result_json)
         
         assert result["success"] is False
-        assert "没有活跃任务" in result["error"]
+        assert "没有活跃任务" in result["message"]
 
 
 # ============================================================
@@ -377,26 +368,13 @@ class TestToolIdentification:
     
     def test_is_task_tool(self):
         """验证任务工具识别"""
-        assert is_task_tool("switch_task") is True
-        assert is_task_tool("create_task") is True
-        assert is_task_tool("append_task_note") is True
-        assert is_task_tool("complete_task") is True
-        assert is_task_tool("bind_context") is True
-        assert is_task_tool("unbind_context") is True
-        assert is_task_tool("refresh_context") is True
-        
-        assert is_task_tool("load_inquiry_skill_instructions") is False
+        assert is_task_tool("task_manager") is True
+        assert is_task_tool("load_skill") is False
         assert is_task_tool("") is False
     
     def test_task_tool_names_constant(self):
         """验证工具名称常量"""
-        assert "switch_task" in TASK_TOOL_NAMES
-        assert "create_task" in TASK_TOOL_NAMES
-        assert "append_task_note" in TASK_TOOL_NAMES
-        assert "complete_task" in TASK_TOOL_NAMES
-        assert "bind_context" in TASK_TOOL_NAMES
-        assert "unbind_context" in TASK_TOOL_NAMES
-        assert "refresh_context" in TASK_TOOL_NAMES
+        assert "task_manager" in TASK_TOOL_NAMES
 
 
 # ============================================================
@@ -411,7 +389,7 @@ class TestApplyStateUpdate:
         state = state_with_tasks
         
         update = apply_task_tool_state_update(
-            state, "switch_task", {"task_id": "写开场白"}, "main_agent"
+            state, "task_manager", {"action": "switch", "task_id": "写开场白"}, "main_agent"
         )
         
         assert "layer3_memory" in update
@@ -424,7 +402,10 @@ class TestApplyStateUpdate:
         state = state_with_tasks
         
         update = apply_task_tool_state_update(
-            state, "create_task", {"task_id": "新任务", "title": "新任务", "summary": "新任务摘要"}, "main_agent"
+            state,
+            "task_manager",
+            {"action": "create", "task_id": "新任务", "title": "新任务", "summary": "新任务摘要"},
+            "main_agent",
         )
         
         assert "layer3_memory" in update
@@ -436,7 +417,7 @@ class TestApplyStateUpdate:
         state = state_with_tasks
         
         update = apply_task_tool_state_update(
-            state, "append_task_note", {"note": "测试笔记"}, "main_agent"
+            state, "task_manager", {"action": "append_note", "note": "测试笔记"}, "main_agent"
         )
         
         assert "layer3_memory" in update

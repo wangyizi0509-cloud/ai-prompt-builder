@@ -86,6 +86,12 @@ def test_user_id():
 
 
 @pytest.fixture
+def clean_test_user(test_user_id):
+    """返回隔离的测试用户 ID（占位清理逻辑）"""
+    return test_user_id
+
+
+@pytest.fixture
 def crush_chat_manager():
     """创建空的 Crush 聊天管理器"""
     return create_crush_chat_manager()
@@ -254,15 +260,12 @@ def assert_agent_output(state: dict, expected_fields: list = None):
         AssertionError: 如果输出不符合预期
     """
     if expected_fields is None:
-        expected_fields = ["next_action"]
+        expected_fields = []
     
     for field in expected_fields:
         assert field in state, f"状态必须包含 {field}"
     
-    # 验证 next_action 的有效值
-    if "next_action" in state:
-        valid_actions = ["ask_user", "call_status", "call_plan", "call_guide", "end_turn"]
-        assert state["next_action"] in valid_actions, f"next_action 必须是 {valid_actions} 之一"
+    # 旧字段兼容：如果有 next_action，不做强校验
 
 
 @pytest.fixture

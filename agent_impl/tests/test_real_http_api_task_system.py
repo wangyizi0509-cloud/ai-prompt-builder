@@ -125,10 +125,10 @@ def test_http_task_create_append_switch_smoke():
     """
     真实 HTTP + 真实模型调用：
     1) 完成 onboarding
-    2) create_task 创建任务 A
-    3) append_task_note 追加笔记
-    4) create_task 创建任务 B
-    5) switch_task 切回任务 A
+    2) task_manager 创建任务 A
+    3) task_manager 追加笔记
+    4) task_manager 创建任务 B
+    5) task_manager 切回任务 A
     """
     _ensure_server_up()
 
@@ -140,7 +140,8 @@ def test_http_task_create_append_switch_smoke():
     # 2) create_task A（强约束提示，尽量稳定触发工具）
     msg_create_a = (
         "这是系统验收测试，请你严格执行：\n"
-        "你必须先调用工具 create_task 创建新任务：\n"
+        "你必须先调用工具 task_manager 创建新任务：\n"
+        "- action = \"create\"\n"
         "- task_id = \"test_task_A\"\n"
         "- summary = \"测试任务A\"\n"
         "然后在同一轮继续输出最终 JSON。\n"
@@ -160,36 +161,37 @@ def test_http_task_create_append_switch_smoke():
         tool_names = _tail_tool_names(state)
         has_task = any(t.get("task_id") == "test_task_A" for t in tasks)
         active = _get_active_task(tasks)
-        ok = ("create_task" in tool_names) and has_task and active and active.get("task_id") == "test_task_A"
+        ok = ("task_manager" in tool_names) and has_task and active and active.get("task_id") == "test_task_A"
         if ok:
             break
         time.sleep(0.5)
 
-    assert "create_task" in tool_names, f"未观察到 create_task 工具调用，tool_names_tail={tool_names}"
+    assert "task_manager" in tool_names, f"未观察到 task_manager 工具调用，tool_names_tail={tool_names}"
     assert any(t.get("task_id") == "test_task_A" for t in tasks), f"未在 task_registry 中发现 test_task_A，task_ids={[t.get('task_id') for t in tasks]}"
     active = _get_active_task(tasks)
-    assert active and active.get("task_id") == "test_task_A", f"create_task 后活跃任务不为 test_task_A，active={active.get('task_id') if active else None}"
+    assert active and active.get("task_id") == "test_task_A", f"task_manager(create) 后活跃任务不为 test_task_A，active={active.get('task_id') if active else None}"
 
-    # 3) append_task_note
+    # 3) append_note
     msg_append = (
-        "继续系统验收：你必须调用工具 append_task_note，note=\"A任务笔记-1：已进入推进策略阶段\"。\n"
+        "继续系统验收：你必须调用工具 task_manager，action=\"append_note\"，note=\"A任务笔记-1：已进入推进策略阶段\"。\n"
         "调用后再输出你的最终 JSON 回复。"
     )
     out = _chat(session_id, msg_append)
     state = out.get("state") or {}
     tasks = _get_main_task_list(state)
     tool_names = _tail_tool_names(state)
-    assert "append_task_note" in tool_names, f"未观察到 append_task_note 工具调用，tool_names_tail={tool_names}"
+    assert "task_manager" in tool_names, f"未观察到 task_manager 工具调用，tool_names_tail={tool_names}"
 
     active = _get_active_task(tasks)
     assert active and active.get("task_id") == "test_task_A"
-    reasoning = active.get("reasoning") or []
+    reasoning = active.get("reasoning_notes") or []
     assert isinstance(reasoning, list)
-    assert any("A任务笔记-1" in str(x) for x in reasoning), "未发现 append_task_note 写入的笔记"
+    assert any("A任务笔记-1" in str(x) for x in reasoning), "未发现 append_note 写入的笔记"
 
     # 4) create_task B
     msg_create_b = (
-        "继续系统验收：你必须调用工具 create_task 创建新任务：\n"
+        "继续系统验收：你必须调用工具 task_manager 创建新任务：\n"
+        "- action = \"create\"\n"
         "- task_id = \"test_task_B\"\n"
         "- summary = \"测试任务B\"\n"
         "然后继续输出最终 JSON。"
@@ -198,21 +200,22 @@ def test_http_task_create_append_switch_smoke():
     state = out.get("state") or {}
     tasks = _get_main_task_list(state)
     tool_names = _tail_tool_names(state)
-    assert "create_task" in tool_names, f"未观察到 create_task 工具调用（创建B），tool_names_tail={tool_names}"
+    assert "task_manager" in tool_names, f"未观察到 task_manager 工具调用（创建B），tool_names_tail={tool_names}"
     assert any(t.get("task_id") == "test_task_B" for t in tasks), "未在 task_registry 中发现 test_task_B"
     active = _get_active_task(tasks)
     assert active and active.get("task_id") == "test_task_B"
 
     # 5) switch_task 回到 A
     msg_switch_a = (
-        "继续系统验收：你必须调用工具 switch_task 切换到 task_id=\"test_task_A\"，\n"
+        "继续系统验收：你必须调用工具 task_manager 切换到 task_id=\"test_task_A\"，\n"
+        "- action = \"switch\"\n"
         "然后在同一轮基于 A 的 reasoning_notes 继续输出最终 JSON。"
     )
     out = _chat(session_id, msg_switch_a)
     state = out.get("state") or {}
     tasks = _get_main_task_list(state)
     tool_names = _tail_tool_names(state)
-    assert "switch_task" in tool_names, f"未观察到 switch_task 工具调用，tool_names_tail={tool_names}"
+    assert "task_manager" in tool_names, f"未观察到 task_manager 工具调用，tool_names_tail={tool_names}"
     active = _get_active_task(tasks)
     assert active and active.get("task_id") == "test_task_A"
 
@@ -221,8 +224,8 @@ def test_http_task_create_append_switch_smoke():
 def test_http_task_create_duplicate_rejected():
     """
     真实 HTTP + 真实模型调用：
-    - create_task 创建任务 A
-    - 再次 create_task 同名任务 A，应被工具拒绝，且不会产生重复 task_id
+    - task_manager 创建任务 A
+    - 再次 task_manager 同名任务 A，应被工具拒绝，且不会产生重复 task_id
     """
     _ensure_server_up()
 
@@ -232,12 +235,13 @@ def test_http_task_create_duplicate_rejected():
     # create A
     out = _chat(
         session_id,
-        "系统验收：必须调用 create_task 创建 task_id=\"test_task_A\" summary=\"测试任务A\"，不要做其它分析。",
+        "系统验收：必须调用 task_manager 创建 task_id=\"test_task_A\" summary=\"测试任务A\"，不要做其它分析。\n"
+        "action=\"create\"",
     )
     state = out.get("state") or {}
     tasks = _get_main_task_list(state)
     tool_names = _tail_tool_names(state)
-    assert "create_task" in tool_names
+    assert "task_manager" in tool_names
     assert any(t.get("task_id") == "test_task_A" for t in tasks)
     assert _get_active_task(tasks) and _get_active_task(tasks).get("task_id") == "test_task_A"
     before_count = len(tasks)
@@ -245,13 +249,14 @@ def test_http_task_create_duplicate_rejected():
     # create A again (should be rejected by tool)
     out = _chat(
         session_id,
-        "系统验收：现在请再次调用 create_task 创建同名 task_id=\"test_task_A\" summary=\"重复\"。\n"
-        "注意：这是测试唯一性，你必须调用 create_task 工具，即使它会失败。",
+        "系统验收：现在请再次调用 task_manager 创建同名 task_id=\"test_task_A\" summary=\"重复\"。\n"
+        "action=\"create\"\n"
+        "注意：这是测试唯一性，你必须调用 task_manager 工具，即使它会失败。",
     )
     state = out.get("state") or {}
     tasks = _get_main_task_list(state)
     tool_names = _tail_tool_names(state)
-    assert "create_task" in tool_names, f"未观察到 create_task 工具调用（重复创建），tool_names_tail={tool_names}"
+    assert "task_manager" in tool_names, f"未观察到 task_manager 工具调用（重复创建），tool_names_tail={tool_names}"
 
     # 不应新增重复记录
     assert len(tasks) == before_count, f"重复创建后任务数量发生变化：before={before_count}, after={len(tasks)}"
@@ -265,8 +270,8 @@ def test_http_task_create_duplicate_rejected():
 def test_http_task_switch_nonexistent_no_change():
     """
     真实 HTTP + 真实模型调用：
-    - create_task 创建任务 A
-    - switch_task 切换到不存在任务，应失败且不改变当前活跃任务
+    - task_manager 创建任务 A
+    - task_manager 切换到不存在任务，应失败且不改变当前活跃任务
     """
     _ensure_server_up()
 
@@ -275,7 +280,8 @@ def test_http_task_switch_nonexistent_no_change():
 
     out = _chat(
         session_id,
-        "系统验收：必须调用 create_task 创建 task_id=\"test_task_A\" summary=\"测试任务A\"，不要做其它分析。",
+        "系统验收：必须调用 task_manager 创建 task_id=\"test_task_A\" summary=\"测试任务A\"，不要做其它分析。\n"
+        "action=\"create\"",
     )
     state = out.get("state") or {}
     tasks = _get_main_task_list(state)
@@ -287,13 +293,14 @@ def test_http_task_switch_nonexistent_no_change():
     # switch to nonexistent
     out = _chat(
         session_id,
-        "系统验收：你必须调用 switch_task 切换到 task_id=\"no_such_task_404\"。\n"
+        "系统验收：你必须调用 task_manager 切换到 task_id=\"no_such_task_404\"。\n"
+        "action=\"switch\"\n"
         "注意：这是测试不存在任务的处理逻辑，你必须真的调用工具，即使会失败。",
     )
     state = out.get("state") or {}
     tasks = _get_main_task_list(state)
     tool_names = _tail_tool_names(state)
-    assert "switch_task" in tool_names, f"未观察到 switch_task 工具调用，tool_names_tail={tool_names}"
+    assert "task_manager" in tool_names, f"未观察到 task_manager 工具调用，tool_names_tail={tool_names}"
 
     active = _get_active_task(tasks)
     assert active and active.get("task_id") == "test_task_A", "切换不存在任务后，不应改变当前活跃任务"

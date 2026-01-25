@@ -35,15 +35,19 @@ class TestProductScenarios:
         
         # 3. 验证结果
         print(f"[系统输出] 当前 Agent: {result.get('current_agent')}")
-        print(f"[系统输出] 下一步动作: {result.get('next_action')}")
+        print(f"[系统输出] 是否提问: {bool(result.get('pending_questions'))}")
         
-        # 断言 1: 应该识别出需要现状分析
-        assert result.get("next_action") in ["call_status", "ask_user"], \
-            f"预期进入现状分析或提问，实际动作: {result.get('next_action')}"
+        # 断言 1: 应该有明确输出（分析/提问/回复）
+        assert (
+            result.get("pending_questions")
+            or result.get("status_report")
+            or result.get("completion_status") == "COMPLETED"
+            or result.get("pending_responses")
+        ), "预期进入现状分析、触发提问或给出回复"
             
         # 断言 2: 如果已经运行了 status_agent，应该有提问意图
         if result.get("current_agent") == "status_agent":
-            # 检查是否有工具调用（通常是 load_inquiry_skill_instructions）
+            # 检查是否有工具调用（通常是 load_skill）
             # 或者直接生成了 pending_questions
             pass 
             

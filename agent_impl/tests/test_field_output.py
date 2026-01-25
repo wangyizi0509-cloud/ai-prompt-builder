@@ -17,10 +17,9 @@ from graph.nodes.plan_agent import plan_agent_node, _format_plan_as_markdown, _p
 from graph.nodes.guide_agent import guide_agent_node, _parse_response as guide_parse
 from graph.state import create_initial_state
 from graph.context_builder import (
-    _format_status_report,
-    _format_action_plan,
-    _format_action_guides,
-    _format_legacy_action_guide,
+    _format_status_report_item,
+    _format_action_plan_item,
+    _format_action_guide_items,
     build_context_dict,
 )
 
@@ -58,13 +57,6 @@ LEGACY_ACTION_PLAN = {
     "summary": "规划摘要",
 }
 
-LEGACY_ACTION_GUIDE = {
-    "current_task": "发朋友圈",
-    "steps": ["选择照片", "编写文案"],
-    "guide_content": "## 任务卡片\n...",
-}
-
-
 class TestStatusAgentOutput:
     """测试 Status Agent 输出格式"""
     
@@ -73,7 +65,6 @@ class TestStatusAgentOutput:
         # 模拟 LLM 输出
         mock_llm_response = """```json
 {
-    "need_questions": false,
     "report_content": "## 🧭 情感罗盘\\n\\n### 当前阶段\\n你们目前处于暧昧初期...",
     "stage": "暧昧初期",
     "acr_analysis": {"A": "中", "C": "低", "R": "上升"}
@@ -95,7 +86,6 @@ class TestStatusAgentOutput:
         mock_response = MagicMock()
         mock_response.content = """```json
 {
-    "need_questions": false,
     "report_content": "## 现状分析报告\\n\\n这是测试报告内容"
 }
 ```"""
@@ -119,10 +109,33 @@ class TestStatusAgentOutput:
         assert "status_report_id" in result
 
     @patch('graph.nodes.status_agent.get_llm')
-    def test_status_agent_need_questions_true_without_inquiry_card_should_ask(self, mock_get_llm):
+    def test_status_agent_direct_report_without_tool_call(self, mock_get_llm):
+        """无工具调用时应直接生成报告"""
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = """```json
+{
+  "report_content": "## 现状分析报告\\n\\n这是测试报告内容"
+}
+```"""
+        mock_response.tool_calls = None
+        mock_llm.bind_tools.return_value = mock_llm
+        mock_llm.invoke.return_value = mock_response
+        mock_get_llm.return_value = mock_llm
+
+        state = create_initial_state("我想追一个女生")
+        state["last_response_for_continuity"] = "好的，我来帮你分析"
+
+        result = status_agent_node(state)
+
+        assert result.get("status_report")
+        assert result.get("current_agent") is None
+
+    @patch('graph.nodes.status_agent.get_llm')
+    def test_status_agent_tool_call_without_inquiry_card_should_error(self, mock_get_llm):
         """
         回归测试：
-        - 模型按“第一阶段”输出了 need_questions=true 但 inquiry_card=null（或缺失）
+        - 工具返回后未生成 inquiry_card.questions
         - status_agent_node 不应直接生成报告
         - 严格模式：不做纠错、不做兜底；应显式返回错误，且不产出报告
         """
@@ -130,7 +143,6 @@ class TestStatusAgentOutput:
         resp = MagicMock()
         resp.content = """```json
 {
-  "need_questions": true,
   "response": "我需要再确认几个点。",
   "inquiry_card": null,
   "report_content": null
@@ -144,6 +156,8 @@ class TestStatusAgentOutput:
 
         state = create_initial_state("我想追一个女生")
         state["last_response_for_continuity"] = "好的，我来帮你分析"
+        state["_tool_caller"] = "status_agent"
+        state["_last_tool_content"] = "# [执行触发] 你已加载「提问引导」Skill，请立即按以下指令执行。"
 
         result = status_agent_node(state)
 
@@ -212,7 +226,6 @@ class TestPlanAgentOutput:
         mock_response = MagicMock()
         mock_response.content = """```json
 {
-    "need_questions": false,
     "goal": "测试目标",
     "strategy": "测试策略",
     "phases": [],
@@ -252,7 +265,6 @@ class TestGuideAgentOutput:
         mock_response = MagicMock()
         mock_response.content = """```json
 {
-    "need_questions": false,
     "guide_content": "## 📋 任务卡片：发一条朋友圈\\n\\n### 执行步骤\\n1. 选择一张好看的照片..."
 }
 ```"""
@@ -312,7 +324,6 @@ class TestGuideAgentOutput:
         mock_response = MagicMock()
         mock_response.content = """```json
 {
-    "need_questions": false,
     "guide_content": "## 第一个指南\\n内容..."
 }
 ```"""
@@ -338,38 +349,62 @@ class TestContextBuilderCompatibility:
     """测试 context_builder 对新旧格式的兼容性"""
 
     def test_format_status_report_string(self):
-        formatted = _format_status_report(NEW_STATUS_REPORT)
+        item = {
+            "report_id": 1,
+            "version": 1,
+            "created_at": datetime.now().isoformat(),
+            "report_content": NEW_STATUS_REPORT,
+        }
+        formatted = _format_status_report_item(item)
         assert NEW_STATUS_REPORT in formatted
 
     def test_format_status_report_dict(self):
-        formatted = _format_status_report(LEGACY_STATUS_REPORT)
+        item = {
+            "report_id": 2,
+            "version": 1,
+            "created_at": datetime.now().isoformat(),
+            **LEGACY_STATUS_REPORT,
+        }
+        formatted = _format_status_report_item(item)
         assert "情感罗盘" in formatted
 
     def test_format_action_plan_string(self):
-        formatted = _format_action_plan(NEW_ACTION_PLAN)
+        item = {
+            "plan_id": 1,
+            "version": 1,
+            "created_at": datetime.now().isoformat(),
+            "plan_content": NEW_ACTION_PLAN,
+        }
+        formatted = _format_action_plan_item(item)
         assert "阶段目标" in formatted
 
     def test_format_action_plan_dict(self):
-        formatted = _format_action_plan(LEGACY_ACTION_PLAN)
+        item = {
+            "plan_id": 2,
+            "version": 1,
+            "created_at": datetime.now().isoformat(),
+            **LEGACY_ACTION_PLAN,
+        }
+        formatted = _format_action_plan_item(item)
         assert "核心策略" in formatted or "阶段性目标" in formatted
 
     def test_format_action_guides_new_format(self):
-        guides = [{"id": "guide_1", "status": "pending", "guide_content": "## 📋 新指南"}]
-        formatted = _format_action_guides(guides)
+        guides = [{
+            "id": "guide_1",
+            "status": "in_progress",
+            "guide": {"guide_content": "## 📋 新指南"},
+        }]
+        formatted = _format_action_guide_items(guides)
         assert "新指南" in formatted
 
     def test_format_action_guides_legacy_format(self):
-        guides = [{"id": "guide_old", "status": "pending", "guide": {"guide_content": "## 旧指南"}}]
-        formatted = _format_action_guides(guides)
+        guides = [{
+            "id": "guide_old",
+            "status": "in_progress",
+            "guide": {"current_task": "旧指南任务", "guide_content": "## 旧指南"},
+        }]
+        formatted = _format_action_guide_items(guides)
         assert "旧指南" in formatted
-
-    def test_format_legacy_action_guide_string(self):
-        formatted = _format_legacy_action_guide("## 单指南")
-        assert "单指南" in formatted
-
-    def test_format_legacy_action_guide_dict(self):
-        formatted = _format_legacy_action_guide(LEGACY_ACTION_GUIDE)
-        assert "任务卡片" in formatted or "当前任务" in formatted
 
 
 class TestReportIdGeneration:
@@ -382,13 +417,11 @@ class TestReportIdGeneration:
         resp2 = MagicMock()
         resp1.content = """```json
 {
-    "need_questions": false,
     "report_content": "## 报告一"
 }
 ```"""
         resp2.content = """```json
 {
-    "need_questions": false,
     "report_content": "## 报告二"
 }
 ```"""
@@ -419,7 +452,6 @@ class TestReportIdGeneration:
         for resp, title in [(resp1, "规划一"), (resp2, "规划二")]:
             resp.content = f"""```json
 {{
-    "need_questions": false,
     "goal": "{title}",
     "strategy": "测试策略",
     "phases": [],
@@ -452,7 +484,6 @@ class TestReportIdGeneration:
         resp = MagicMock()
         resp.content = """```json
 {
-    "need_questions": false,
     "guide_content": "## 指南编号测试"
 }
 ```"""
@@ -481,13 +512,11 @@ class TestActionGuidesListAppendExtended:
         resp2 = MagicMock()
         resp1.content = """```json
 {
-    "need_questions": false,
     "guide_content": "## 第一个指南"
 }
 ```"""
         resp2.content = """```json
 {
-    "need_questions": false,
     "guide_content": "## 第二个指南"
 }
 ```"""
@@ -519,7 +548,6 @@ class TestActionGuidesListAppendExtended:
         resp = MagicMock()
         resp.content = """```json
 {
-    "need_questions": false,
     "guide_content": "## 状态字段测试"
 }
 ```"""
@@ -551,7 +579,6 @@ class TestParseResponseFunctions:
 
 ```json
 {
-    "need_questions": false,
     "report_content": "## 报告内容"
 }
 ```
@@ -559,14 +586,12 @@ class TestParseResponseFunctions:
 希望对你有帮助。"""
         
         parsed = status_parse(content)
-        assert parsed["need_questions"] == False
         assert parsed["report_content"] == "## 报告内容"
     
     def test_plan_parse_with_phases(self):
         """测试解析包含 phases 的规划"""
         content = """```json
 {
-    "need_questions": false,
     "goal": "目标",
     "strategy": "策略",
     "phases": [{"name": "阶段1", "description": "描述"}],
@@ -582,7 +607,6 @@ class TestParseResponseFunctions:
         """测试解析指南内容"""
         content = """```json
 {
-    "need_questions": false,
     "guide_content": "## 任务卡片\\n步骤..."
 }
 ```"""

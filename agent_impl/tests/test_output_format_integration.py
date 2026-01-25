@@ -139,7 +139,7 @@ class TestOutputFormatIntegration:
         assert "执行步骤" in guides_section
 
         # 其他状态：应当是表格元数据，并提示工具
-        assert "load_action_guide_detail" in guides_section
+        assert "context_loader" in guides_section
         assert "| g_pen |" in guides_section
         assert "| g_cmp |" in guides_section
 

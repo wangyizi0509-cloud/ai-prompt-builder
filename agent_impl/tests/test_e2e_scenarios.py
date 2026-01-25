@@ -76,7 +76,7 @@ class TestE2EScenarios:
         
         # 验证应该是咨询回复，不需要调用子 Agent
         assert len(response) > 0, "应该有回复"
-        assert result.get("next_action") in ["end_turn", "ask_user"], "应该结束或提问，不需要调用子 Agent"
+        assert result.get("pending_questions") or result.get("pending_responses"), "应该有回复或提问"
         
         print("\n✅ 纯咨询场景测试通过")
     
@@ -143,8 +143,7 @@ class TestE2EScenarios:
         print(f"\nAI 回复: {response[:200]}...")
         
         # 验证可能触发现状分析更新
-        next_action = result.get("next_action")
-        if next_action == "call_status":
+        if result.get("completion_status") == "COMPLETED" or result.get("status_report"):
             print("触发了现状分析更新")
         
         print("\n✅ 关系状态更新测试通过")
