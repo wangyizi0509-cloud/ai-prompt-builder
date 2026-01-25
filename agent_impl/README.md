@@ -29,7 +29,7 @@ agent_impl/
 ├── skills/
 │   ├── __init__.py           # Skills 模块导出
 │   ├── base.py               # Skill 基类
-│   ├── tool.py               # load_skill_instructions 工具定义
+│   ├── tool.py               # load_skill 工具定义
 │   └── ...
 │
 ├── prompts/                   # Prompt 独立维护
@@ -111,7 +111,7 @@ graph TD
 Skills 通过 LLM 原生工具调用加载：
 
 1.  Prompt 只包含 Skills 元数据。
-2.  LLM 判断需要 Skill 时，发起 `load_skill_instructions` 工具调用。
+2.  LLM 判断需要 Skill 时，发起 `load_skill` 工具调用。
 3.  `skill_tools` 节点执行工具，返回完整指令。
 4.  LLM 根据指令生成最终结果。
 

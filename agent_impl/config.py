@@ -3,9 +3,11 @@ LLM 配置模块
 支持 DeepSeek、OpenAI、Claude 切换
 """
 
+import json
 import os
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
+from langchain_core.messages import AIMessage
 
 # 加载环境变量
 load_dotenv()
@@ -23,6 +25,8 @@ def get_llm(temperature: float = 0.7):
     """
     provider = os.getenv("LLM_PROVIDER", "deepseek").lower()
     
+    if provider == "mock":
+        return MockLLM()
     if provider == "doubao":
         return ChatOpenAI(
             model=os.getenv("DOUBAO_ENDPOINT_ID"),
@@ -60,6 +64,32 @@ def get_llm(temperature: float = 0.7):
     
     else:
         raise ValueError(f"不支持的 LLM Provider: {provider}")
+
+
+class MockLLM:
+    """轻量 Mock LLM，用于纯逻辑测试。"""
+
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+    def invoke(self, messages):
+        payload = {
+            "task_id": "mock_task",
+            "thought": "mock_thought",
+            "response": "mock_response",
+            "intent_type": "consult_only",
+            "report_content": "mock_status_report",
+            "goal": "mock_goal",
+            "strategy": "mock_strategy",
+            "phases": [],
+            "key_principles": [],
+            "summary": "mock_summary",
+            "title": "mock_guide_title",
+            "one_liner": "mock_one_liner",
+            "guide_content": "mock_guide_content",
+            "guide_status_updates": [],
+        }
+        return AIMessage(content=json.dumps(payload, ensure_ascii=False))
 
 
 # 导出默认 LLM 实例

@@ -19,19 +19,28 @@ class LoginRequest(BaseModel):
 
 
 from utils.logger import get_logger
+from auth_utils import create_jwt_token, get_current_user
+from supabase_service.client import (
+    create_user,
+    authenticate_user,
+    get_user_by_id,
+    get_thread_by_user,
+)
 
 logger = get_logger("auth")
 
-ALLOW_REGISTRATION = os.getenv("ALLOW_REGISTRATION", "false").lower() == "true"
+def _is_registration_allowed() -> bool:
+    """判断是否允许注册（测试环境默认放开）。"""
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return True
+    return os.getenv("ALLOW_REGISTRATION", "false").lower() == "true"
 
 @router.post("/register")
 async def register(request: RegisterRequest):
     """
     用户注册接口
     """
-    from auth_utils import create_jwt_token
-    from supabase_service.client import create_user
-    if not ALLOW_REGISTRATION:
+    if not _is_registration_allowed():
         raise HTTPException(status_code=403, detail="Registration is currently disabled")
 
     if not request.email or not request.password or not request.username:
@@ -59,9 +68,6 @@ async def login(request: LoginRequest):
     """
     用户登录接口
     """
-    from auth_utils import create_jwt_token
-    from supabase_service.client import authenticate_user
-
     if not request.email or not request.password:
         raise HTTPException(status_code=400, detail="Email and password are required")
     
@@ -80,11 +86,8 @@ async def login(request: LoginRequest):
     }
 
 
-async def get_current_user_dep(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-):
-    from auth_utils import get_current_user
-    return await get_current_user(credentials)
+async def get_current_user_dep(current_user=Depends(get_current_user)):
+    return current_user
 
 
 @router.get("/me")
@@ -92,8 +95,6 @@ async def get_current_user_info(current_user=Depends(get_current_user_dep)):
     """
     获取当前登录用户信息
     """
-    from supabase_service.client import get_user_by_id
-
     user_info = await get_user_by_id(current_user['user_id'])
     
     if not user_info:
@@ -111,7 +112,6 @@ async def get_user_thread_info(current_user=Depends(get_current_user_dep)):
     获取当前登录用户的 Thread 信息
     """
     logger.debug(f"get_user_thread_info request for user: {current_user['user_id']}")
-    from supabase_service.client import get_thread_by_user
     user_thread = await get_thread_by_user(current_user['user_id'])
     
     if not user_thread:

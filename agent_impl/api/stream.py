@@ -1,4 +1,5 @@
 import json
+import uuid
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
@@ -16,7 +17,8 @@ class StreamChatRequest(BaseModel):
     stream_mode: Literal["values", "updates", "messages", "debug"] = "updates"
 
 
-LOG_PATH = Path("/Users/ant/Desktop/Crushe/模型策略/.cursor/debug.log")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+LOG_PATH = PROJECT_ROOT / ".cursor" / "debug.log"
 
 
 async def get_optional_user_dep(
@@ -40,6 +42,7 @@ def _append_debug_log(run_id: str, hypothesis_id: str, location: str, message: s
         "timestamp": int(time.time() * 1000),
     }
     try:
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with LOG_PATH.open("a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except Exception:
@@ -275,11 +278,14 @@ async def chat_stream(
     
     if base_state is None:
         print("[Stream SDK] Creating new session (checkpointer empty)")
-        state = create_initial_state(request.message)
+        current_message_id = str(uuid.uuid4())
+        state = create_initial_state(request.message, current_message_id=current_message_id)
     else:
         print("[Stream SDK] Restoring existing session (checkpointer)")
         state = dict(base_state)
+        current_message_id = str(uuid.uuid4())
         state["user_message"] = request.message
+        state["current_message_id"] = current_message_id
         state["debug_log"] = []
         state["inquiry_card"] = None
         state["pending_questions"] = []
