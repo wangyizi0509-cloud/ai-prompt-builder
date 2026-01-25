@@ -44,7 +44,7 @@
 | 1.0 路径 | 2.0 路径 | 代码对应（权威） | 说明 |
 |:---|:---|:---|:---|
 | `03_Strategies/Storage_Strategy/storage_strategy_v1.0.md` | `03_Strategies/Storage_Strategy/storage_strategy_v2.0.md` | `graph/storage_strategy.py`, `graph/nodes/organize_agent.py` | 以“同步落库 + 异步提纯”叙事解释全链路 |
-| `03_Strategies/Storage_Strategy/storage_schema_v1.0.md` | （并入各 Specs 的“数据结构”章节） | `graph/context_types.py`, `graph/state.py` | 2.0 不再单独维护一份超长 Schema 文档，避免过期；在各层规范里提供字段表与示例 |
+| `03_Strategies/Storage_Strategy/storage_schema_v1.0.md` | `03_Strategies/Storage_Strategy/storage_schema_v2.0.md` | `graph/context_types.py`, `graph/state.py` | 2.0 提供“人类可读 Schema 总览”，用于理解 AgentState/各层 Memory 的关系；更细输出格式仍以 `02_Specs/` 为准 |
 | `03_Strategies/Extraction_Strategy/extraction_strategy_v1.0.md` | `03_Strategies/Extraction_Strategy/extraction_strategy_v2.0.md` | `graph/extraction_strategy.py`, `graph/context_builder.py` | 以 Pipeline + 默认配置解释“每次回复前取什么” |
 | `03_Strategies/Extraction_Strategy/source_rules_spec.md` | `03_Strategies/Extraction_Strategy/source_rules_spec_v2.0.md` | `graph/context_types.py`（信任层级/字段）+ `graph/nodes/organize_agent.py`（抽取写入） | 对齐 Organize Prompt 的来源边界 |
 | `03_Strategies/Extraction_Strategy/value_filter_spec.md` | `03_Strategies/Extraction_Strategy/value_filter_spec_v2.0.md` | `graph/nodes/organize_agent.py` + `context_system/04_Prompts/organize_agent_prompts.md`（运行时模板） | 明确“半年后仍有用吗”的过滤原则 |
