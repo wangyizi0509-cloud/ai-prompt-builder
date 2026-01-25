@@ -10,6 +10,7 @@
 |:-----|:----|:----|:--------|
 | **1** | `01_Overview/Quick_Start.md` | 入门科普：这个系统解决什么问题 | 5 分钟 |
 | **2** | `01_Overview/System_Overview.md` | 全景图：信息怎么流转、各模块怎么协作 | 10 分钟 |
+| **3** | `agent_impl/docs/plan_消息结构标准化.md` | 最新结构：消息栈 + Context XML 注入 | 10 分钟 |
 
 读完这两篇，你就能理解整个上下文工程的逻辑了。
 
@@ -25,7 +26,8 @@
 | `02_Specs/layer2_spec_v1.0.md` | Layer 2 工作上下文：报告、规划、指南、动态情报 |
 | `02_Specs/layer3_spec_v1.0.md` | Layer 3 对话历史：消息处理、压缩、摘要 |
 | `02_Specs/task_system_spec.md` | 任务系统：任务状态机、BoundContext |
-| `02_Specs/context_assembly_spec.md` | 上下文组装：组装顺序、KV Cache 优化 |
+| `02_Specs/context_assembly_spec.md` | 上下文组装：消息栈顺序、KV Cache 优化 |
+| `02_Specs/message_input_spec_v1.0.md` | 统一消息输入：最简字段与格式规则 |
 
 ### 策略文档（讲"怎么做"）
 
@@ -52,17 +54,19 @@
 
 1. `01_Overview/Quick_Start.md` — 入门
 2. `01_Overview/System_Overview.md` — 全景
-3. `02_Specs/layer2_spec_v1.0.md` — 重点看报告和指南
-4. `02_Specs/task_system_spec.md` — 了解任务概念
+3. `agent_impl/docs/plan_消息结构标准化.md` — 最新消息结构
+4. `02_Specs/layer2_spec_v1.0.md` — 重点看报告和指南
+5. `02_Specs/task_system_spec.md` — 了解任务概念
 
 ### 研发
 
 1. `01_Overview/Quick_Start.md` — 入门
 2. `01_Overview/System_Overview.md` — 全景
-3. `02_Specs/layer1_spec_v1.0.md` → `layer2_spec_v1.0.md` → `layer3_spec_v1.0.md` — 各层规范
-4. `02_Specs/context_assembly_spec.md` — 组装逻辑
-5. `03_Strategies/Storage_Strategy/storage_schema_v1.0.md` — 数据结构
+3. `agent_impl/docs/plan_消息结构标准化.md` — 消息栈与注入规则
+4. `02_Specs/layer1_spec_v1.0.md` → `layer2_spec_v1.0.md` → `layer3_spec_v1.0.md` — 各层规范
+5. `02_Specs/context_assembly_spec.md` — 组装逻辑
+6. `03_Strategies/Storage_Strategy/storage_schema_v1.0.md` — 数据结构
 
 ---
 
-*最后更新：2026-01-15*
+*最后更新：2026-01-23*

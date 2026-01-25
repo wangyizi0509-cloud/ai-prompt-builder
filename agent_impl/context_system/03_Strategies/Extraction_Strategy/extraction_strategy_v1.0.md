@@ -92,7 +92,7 @@
     3.  并行获取各层数据。
     4.  **动态情报注入**: 检查 L2 `Dynamic Intel`，过滤已过期条目，将有效条目置顶注入 Context。
     5.  按优先级裁剪 (Trimming)。
-*   **输出**: 最终送入 LLM 的 `messages` 列表。
+*   **输出**: 最终送入 LLM 的标准 `messages` 列表（SystemMessage + Context XML + History）。
 
 ### 5.2 检索增强 (RAG) - 规划中
 对于超出 Context Window 的长期记忆（如半年前的聊天细节）：

@@ -23,7 +23,7 @@ AI 的输入窗口有限（~60K tokens），但用户的信息会持续累积：
         ↓
    按需提取（根据当前任务筛选最相关的）
         ↓
-   组装注入（拼成 ~50K tokens 的 Prompt）
+   组装注入（构建 ~50K tokens 的消息栈）
         ↓
       AI 回复
 ```
@@ -41,7 +41,7 @@ AI 的输入窗口有限（~60K tokens），但用户的信息会持续累积：
 │                                                                             │
 │   ① 产生          ② 写入           ③ 提纯           ④ 提取          ⑤ 注入   │
 │                                                                             │
-│   用户发消息  →   存入 Layer 3  →  沉淀到 L1/L2  →  按需筛选  →  组装 Prompt  │
+│   用户发消息  →   存入 Layer 3  →  沉淀到 L1/L2  →  按需筛选  →  组装消息栈  │
 │   上传截图        （对话历史）      （长期记忆）      （最相关的）    （给 AI）   │
 │   AI 生成报告     存入 Layer 2                                              │
 │                   （工作上下文）                                             │
@@ -57,7 +57,7 @@ AI 的输入窗口有限（~60K tokens），但用户的信息会持续累积：
 | **② 写入** | 同步存入对应层级（追求快，不阻塞用户） | Storage Router | `storage_strategy_v1.0.md` |
 | **③ 提纯** | 异步提取高价值信息，沉淀到更稳定的层级 | Organize Agent | `refining_strategy_v1.0.md` |
 | **④ 提取** | 从各层取出当前需要的信息 | Context Builder | `extraction_strategy_v1.0.md` |
-| **⑤ 注入** | 按固定顺序组装成 Prompt | Context Builder | `context_assembly_spec.md` |
+| **⑤ 注入** | 按固定顺序组装成消息栈 | Context Builder | `context_assembly_spec.md` |
 
 ---
 
@@ -143,7 +143,7 @@ Layer 2 报告被新版替换：
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                        Context Builder（上下文组装器）                        │
-│  职责：从 Layer 0/1/2/3 提取信息 → 按顺序组装成 Prompt                         │
+│  职责：从 Layer 0/1/2/3 提取信息 → 按顺序组装成消息栈                       │
 └─────────────────────────────────────────────────────────────────────────────┘
                                │
                                ▼
@@ -163,14 +163,36 @@ Layer 2 报告被新版替换：
 
 | 模块 | 职责 | 触发时机 | 相关文档 |
 |:----|:----|:--------|:--------|
-| **Context Builder** | 从各层提取信息，组装成 Prompt | 每次 AI 回复前 | `context_assembly_spec.md` |
+| **Context Builder** | 从各层提取信息，组装成消息栈 | 每次 AI 回复前 | `context_assembly_spec.md` |
 | **Organize Agent** | 提取高价值信息，生成摘要 | 对话压缩时、报告生成时、指南完成时 | `refining_strategy_v1.0.md` |
 | **Task System** | 管理任务状态，绑定额外上下文 | Agent 需要更多上下文时 | `task_system_spec.md` |
 | **Storage Router** | 决定信息写入哪一层 | 信息产生时 | `storage_strategy_v1.0.md` |
 
 ---
 
-## 五、一个完整场景走一遍
+## 五、结构化消息栈（最新）
+
+为提升稳定性与抗注入能力，系统不再拼接单字符串 Prompt，而是构建标准消息栈：
+
+```
+[1] SystemMessage (Markdown)
+    - 角色设定、核心规则、输出格式
+[2] HumanMessage (Context Injection, XML)
+    - 用户档案、现状报告、行动规划、行动指南、任务信息
+[3] AIMessage (Virtual Ack)
+    - 语义隔离“阅读资料”和“开始对话”
+[4~N] HumanMessage / AIMessage / ToolMessage
+    - 真实历史对话（滑动窗口）
+[End] HumanMessage
+    - 当前用户输入
+```
+
+补充说明：
+- **信任规则写在 System**；**来源标注写在 Context XML 属性**。
+- 多 Agent 架构下，`AIMessage.name` 标注来源（如 `status_agent`）。
+- 工具调用走标准 `AIMessage(tool_calls)` + `ToolMessage`。
+
+## 六、一个完整场景走一遍
 
 **场景**：用户小明发来一张 Crush 的朋友圈截图，问"她这是什么意思？"
 
@@ -190,13 +212,13 @@ Context Builder 工作：
 ├── Layer 1：读取用户画像、Crush 画像、关系背景
 ├── Layer 2：读取当前报告、规划、动态情报
 ├── Layer 3：读取最近 25 轮对话 + 历史摘要
-└── 按固定顺序拼接成 Prompt
+└── 按固定顺序组装成消息栈
 ```
 
 ### Step 3：AI 回复
 
 ```
-Main Agent 收到组装好的 Prompt
+Main Agent 收到组装好的消息栈
         ↓
     分析用户意图：想了解 Crush 的心理
         ↓
@@ -220,7 +242,7 @@ Organize Agent 被触发（假设对话超过 25 轮需要压缩）
 
 ---
 
-## 六、Onboarding 与上下文工程的关系
+## 七、Onboarding 与上下文工程的关系
 
 Onboarding 是用户首次使用时的信息收集流程，它是 **Layer 1 的初始数据源**。
 
@@ -263,7 +285,7 @@ Onboarding 是用户首次使用时的信息收集流程，它是 **Layer 1 的�
 
 ---
 
-## 七、各层规范文档索引
+## 八、各层规范文档索引
 
 | 层级 | 规范文档 | 核心内容 |
 |:----|:--------|:--------|
@@ -276,7 +298,7 @@ Onboarding 是用户首次使用时的信息收集流程，它是 **Layer 1 的�
 
 ---
 
-## 八、策略文档索引
+## 九、策略文档索引
 
 | 策略 | 文档 | 解决什么问题 |
 |:----|:----|:-----------|
@@ -287,7 +309,7 @@ Onboarding 是用户首次使用时的信息收集流程，它是 **Layer 1 的�
 
 ---
 
-## 九、关键设计决策
+## 十、关键设计决策
 
 | 决策 | 原因 |
 |:----|:----|
@@ -299,7 +321,7 @@ Onboarding 是用户首次使用时的信息收集流程，它是 **Layer 1 的�
 
 ---
 
-## 十、代码位置
+## 十一、代码位置
 
 | 模块 | 文件路径 |
 |:----|:--------|

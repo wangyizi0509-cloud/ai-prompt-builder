@@ -117,7 +117,7 @@ pending ──→ active ──→ completed
 | 状态 | 含义 | 触发条件 |
 |:----|:----|:--------|
 | `pending` | 创建但未激活 | 被其他任务切走时 |
-| `active` | 当前活跃 | create_task / switch_task |
+| `active` | 当前活跃 | task_manager(action="create"/"switch") |
 | `completed` | 已完成 | Agent 显式完成 |
 
 **注意**：同一时刻只有一个 `active` 任务。
@@ -138,9 +138,9 @@ pending ──→ active ──→ completed
     │
     └── 否 → 是否与某个历史任务相似？
                 │
-                ├── 是 → switch_task 切回旧任务
+                ├── 是 → task_manager(action="switch") 切回旧任务
                 │
-                └── 否 → create_task 创建新任务
+                └── 否 → task_manager(action="create") 创建新任务
 ```
 
 ### 4.2 判断标准
@@ -148,8 +148,8 @@ pending ──→ active ──→ completed
 | 场景 | 判断 | 动作 |
 |:----|:----|:----|
 | 用户在**同一话题追问** | 继续 | 无需调用工具 |
-| 用户**提出新问题/新需求** | 新任务 | `create_task` |
-| 用户**回到之前聊过的话题** | 切回 | `switch_task` |
+| 用户**提出新问题/新需求** | 新任务 | `task_manager(action="create")` |
+| 用户**回到之前聊过的话题** | 切回 | `task_manager(action="switch")` |
 | Agent **主动推进**（生成报告/指南） | 继续 | 无需调用工具 |
 
 ### 4.3 颗粒度参考
@@ -272,18 +272,13 @@ Agent 自行判断，基于任务列表的 `title` 和 `summary`。
 
 | 工具 | 功能 | 参数 |
 |:----|:----|:----|
-| `create_task` | 创建新任务并设为活跃 | `title`, `summary` |
-| `switch_task` | 切换到已存在的任务 | `task_id` |
-| `complete_task` | 完成当前任务 | `completion_summary` |
-| `append_task_note` | 追加思考笔记 | `note`, `task_id?` |
+| `task_manager` | 创建/切换/完成/追加笔记 | `action`, `task_id`, `title`, `summary`, `note` |
 
 ### 8.2 上下文绑定工具
 
 | 工具 | 功能 | 参数 |
 |:----|:----|:----|
-| `bind_context` | 绑定上下文到当前任务 | `type`, `ref_id?`, `title`, `content_md`, `expire_at?` |
-| `unbind_context` | 解绑上下文 | `context_id` |
-| `refresh_context` | 刷新上下文内容（续期） | `context_id` |
+| `context_loader` | load/bind/unbind/refresh 上下文 | `action`, `context_type`, `context_id`, `expire_at?` |
 
 ---
 

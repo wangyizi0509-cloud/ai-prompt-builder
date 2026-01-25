@@ -173,7 +173,7 @@ TaskState = {
     "started_at": str,
     "completed_at": str,
     "is_active": bool,        # 向后兼容
-    "bound_action_guides": list[BoundActionGuide],  # 绑定的行动指南
+    "bound_contexts": list[BoundContext],  # 绑定的上下文
 }
 ```
 
@@ -181,13 +181,13 @@ TaskState = {
 
 | 文件 | 说明 |
 |:----|:----|
-| `agent_impl/graph/tools/task_tools.py` | 任务管理工具：`switch_task`、`create_task`、`append_task_note` |
-| `agent_impl/graph/tools/guide_bind_tools.py` | 行动指南绑定工具 |
+| `agent_impl/graph/tools/task_tools.py` | 任务管理工具：`task_manager` |
+| `agent_impl/graph/tools/context_loader.py` | 通用上下文拉取工具 |
 
 **现有工具**：
-- `switch_task`: 切换到已存在的任务
-- `create_task`: 创建新任务并设为活跃
-- `append_task_note`: 追加思考笔记
+- `task_manager(action="switch")`: 切换到已存在的任务
+- `task_manager(action="create")`: 创建新任务并设为活跃
+- `task_manager(action="append_note")`: 追加思考笔记
 
 #### 3. 上下文注入逻辑（参考）
 

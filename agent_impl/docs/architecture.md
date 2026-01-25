@@ -97,7 +97,7 @@ v2.1 采用 **Router 状态恢复** 模式来实现 Human-in-the-Loop，而非 L
 ```python
 def main_agent_node(state):
     # 1. 绑定工具
-    llm = get_llm().bind_tools([load_skill_instructions])
+    llm = get_llm().bind_tools([create_all_skills_loader()])
     
     # 2. 调用 LLM
     response = llm.invoke(prompt)
@@ -139,7 +139,7 @@ Skills 是通用能力模块，v1.4 起采用 **LLM 原生 Tool-Use** 机制。
 
 **核心流程**：
 1.  **Progressive Disclosure**：Prompt 中只包含 Skill 元数据。
-2.  **Tool Call**：LLM 自主决定调用 `load_skill_instructions(skill_id)`。
+2.  **Tool Call**：LLM 自主决定调用 `load_skill(skill_id)`。
 3.  **Tool Exec**：ToolNode 返回完整指令。
 4.  **Generation**：LLM 根据完整指令生成最终内容（如 inquiry_card）。
 
@@ -200,7 +200,7 @@ workflow.compile(checkpointer=checkpointer)
 1.  **用户**："我喜欢一个女生。"
 2.  **Router**：新会话 -> **Main Agent**
 3.  **Main Agent**：
-    -   调用 `load_skill_instructions("inquiry")`
+    -   调用 `load_skill("inquiry")`
     -   **ToolNode** 返回指令
     -   生成 `inquiry_card`
     -   设置 `next_action="ask_user"`，结束本轮

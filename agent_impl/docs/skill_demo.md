@@ -9,9 +9,9 @@
 ```mermaid
 flowchart TD
     A[用户消息] --> B[构建 Prompt + Skills 元数据]
-    B --> C[LLM 调用<br/>bind_tools: load_skill_instructions]
+    B --> C[LLM 调用<br/>bind_tools: load_skill]
     C --> D{LLM 判断}
-    D -->|需要 Skill| E[LLM 发起 tool_call:<br/>load_skill_instructions]
+    D -->|需要 Skill| E[LLM 发起 tool_call:<br/>load_skill]
     D -->|不需要 Skill| F[直接返回结果]
     E --> G[ToolNode 执行工具<br/>返回完整 Skill prompt]
     G --> H[LLM 收到工具结果<br/>继续生成]
@@ -37,13 +37,13 @@ flowchart TD
     B --> C[只加载 Skills 元数据<br/>约 150 tokens]
     C --> D[第一次 LLM 调用]
     D --> E{模型判断}
-    E -->|need_questions=true| F[需要提问 Skill]
+    E -->|需要提问| F[需要提问 Skill]
     E -->|intent_type=consult_only| G[需要咨询 Skill]
     E -->|intent_type=emotion_vent| H[需要陪伴 Skill]
     E -->|不需要任何 Skill| I[直接返回结果<br/>只调用一次]
-    F --> J[动态加载 InquirySkill<br/>完整 prompt ~3000 tokens]
-    G --> K[动态加载 ConsultAnswerSkill<br/>完整 prompt ~2500 tokens]
-    H --> L[动态加载 EmotionSupportSkill<br/>完整 prompt ~2000 tokens]
+    F --> J[动态加载 inquiry Skill<br/>完整指令 ~3000 tokens]
+    G --> K[动态加载 consult_answer Skill<br/>完整指令 ~2500 tokens]
+    H --> L[动态加载 emotion_support Skill<br/>完整指令 ~2000 tokens]
     J --> M[第二次 LLM 调用<br/>生成 inquiry_card]
     K --> N[第二次 LLM 调用<br/>生成咨询回复]
     L --> O[第二次 LLM 调用<br/>生成陪伴回复]
@@ -68,10 +68,11 @@ flowchart TD
 ### 工程代码执行流程（单次调用闭环）
 
 ```python
-from skills.tool import load_skill_instructions
+from skills.tool import create_all_skills_loader
 
 # 1. 绑定工具
-llm = get_llm().bind_tools([load_skill_instructions])
+skill_tool = create_all_skills_loader()
+llm = get_llm().bind_tools([skill_tool])
 
 # 2. 构建 Prompt（只包含元数据）
 prompt = main_agent_template.format(
@@ -89,7 +90,7 @@ response = llm.invoke(prompt)
 
 # 4. 如果有 tool_calls，LangGraph ToolNode 自动执行
 if response.tool_calls:
-    # tool_calls = [{"name": "load_skill_instructions", "args": {"skill_id": "inquiry_skill"}}]
+    # tool_calls = [{"name": "load_skill", "args": {"skill_id": "inquiry"}}]
     # ToolNode 执行后返回完整 Skill prompt
     # LLM 继续生成最终结果（包含 inquiry_card）
     pass
@@ -98,7 +99,6 @@ if response.tool_calls:
 result = _parse_response(response.content, state)
 # result = {
 #     "intent_type": "action_trigger",
-#     "need_questions": true,
 #     "response": "我理解你的困扰，让我帮你分析一下～",
 #     "next_action": "ask_user",
 #     "inquiry_card": {...},  # ← 已包含完整问题卡片
@@ -132,7 +132,6 @@ response = llm.invoke(prompt)
 result = _parse_response(response.content, state)
 # result = {
 #     "intent_type": "action_trigger",
-#     "need_questions": true,  # ← 模型判断需要提问
 #     "response": "我理解你的困扰，让我帮你分析一下～",
 #     "next_action": "ask_user",
 #     "inquiry_card": null,  # ← 第一阶段还没有生成
@@ -174,13 +173,13 @@ result = _parse_response(response.content, state)
 
 ## 📚 可用技能
 
-以下是可用技能的简要描述。当你判断需要使用某个技能时，请调用 `load_skill_instructions` 工具获取完整执行指令。
+以下是可用技能的简要描述。当你判断需要使用某个技能时，请调用 `load_skill` 工具获取完整执行指令。
 
-- **inquiry_skill**：生成结构化的引导性问题，帮助收集用户信息
-- **consult_answer_skill**：针对用户的情感问题提供专业分析和解答
-- **emotion_support_skill**：提供情感支持和陪伴，帮助用户缓解情绪
+- **inquiry**：生成结构化的引导性问题，帮助收集用户信息
+- **consult_answer**：针对用户的情感问题提供专业分析和解答
+- **emotion_support**：提供情感支持和陪伴，帮助用户缓解情绪
 
-**使用方法**：调用 `load_skill_instructions(skill_id)` 获取完整指令后再执行。
+**使用方法**：调用 `load_skill(skill_id)` 获取完整指令后再执行。
 
 ---
 
@@ -198,7 +197,7 @@ result = _parse_response(response.content, state)
 
 ### 3. 决策下一步
 根据看板状态和用户意图，决定：
-- `ask_user`: 信息不足，需要向用户提问（先调用 load_skill_instructions("inquiry_skill")）
+- `ask_user`: 信息不足，需要向用户提问（先调用 load_skill("inquiry")）
 - `call_status`: 需要生成或更新现状分析
 - `call_plan`: 需要生成或更新行动规划
 - `call_guide`: 需要生成或更新行动指南
@@ -212,7 +211,6 @@ result = _parse_response(response.content, state)
   "response": "给用户的回复（自然、温暖、简短、接着对话历史往下说）",
   "intent_type": "consult_only|emotion_vent|action_trigger|info_update",
   "next_action": "ask_user|call_status|call_plan|call_guide|end_turn",
-  "need_questions": false,
   "inquiry_card": null,
   "mark_guide_completed": false,
   "completed_guide_id": null
@@ -228,8 +226,8 @@ result = _parse_response(response.content, state)
 {
   "tool_calls": [
     {
-      "name": "load_skill_instructions",
-      "args": {"skill_id": "inquiry_skill"}
+      "name": "load_skill",
+      "args": {"skill_id": "inquiry"}
     }
   ]
 }
@@ -241,7 +239,7 @@ result = _parse_response(response.content, state)
 # 提问 Skill
 
 你是恋爱军师「小话」的提问能力模块...
-[完整的 inquiry_skill.md 内容]
+[完整的 skills/definitions/inquiry/SKILL.md 内容]
 ```
 
 **Step 3: LLM 收到工具结果，生成最终输出**
@@ -251,7 +249,6 @@ result = _parse_response(response.content, state)
   "response": "我理解你的困扰，让我帮你分析一下～",
   "intent_type": "action_trigger",
   "next_action": "ask_user",
-  "need_questions": true,
   "inquiry_card": {
     "questions": [...],
     "intro": "...",
@@ -267,20 +264,21 @@ result = _parse_response(response.content, state)
 - ✅ LLM 自主决定是否需要工具（不是工程代码 if/else）
 - ✅ 代码大幅简化
 
-## `load_skill_instructions` 工具定义
+## `load_skill` 工具定义
 
 ```python
 # skills/tool.py
 from langchain.tools import tool
-from utils.prompt_loader import load_prompt
+from skills.registry import get_skill_registry
 
 @tool
-def load_skill_instructions(skill_id: str):
+def load_skill(skill_id: str):
     """
     当识别到用户需要咨询、提问或陪伴时，调用此工具获取该技能的详细执行指令。
-    参数 skill_id 必须是: inquiry_skill, consult_answer_skill, emotion_support_skill 之一。
+    参数 skill_id 必须是: inquiry, consult_answer, emotion_support 之一。
     """
-    return load_prompt(skill_id)
+    registry = get_skill_registry()
+    return registry.get_skill_instructions(skill_id)
 ```
 
 ---
@@ -290,7 +288,7 @@ def load_skill_instructions(skill_id: str):
 ```python
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
-from skills.tool import load_skill_instructions
+from skills.tool import create_all_skills_loader
 
 def create_workflow():
     workflow = StateGraph(AgentState)
@@ -302,7 +300,7 @@ def create_workflow():
     workflow.add_node("plan_agent", plan_agent_node)
     workflow.add_node("guide_agent", guide_agent_node)
     workflow.add_node("wait_user_input", wait_user_input_node)
-    workflow.add_node("skill_tools", ToolNode([load_skill_instructions]))  # Tool-Use 节点
+    workflow.add_node("skill_tools", ToolNode([create_all_skills_loader()]))  # Tool-Use 节点
     
     # 路由逻辑
     def route_after_agent(state):
@@ -336,9 +334,9 @@ sequenceDiagram
 
     User->>MainAgent: 用户消息
     MainAgent->>MainAgent: 构建 Prompt<br/>(包含 Skills 元数据)
-    MainAgent->>LLM: 调用 LLM.bind_tools([load_skill_instructions])
+    MainAgent->>LLM: 调用 LLM.bind_tools([load_skill])
     LLM->>LLM: 分析用户意图
-    LLM-->>MainAgent: 返回 tool_calls<br/>[load_skill_instructions("inquiry_skill")]
+    LLM-->>MainAgent: 返回 tool_calls<br/>[load_skill("inquiry")]
     MainAgent->>ToolNode: 路由到 skill_tools 节点
     ToolNode->>ToolNode: 执行工具，加载完整 Skill prompt
     ToolNode-->>LLM: 返回工具结果
@@ -352,11 +350,11 @@ sequenceDiagram
 ### 代码执行顺序（v1.4 简化版）
 
 ```python
-from skills.tool import load_skill_instructions
+from skills.tool import create_all_skills_loader
 
 def main_agent_node(state: AgentState) -> dict[str, Any]:
     # 绑定工具
-    llm = get_llm(temperature=0.7).bind_tools([load_skill_instructions])
+    llm = get_llm(temperature=0.7).bind_tools([create_all_skills_loader()])
     
     # 构建 Prompt（只包含元数据 + 工具使用说明）
     format_kwargs = {
@@ -421,9 +419,9 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
 
 ```
 主 Prompt: ~2000 tokens
-+ InquirySkill 完整 prompt: ~3000 tokens
-+ ConsultAnswerSkill 完整 prompt: ~2500 tokens
-+ EmotionSupportSkill 完整 prompt: ~2000 tokens
++ inquiry Skill 完整指令: ~3000 tokens
++ consult_answer Skill 完整指令: ~2500 tokens
++ emotion_support Skill 完整指令: ~2000 tokens
 ─────────────────────────────────────────
 总计: ~9500 tokens（每次调用都加载）
 ```
@@ -471,11 +469,11 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
 ## 关键文件清单（v1.4）
 
 1. **`agent_impl/skills/tool.py`**（新增）
-   - 定义 `load_skill_instructions` 工具
-   - 使用 `@tool` 装饰器
+   - 定义 `load_skill` 工具
+   - 使用 `StructuredTool` + `args_schema`
 
 2. **`agent_impl/skills/__init__.py`**
-   - 导出 `load_skill_instructions`
+   - 导出 `create_skill_loader`
 
 3. **`agent_impl/graph/workflow.py`**
    - 添加 `skill_tools` ToolNode
@@ -517,7 +515,7 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
 
 #### A. 新增 Prompt 文件（元数据 + 指令）
 
-1. 新建 `agent_impl/prompts/xxx_skill.md`
+1. 新建 `agent_impl/skills/definitions/{skill_id}/SKILL.md`
 2. 在文件开头写 YAML frontmatter（至少包含 `name` / `description`）：
 
    - `name`: 给模型看的短名称（用于元数据列表）
@@ -525,12 +523,10 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
 
 3. 在正文写“二阶段”执行指令（包括输出格式约束、字段要求、禁止事项等）
 
-#### B. 新增 Tool（让模型能按需加载该指令）
+#### B. 无需新增 Tool（单一工具加载）
 
-1. 在 `agent_impl/skills/tool.py` 增加一个 `@tool` 函数，例如：
-   - `load_xxx_skill_instructions()` → `return load_prompt("xxx_skill")`
-2. 把 `xxx_skill` 加入 `AVAILABLE_SKILLS`（用于校验/提示）
-3. 如需 `get_skill_tool(skill_id)` 这种按 id 取工具的能力，也要补上分支
+1. 继续使用 `load_skill(skill_id)`，不需要为每个 skill 新建工具函数
+2. `skill_id` 取自 definitions/{skill_id} 目录名，registry 会自动扫描
 
 #### C. 把 Tool 纳入工作流执行器（否则 tool_call 不会被执行）
 
@@ -549,8 +545,8 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
 
 Main Agent 的元数据列表来自 `agent_impl/graph/nodes/main_agent.py::_get_skills_metadata_prompt()`。
 
-- 你需要把新 skill 的一行元数据加进去（例如通过 `BaseSkill.get_metadata_prompt()` 输出）
-- 并在“Skill 调用规则”里补充对应的 `load_xxx_skill_instructions()` 使用说明（不然模型可能不知道该调用哪个工具）
+- registry 会从 frontmatter 自动生成元数据列表，无需手工加一行
+- 只要保证 `SKILL.md` 的 `name`/`description` 完整即可
 
 #### F. 二阶段注入与识别（通常不用改，但要知道原理）
 
@@ -560,27 +556,25 @@ Main Agent 的元数据列表来自 `agent_impl/graph/nodes/main_agent.py::_get_
 - **二阶段识别是干嘛的？**
   - 因为系统里不止“Skill loader”这一类工具（例如还有“行动指南详情加载”工具），Main Agent 需要先判断：**这次 tool 输出属于哪一类**，才知道该用什么方式注入、以及给模型下什么“二阶段执行指令”。
   - 现在的做法很朴素：Main Agent 会回看上一条 AIMessage 的 `tool_calls.name`，然后：
-    - 如果是 `load_action_guide_detail` → 当作“行动指南详情”，注入到 `{skills_prompt}` 的“行动指南详情”区块，并要求二阶段直接基于指南详情产出最终 JSON。
+    - 如果是 `context_loader(action="load", context_type="action_guide")` → 当作“行动指南详情”，并要求二阶段直接基于指南详情产出最终 JSON。
     - 如果是某个 “skill loader tool” → 当作“Skill 指令”，注入到 `{skills_prompt}` 的“已加载的 Skill 指令”区块，并要求二阶段按 Skill 规范产出最终 JSON。
     - 否则 → 当作“通用工具输出”，走兜底注入与兜底二阶段指令。
 
-- 对于“被识别为 Skill 指令”的工具名集合，当前是写死的：
-  - `load_inquiry_skill_instructions`
-  - `load_consult_answer_skill_instructions`
-  - `load_emotion_support_skill_instructions`
+- 对于“被识别为 Skill 指令”的工具名集合，当前只包含：
+  - `load_skill`
 
-如果你新增的是一个“真正的 skill loader tool”，建议把它也加入这个集合，确保被归类为“Skill 指令”并触发二阶段提醒。
+如果你新增了其他“技能指令加载类工具”，需要把它也加入这个集合，确保被归类为“Skill 指令”并触发二阶段提醒。
 
 #### G. 如果我的 skill 文件夹有很多层怎么办？
 
 这里要区分两件事：
 
-- **指令文件（Prompt）**：当前实现默认从 `agent_impl/prompts/` **同一层**加载（文件名 = `prompt_name.md`）。
-  - 结论：如果你把 prompt 放进很多层子目录，现有 `prompt_loader` 默认**找不到**。
-  - 建议（产品口径）：先别搞深层目录；用统一命名 + 前缀分组（例如 `guide__xxx_skill.md` / `chat__xxx_skill.md`）更省心。
-  - 如果你强需求一定要多层目录：需要升级 `prompt_loader` 支持“递归查找”或“以路径作为 skill_id”（这是工程改造点，不是加文件就能生效）。
+- **指令文件（Skill 指令）**：当前实现默认从 `agent_impl/skills/definitions/{skill_id}/SKILL.md` 加载。
+  - 结论：如果你把指令放进很多层子目录，现有 registry 默认**扫描不到**。
+  - 建议（产品口径）：先别搞深层目录；用统一命名的 `skill_id` 目录更省心。
+  - 如果你强需求一定要多层目录：需要升级 registry 支持“递归扫描”或“以路径作为 skill_id”（这是工程改造点，不是加文件就能生效）。
 
-- **Python Skill 代码**：`agent_impl/skills/` 下面理论上可以按模块分子文件夹，但最终仍然要回到“注册点”（tool.py / bind_tools / ToolNode / 元数据列表），否则模型用不到。
+- **Python Skill 代码**：旧的 Skill 类已废弃；如需新增能力，优先通过 `SKILL.md` 指令与单一工具完成。
 
 #### H. 同一时间用好几个 skill 怎么办？
 
