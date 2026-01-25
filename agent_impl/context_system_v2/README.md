@@ -36,6 +36,7 @@
 | 文档 | 内容 |
 |:---|:---|
 | `03_Strategies/Storage_Strategy/storage_strategy_v2.0.md` | 信息写入哪一层：同步落库与异步提纯 |
+| `03_Strategies/Storage_Strategy/storage_schema_v2.0.md` | 数据结构总览：AgentState/各层 Memory 的人类可读 Schema |
 | `03_Strategies/Extraction_Strategy/extraction_strategy_v2.0.md` | 每次回复前从各层取什么、默认配置与限制 |
 | `03_Strategies/Refining_Strategy/refining_strategy_v2.0.md` | Organize Agent 如何提取高价值信息、如何沉淀到 L1/L2 |
 | `03_Strategies/Compression_Strategy/compression_strategy_v2.0.md` | 对话/报告/规划/指南/推理的压缩与归档触发 |
