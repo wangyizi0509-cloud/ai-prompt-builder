@@ -4,7 +4,7 @@
 
 采用 Tool-based 渐进式加载模式：
 - 系统提示只包含 Skills 的元数据
-- 模型通过 load_skill_instructions 工具按需加载完整指令
+- 模型通过 load_skill 工具按需加载完整指令
 
 上下文架构更新 (v2.0)：
 - 使用分层上下文架构（Layer 0-4）
@@ -22,7 +22,7 @@ from typing import Any
 from datetime import datetime
 
 from graph.state import AgentState, ActionGuide
-from graph.context_builder import build_context_dict
+from graph.message_builder import build_messages_for_model
 from graph.context_types import (
     ActionGuideItem,
     ActionGuideContent,
@@ -32,11 +32,8 @@ from graph.context_types import (
     is_valid_action_guide_status_transition,
 )
 from utils.message_utils import get_msg_role_and_content
-from skills import load_inquiry_skill_instructions
-from skills.inquiry import get_inquiry_skill
-from skills.guide_loader import create_guide_loader_tool
-from graph.tools.guide_bind_tools import create_guide_bind_tool
-from utils.prompt_loader import load_prompt, get_prompt_path
+from skills import create_inquiry_only_loader
+from graph.tools.ask_tool import get_ask_tool, ask_user
 from config import get_llm
 
 
@@ -153,53 +150,12 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
     if from_tool_call:
         print(f"[DEBUG] GuideAgent: Continuing after tool call (last_role={last_msg_role})")
     
-    # 绑定工具：与 main_agent 保持一致，只有从工具返回时禁用
-    llm = get_llm(temperature=0.6)
-    if not from_tool_call:
-        llm = llm.bind_tools([
-            load_inquiry_skill_instructions,
-            create_guide_loader_tool(lambda: state),
-            create_guide_bind_tool(lambda: state, "guide_agent"),
-        ])
-    else:
+    # 准备 LLM（工具绑定在决策后进行）
+    base_llm = get_llm(temperature=0.6)
+    if from_tool_call:
         print("[DEBUG] GuideAgent: Second stage (from_tool_call), tools disabled to prevent loop")
     
-    # 加载 Prompt
-    try:
-        prompt_name = "guide_agent"
-        prompt_path = get_prompt_path(prompt_name)
-        prompt_template = load_prompt(prompt_name)
-        prompt_source = str(prompt_path)
-        prompt_fallback = False
-    except FileNotFoundError:
-        prompt_template = _get_default_prompt()
-        prompt_source = "fallback:_get_default_prompt(FileNotFoundError)"
-        prompt_fallback = True
-    
-    # 获取主 Agent 刚说的话（用于保持对话连贯）
-    last_response = state.get("last_response_for_continuity", "")
-    
-    # 构建上下文（使用新的分层上下文架构）
-    context_dict = build_context_dict(state, target_agent="guide_agent")
-    
-    # 获取 InquirySkill 元数据 + 工具使用说明
-    inquiry_skill = get_inquiry_skill()
-    inquiry_metadata = f"""
----
-
-## 📚 可用 Skill（通过工具按需加载）
-
-{inquiry_skill.get_metadata_prompt()}
-
-### 如何使用
-
-**如果你在对话历史（工具输出）或下方的「刚刚获取到的 Skill 指令」中已经包含了所需指令，请直接根据指令生成回复，禁止重复调用工具。**
-
-只有当信息不足需要提问，且 **还没有获取过提问指令** 时，请调用 `load_inquiry_skill_instructions()`。
-
----
-"""
-    # 注入 tool 输出（如果刚从工具返回）。注意：tool 输出不会写入对话历史，需要在二阶段显式注入。
+    # 注入 tool 输出（如果刚从工具返回）。
     if from_tool_call and not last_tool_content:
         # [FIX] 优先检查 _last_tool_content（skill_tools_node 直接设置的，最可靠）
         cached_content = state.get("_last_tool_content")
@@ -226,123 +182,102 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
                         last_tool_content = cached_content
                         break
 
-    if from_tool_call and last_tool_content:
-        tool_call_names: list[str] = []
-        for msg in reversed(messages):
-            tc = getattr(msg, "tool_calls", None)
-            if tc:
-                try:
-                    tool_call_names = [str(x.get("name") or "") for x in tc if isinstance(x, dict)]
-                except Exception:
-                    tool_call_names = []
-                break
-            if isinstance(msg, dict) and msg.get("tool_calls"):
-                try:
-                    tool_call_names = [str(x.get("name") or "") for x in msg["tool_calls"] if isinstance(x, dict)]
-                except Exception:
-                    tool_call_names = []
-                break
-        tool_call_names = [n for n in tool_call_names if n]
+    tool_call_is_inquiry = bool(from_tool_call and last_tool_content)
 
-        if "load_action_guide_detail" in tool_call_names:
-            inquiry_metadata = f"""
-{inquiry_metadata}
-
-### 📌 你刚才已成功加载了以下行动指南详情
-{last_tool_content}
-
-## 🟢 第二阶段执行指令 (CRITICAL)
-你已经成功加载了行动指南的详细内容。现在是**第二阶段**。
-请基于这份指南详情 + 当前上下文继续完成本轮任务，并输出最终 JSON。
-禁止再次调用任何工具。
-"""
-        else:
-            # 默认：当作提问 Skill 指令（向后兼容旧逻辑）
-            inquiry_metadata = f"""
-{inquiry_metadata}
-
-### ⚠️ 重要：你刚才已经成功获取了以下提问指令
-{last_tool_content}
-
-## 🟢 第二阶段执行指令 (CRITICAL)
-你已经成功加载了提问 Skill 指令。现在是**第二阶段**。
-
-**你主动请求了提问工具，说明你认为信息不足。请立即根据上面的 Skill 指令生成提问。**
-
-**必填项检查**：
-- 必须设置 `need_questions=true`
-- 必须生成完整的 `inquiry_card` JSON 对象，**严禁**设为 null
-- **严禁**直接输出行动指南（guide_content），你必须先提问！
-
-**禁止再次调用 load_inquiry_skill_instructions 工具！**
-"""
-
-    # 填充 Prompt
-    from collections import defaultdict
-    format_kwargs = {
-        # 新版：使用分层上下文
-        "instruction": context_dict.get("instruction") or "无",
-        "user_context": context_dict.get("user_context", "暂无用户信息"),
-        "status_report": context_dict.get("status_report", "暂无"),
-        "action_plan": context_dict.get("action_plan", "暂无"),
-        "action_guides": context_dict.get("action_guides", "暂无"),
-        "bound_action_guides": context_dict.get("bound_action_guides", ""),
-        "conversation_history": context_dict.get("conversation_history", "无历史对话"),
-        "current_task_id": context_dict.get("current_task_id", ""),
-        "task_reasoning": context_dict.get("task_reasoning", ""),
-        "last_response": last_response if last_response else "无",
-        # 向后兼容
-        "user_profile": context_dict.get("user_profile", "{}"),
-        # Skills 元数据
-        "inquiry_skill_metadata": inquiry_metadata,
-    }
-    try:
-        prompt = prompt_template.format_map(defaultdict(str, format_kwargs))
-    except Exception as e:
-        print(f"[ERROR] GuideAgent: Prompt format error: {type(e).__name__}: {e}. Falling back to _get_default_prompt.")
-        prompt_source = "fallback:_get_default_prompt(format_error)"
-        prompt_fallback = True
-        fallback_template = _get_default_prompt()
-        try:
-            prompt = fallback_template.format_map(defaultdict(str, format_kwargs))
-        except Exception:
-            prompt = fallback_template
+    # [FIX] 当从工具调用返回时，不应该再次添加用户的上一条输入
+    # 否则模型会看到错误的消息栈，误以为用户已确认，跳过提问
+    current_input = "" if from_tool_call else state.get("user_message", "")
     
-    # === 调用 LLM（模型自主决定是否需要工具）===
-    print(f"[DEBUG] GuideAgent: Invoking LLM (from_tool_call={from_tool_call})")
+    model_messages = build_messages_for_model(
+        state=state,
+        agent_name="guide_agent",
+        current_input=current_input,
+    )
+    prompt_source = "message_builder"
+    prompt_fallback = False
     
-    # 归还工具箱：不再强制禁用工具
-    response = llm.invoke(prompt)
+    # === 调用 LLM（工具驱动）===
+    ask_mode = state.get("ask_mode", False)
+    print(f"[DEBUG] GuideAgent: Invoking LLM (from_tool_call={from_tool_call}, ask_mode={ask_mode})")
+    response = None
+    parsed = None
+    pending_action = state.get("_pending_action") or ""
     
-    # 检查是否有工具调用
-    if hasattr(response, "tool_calls") and response.tool_calls:
-        # 模型决定调用工具，返回消息让 workflow 路由到 skill_tools
-        tool_names = []
-        try:
-            tool_names = [tc["name"] for tc in response.tool_calls]
-        except Exception:
-            tool_names = []
-        print(f"[DEBUG] GuideAgent: Model requested tool call: {tool_names}")
-        is_inquiry_tool = "load_inquiry_skill_instructions" in tool_names
-        return {
-            "user_message": state.get("user_message", ""),
-            "user_context": state.get("user_context", {}),
-            # 兼容测试与工作流：工具调用阶段视为 ask_user（请求加载提问 Skill）
-            "next_action": "ask_user" if is_inquiry_tool else "end_turn",
-            "need_questions": True if is_inquiry_tool else False,
-            "inquiry_card": None,
-            "messages": [response],
-            "current_agent": "guide_agent",  # 标记调用来源
-            "_tool_caller": "guide_agent",   # 显式标记工具调用来源
-            "debug_log": [{
-                "node": "guide_agent",
-                "step": "Tool Call Requested",
-                "tool_calls": [tc["name"] for tc in response.tool_calls],
-            }]
-        }
+    # Phase 2: ask_mode=True 后强制调用 ask 工具生成 inquiry_card
+    if from_tool_call and pending_action == "ask":
+        ask_full_tool = get_ask_tool(True)
+        llm_with_tools = base_llm.bind_tools(
+            [ask_full_tool],
+            tool_choice={"type": "function", "function": {"name": "ask"}},
+        )
+        response = llm_with_tools.invoke(model_messages)
+        if hasattr(response, "tool_calls") and response.tool_calls:
+            print("[DEBUG] GuideAgent: Forced ask tool call (Phase 2: generate inquiry_card)")
+            if hasattr(response, "name"):
+                response.name = "guide_agent"
+            return {
+                "messages": [response],
+                "current_agent": "guide_agent",
+                "_tool_caller": "guide_agent",
+                "debug_log": [{
+                    "node": "guide_agent",
+                    "step": "Tool Call Requested (ask forced, Phase 2)",
+                    "tool_calls": [tc["name"] for tc in response.tool_calls],
+                }],
+            }
     
-    # 没有工具调用，解析响应
-    parsed = _parse_response(response.content)
+    # 向后兼容：原 inquiry skill 的两阶段处理
+    elif from_tool_call and pending_action == "inquiry":
+        llm_with_tools = base_llm.bind_tools(
+            [ask_user],
+            tool_choice={"type": "function", "function": {"name": "ask_user"}},
+        )
+        response = llm_with_tools.invoke(model_messages)
+        if hasattr(response, "tool_calls") and response.tool_calls:
+            print("[DEBUG] GuideAgent: Forced ask_user tool call after inquiry skill")
+            if hasattr(response, "name"):
+                response.name = "guide_agent"
+            return {
+                "messages": [response],
+                "current_agent": "guide_agent",
+                "_tool_caller": "guide_agent",
+                "debug_log": [{
+                    "node": "guide_agent",
+                    "step": "Tool Call Requested (ask_user forced)",
+                    "tool_calls": [tc["name"] for tc in response.tool_calls],
+                }],
+            }
+    elif from_tool_call:
+        response = base_llm.invoke(model_messages)
+    else:
+        # 使用定制工具：guide_agent 只允许使用 inquiry skill
+        inquiry_tool = create_inquiry_only_loader()
+<<<<<<< Current (Your changes)
+        llm_with_tools = base_llm.bind_tools([inquiry_tool])
+=======
+        # 允许子 Agent 直接进入 ask 两阶段提问（Phase 1: ask(action="enable")）
+        ask_tool = get_ask_tool(False)
+        llm_with_tools = base_llm.bind_tools([ask_tool, inquiry_tool])
+>>>>>>> Incoming (Background Agent changes)
+        response = llm_with_tools.invoke(model_messages)
+        if hasattr(response, "tool_calls") and response.tool_calls:
+            print(f"[DEBUG] GuideAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
+            if hasattr(response, "name"):
+                response.name = "guide_agent"
+            return {
+                "messages": [response],
+                "current_agent": "guide_agent",
+                "_tool_caller": "guide_agent",
+                "debug_log": [{
+                    "node": "guide_agent",
+                    "step": "Tool Call Requested",
+                    "tool_calls": [tc["name"] for tc in response.tool_calls],
+                }],
+            }
+    
+    # 解析响应（若决策已解析则复用）
+    if parsed is None:
+        parsed = _parse_response(response.content)
 
     # === 处理 guide_status_updates（状态机）===
     status_updates = parsed.get("guide_status_updates", []) or []
@@ -415,14 +350,25 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
         result["action_guides"] = layer2_memory.get("action_guides", [])
     
     # 检查是否需要提问
-    need_questions = bool(parsed.get("need_questions", False))
     inquiry_card = parsed.get("inquiry_card")
-
     questions_list = inquiry_card.get("questions", []) if isinstance(inquiry_card, dict) else []
     next_streak = (streak_count + 1) if (streak_agent == "guide_agent") else 1
     allow_ask = next_streak <= max_streak
+    if tool_call_is_inquiry and not questions_list and from_tool_call and last_tool_content:
+        err_msg = "系统异常：已加载提问指令但未生成问题列表（inquiry_card.questions 为空）。请重试。"
+        result["action_guide"] = None
+        result["inquiry_card"] = None
+        result["pending_questions"] = []
+        existing_responses = state.get("pending_responses", [])
+        result["pending_responses"] = existing_responses + [{"from": "guide_agent", "content": err_msg, "phase": "after_guide"}]
+        result["messages"] = [{"role": "assistant", "name": "guide_agent", "content": err_msg}]
+        result["current_agent"] = "guide_agent"
+        result["agent_resume_point"] = "continue_guide"
+        result["completion_status"] = None
+        result["result_summary"] = None
+        return result
 
-    if need_questions and questions_list and allow_ask:
+    if questions_list and allow_ask:
         print(f"[DEBUG] GuideAgent: Generated {len(inquiry_card.get('questions', []))} questions")
         
         result["inquiry_card"] = inquiry_card
@@ -456,6 +402,7 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
         raw_assistant_msg = response.content if getattr(response, "content", None) else response_content
         result["messages"] = [{
             "role": "assistant",
+            "name": "guide_agent",
             "content": raw_assistant_msg,
             "metadata": {
                 "task_id": parsed.get("task_id"),
@@ -487,6 +434,7 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
             result["pending_questions"] = []
             result["messages"] = [{
                 "role": "assistant",
+                "name": "guide_agent",
                 "content": "（行动指南状态已更新）",
                 "metadata": {
                     "task_id": parsed.get("task_id"),
@@ -500,6 +448,9 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
             result["_tool_caller"] = None
             if task_updates and "task_registry" in task_updates:
                 result["task_registry"] = task_updates.get("task_registry", {})
+            result["_handoff_target"] = None
+            result["_handoff_instruction"] = None
+            result["instruction"] = None
             return result
         
         # 构建新的指南条目（v3.1 真源：ActionGuideItem -> layer2_memory）
@@ -571,6 +522,7 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
         result["pending_responses"] = existing_responses
         result["messages"] = [{
             "role": "assistant",
+            "name": "guide_agent",
             "content": f"（行动指南{new_guide_id}已生成）",
             "metadata": {
                 "task_id": parsed.get("task_id"),
@@ -587,6 +539,11 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
     if task_updates:
         if "task_registry" in task_updates:
             result["task_registry"] = task_updates.get("task_registry", {})
+
+    # 清理 handoff 指令，避免后续轮次误注入
+    result["_handoff_target"] = None
+    result["_handoff_instruction"] = None
+    result["instruction"] = None
     
     return result
 
@@ -636,7 +593,6 @@ def _parse_response(content: str) -> dict:
         return {
             "task_id": "",
             "thought": "",
-            "need_questions": False,
             "guide_content": content.strip() if content else "暂时无法生成指南，请提供更多信息。",
         }
 
@@ -808,8 +764,8 @@ def _get_default_prompt() -> str:
 
 ## 你的任务
 1. 首先判断信息是否足够生成具体的行动指南
-2. 如果信息不足，设置 `need_questions=true`（不需要填写 `question_goal`，目标在你心中即可）
-   - 如果设置了 `need_questions=true`，系统会自动加载「提问引导 Skill」的完整指令，你需要生成完整的 `inquiry_card`
+2. 如果信息不足，调用 `load_skill("inquiry")` 获取提问指令
+   - 工具返回后，必须生成完整的 `inquiry_card`
 3. 如果信息足够，输出完整的行动指南
 
 ## 输出格式
@@ -818,7 +774,6 @@ def _get_default_prompt() -> str:
 {{
   "task_id": "当前任务ID（例如 task_001）。",
   "thought": "本轮内部思考（给系统看的，不给用户看）。要求：简短、决策导向。",
-  "need_questions": false,
   "response": "如果需要提问，这里写你要对用户说的话",
   "guide_content": "如果信息足够，这里输出完整的 Markdown 格式行动指南",
   "inquiry_card": null
@@ -826,10 +781,10 @@ def _get_default_prompt() -> str:
 ```
 
 **重要说明**：
-- 如果 `need_questions=true`，必须生成完整的 `inquiry_card`（包含 questions 数组、intro、reasoning）
-- 如果 `need_questions=false`，`inquiry_card` 设为 `null`
+- 仅当需要提问时才生成完整的 `inquiry_card`（包含 questions 数组、intro、reasoning）
+- 其他情况下，`inquiry_card` 设为 `null`
 
-如果 need_questions=false，guide_content 必须包含以下结构：
+当 guide_content 需要输出时，必须包含以下结构：
 
 ## 📋 任务卡片：[任务名称]
 > [一句话核心意图]

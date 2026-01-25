@@ -4,6 +4,7 @@
 """
 
 import re
+import uuid
 from typing import Any
 
 from graph.state import AgentState
@@ -44,7 +45,7 @@ def router_node(state: AgentState) -> dict[str, Any]:
 
     # 统一现有 messages 为 dict，防止混入 LangChain Message 对象
     existing_messages = state.get("messages", [])
-    from graph.state import convert_message_to_dict
+    from graph.state import convert_message_to_dict, get_message_id
     normalized_messages = []
     for m in existing_messages:
         try:
@@ -72,6 +73,20 @@ def router_node(state: AgentState) -> dict[str, Any]:
                     role = "assistant"
                 normalized_messages.append({"role": role, "content": m.content})
     state["messages"] = normalized_messages
+
+    # 根因修复：若 user_message 为空，但 messages 已包含用户输入，则回填
+    fallback_user_message = ""
+    fallback_message_id = ""
+    if not user_message:
+        for msg in reversed(normalized_messages):
+            if msg.get("role") == "user":
+                content = (msg.get("content") or "").strip()
+                if content:
+                    fallback_user_message = content
+                    fallback_message_id = get_message_id(msg)
+                    break
+        if fallback_user_message:
+            user_message = fallback_user_message
     
     # [FIX] 状态清理：每轮开始时，确保清理上一轮的临时状态，防止上下文爆炸
     base_update = {
@@ -82,8 +97,15 @@ def router_node(state: AgentState) -> dict[str, Any]:
         "completion_status": None,  # 重置子 Agent 信号
         "result_summary": None,
         "_tool_caller": None,  # [FIX] 重置工具调用标记，防止 Skill 指令一直挂着
+        "_pending_action": None,  # 重置两阶段工具标记
+        "_handoff_target": None,
+        "_handoff_instruction": None,
         "_iteration_count": 0,  # [FIX] 重置单轮步数计数器，避免跨轮次累积导致流程被卡死（Studio 模式下不走 server.py）
     }
+    if fallback_user_message:
+        base_update["user_message"] = fallback_user_message
+        if fallback_message_id and not state.get("current_message_id"):
+            base_update["current_message_id"] = fallback_message_id
 
     # [v3.0] instruction 属于“主 Agent -> 专家”的临时 Brief：
     # - 非 resume 场景：每轮开头清空，避免跨轮次残留导致下游误用旧指令
@@ -117,28 +139,32 @@ def router_node(state: AgentState) -> dict[str, Any]:
     existing_messages, trimmed = _trim_messages_if_needed(existing_messages, max_messages=50)
     state["messages"] = existing_messages
     
-    # 检查最后一条消息是否已经是这条用户消息（避免重复添加）
-    need_add_user_msg = True
-    if existing_messages:
-        last_msg = existing_messages[-1]
-        # 兼容多种消息格式
-        if hasattr(last_msg, "content"):
-            last_content = last_msg.content
-            last_role = getattr(last_msg, "type", "unknown")
-        elif isinstance(last_msg, dict):
-            last_content = last_msg.get("content", "")
-            last_role = last_msg.get("role", "unknown")
-        else:
-            last_content = ""
-            last_role = "unknown"
-        
-        # 如果最后一条消息就是当前用户消息，不重复添加
-        if last_role in ("user", "human") and last_content.strip() == user_message:
-            need_add_user_msg = False
+    # [FIX-2026-01-19] 使用消息 ID 去重，避免误删“用户重复发同一句话”
+    current_message_id = (
+        state.get("current_message_id")
+        or base_update.get("current_message_id")
+        or str(uuid.uuid4())
+    )
+    if not state.get("current_message_id") and not base_update.get("current_message_id"):
+        base_update["current_message_id"] = current_message_id
+    existing_ids = {get_message_id(m) for m in existing_messages if get_message_id(m)}
+
+    # 如果当前 message_id 已存在但内容不一致，说明是“旧 id”，需要换新 id
+    if current_message_id in existing_ids and user_message:
+        matched_content = ""
+        for msg in existing_messages:
+            if get_message_id(msg) == current_message_id:
+                matched_content = (msg.get("content") or "").strip() if isinstance(msg, dict) else ""
+                break
+        if matched_content and matched_content != user_message.strip():
+            current_message_id = str(uuid.uuid4())
+            base_update["current_message_id"] = current_message_id
+
+    need_add_user_msg = bool(user_message) and current_message_id not in existing_ids
     
     if need_add_user_msg and user_message:
         # 使用 LangGraph 的 add_messages reducer 兼容的格式
-        base_update["messages"] = [{"role": "user", "content": user_message}]
+        base_update["messages"] = [{"role": "user", "content": user_message, "id": current_message_id}]
 
     # 同步全量存储：默认情况下使用已有 messages + 本轮待添加的用户消息
     merged_messages = list(existing_messages)
@@ -151,7 +177,7 @@ def router_node(state: AgentState) -> dict[str, Any]:
         # [FIX] 构建消息列表：先添加用户消息，再添加助手回复
         messages_to_add = []
         if need_add_user_msg and user_message:
-            messages_to_add.append({"role": "user", "content": user_message})
+            messages_to_add.append({"role": "user", "content": user_message, "id": current_message_id})
         messages_to_add.append({"role": "assistant", "content": response_content})
         
         return {
@@ -173,7 +199,7 @@ def router_node(state: AgentState) -> dict[str, Any]:
         # [FIX] 构建消息列表：先添加用户消息，再添加助手回复
         messages_to_add = []
         if need_add_user_msg and user_message:
-            messages_to_add.append({"role": "user", "content": user_message})
+            messages_to_add.append({"role": "user", "content": user_message, "id": current_message_id})
         messages_to_add.append({"role": "assistant", "content": response_content})
         
         return {

@@ -4,7 +4,7 @@
 
 采用 Tool-based 渐进式加载模式：
 - 系统提示只包含 Skills 的元数据
-- 模型通过 load_skill_instructions 工具按需加载完整指令
+- 模型通过 load_skill 工具按需加载完整指令
 
 上下文架构更新 (v2.0)：
 - 使用分层上下文架构（Layer 0-4）
@@ -21,7 +21,7 @@ from typing import Any
 from datetime import datetime
 
 from graph.state import AgentState, StatusReport
-from graph.context_builder import build_context_dict
+from graph.message_builder import build_messages_for_model
 from graph.context_types import (
     create_new_task,
     get_active_task,
@@ -29,9 +29,8 @@ from graph.context_types import (
     create_status_report_item,
 )
 from utils.message_utils import get_msg_role_and_content
-from skills.inquiry import get_inquiry_skill
-from skills import load_inquiry_skill_instructions
-from utils.prompt_loader import load_prompt, get_prompt_path
+from skills import create_inquiry_only_loader
+from graph.tools.ask_tool import get_ask_tool, ask_user
 from config import get_llm
 
 
@@ -193,48 +192,11 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
     if from_tool_call:
         print(f"[DEBUG] StatusAgent: Continuing after tool call (last_role={last_msg_role})")
     
-    # 绑定工具：与 main_agent 保持一致，只有从工具返回时禁用
-    llm = get_llm(temperature=0.5)
-    if not from_tool_call:
-        llm = llm.bind_tools([load_inquiry_skill_instructions])
-    else:
+    # 准备 LLM（工具绑定在决策后进行）
+    base_llm = get_llm(temperature=0.5)
+    if from_tool_call:
         print("[DEBUG] StatusAgent: Second stage (from_tool_call), tools disabled to prevent loop")
     
-    # 加载 Prompt
-    try:
-        prompt_name = "status_agent"
-        prompt_path = get_prompt_path(prompt_name)
-        prompt_template = load_prompt(prompt_name)
-        prompt_source = str(prompt_path)
-        prompt_fallback = False
-    except FileNotFoundError:
-        prompt_template = _get_default_prompt()
-        prompt_source = "fallback:_get_default_prompt(FileNotFoundError)"
-        prompt_fallback = True
-    
-    # 获取主 Agent 刚说的话（用于保持对话连贯）
-    last_response = state.get("last_response_for_continuity", "")
-    
-    # 构建上下文（使用新的分层上下文架构）
-    context_dict = build_context_dict(state, target_agent="status_agent")
-    
-    # 获取 InquirySkill 元数据 + 工具使用说明
-    inquiry_skill = get_inquiry_skill()
-    inquiry_metadata = f"""
----
-
-## 📚 可用 Skill（通过工具按需加载）
-
-{inquiry_skill.get_metadata_prompt()}
-
-### 如何使用
-
-**如果你在对话历史（工具输出）或下方的「刚刚获取到的 Skill 指令」中已经包含了所需指令，请直接根据指令生成回复，禁止重复调用工具。**
-
-只有当信息不足需要提问，且 **还没有获取过提问指令** 时，请调用 `load_inquiry_skill_instructions()`。
-
----
-"""
     # 注入工具指令（如果刚从工具返回）
     if from_tool_call and not last_tool_content:
         # [FIX] 优先检查 _last_tool_content（skill_tools_node 直接设置的，最可靠）
@@ -262,82 +224,100 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
                         last_tool_content = cached_content
                         break
 
-    if from_tool_call and last_tool_content:
-        inquiry_metadata = f"""
-{inquiry_metadata}
-
-### ⚠️ 重要：你刚才已经成功获取了以下提问指令
-{last_tool_content}
-
-## 🟢 第二阶段执行指令 (CRITICAL)
-你已经成功加载了提问 Skill 指令。现在是**第二阶段**。
-
-**你主动请求了提问工具，说明你认为信息不足。请立即根据上面的 Skill 指令生成提问。**
-
-**必填项检查**：
-- 必须设置 `need_questions=true`
-- 必须生成完整的 `inquiry_card` JSON 对象，**严禁**设为 null
-- **严禁**直接输出分析报告（report_content），你必须先提问！
-
-**禁止再次调用 load_inquiry_skill_instructions 工具！**
-"""
-
-    # 填充 Prompt
-    from collections import defaultdict
-    try:
-        prompt = prompt_template.format_map(defaultdict(str, {
-            # 新版：使用分层上下文
-            "instruction": context_dict.get("instruction") or "无",
-            "user_context": context_dict.get("user_context", "暂无用户信息"),
-            "status_report": context_dict.get("status_report", "暂无"),
-            "action_plan": context_dict.get("action_plan", "暂无"),
-            "action_guides": context_dict.get("action_guides", "暂无"),
-            "bound_action_guides": context_dict.get("bound_action_guides", ""),
-            "conversation_history": context_dict.get("conversation_history", "无历史对话"),
-            "current_task_id": context_dict.get("current_task_id", ""),
-            "task_reasoning": context_dict.get("task_reasoning", ""),
-            "user_message": state.get("user_message", ""),
-            "last_response": last_response if last_response else "无",
-            # 向后兼容
-            "user_profile": context_dict.get("user_profile", "{}"),
-            # Skills 元数据
-            "inquiry_skill_metadata": inquiry_metadata,
-        }))
-    except Exception:
-        # 如果格式化失败（通常是 prompt 模板残留未转义花括号），回退到默认 prompt
-        prompt = _get_default_prompt()
-        prompt_source = "fallback:_get_default_prompt(format_error)"
-        prompt_fallback = True
-
-    # === 调用 LLM（模型自主决定是否需要工具）===
-    print(f"[DEBUG] StatusAgent: Invoking LLM (from_tool_call={from_tool_call})")
+    # [FIX] 当从工具调用返回时，不应该再次添加用户的上一条输入
+    # 否则模型会看到错误的消息栈，误以为用户已确认，跳过提问
+    current_input = "" if from_tool_call else state.get("user_message", "")
     
-    # 归还工具箱：不再强制禁用工具
-    response = llm.invoke(prompt)
+    model_messages = build_messages_for_model(
+        state=state,
+        agent_name="status_agent",
+        current_input=current_input,
+    )
+    prompt_source = "message_builder"
+    prompt_fallback = False
+
+    # === 调用 LLM（工具驱动）===
+    ask_mode = state.get("ask_mode", False)
+    print(f"[DEBUG] StatusAgent: Invoking LLM (from_tool_call={from_tool_call}, ask_mode={ask_mode})")
+    response = None
+    parsed = None
+    pending_action = state.get("_pending_action") or ""
     
-    # 检查是否有工具调用
-    if hasattr(response, "tool_calls") and response.tool_calls:
-        # 模型决定调用工具，返回消息让 workflow 路由到 skill_tools
-        print(f"[DEBUG] StatusAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
-        return {
-            "user_message": state.get("user_message", ""),
-            "user_context": state.get("user_context", {}),
-            # 兼容测试与工作流：工具调用阶段视为 ask_user（请求加载提问 Skill）
-            "next_action": "ask_user",
-            "need_questions": True,
-            "inquiry_card": None,
-            "messages": [response],
-            "current_agent": "status_agent",  # 标记调用来源
-            "_tool_caller": "status_agent",   # 显式标记工具调用来源
-            "debug_log": [{
-                "node": "status_agent",
-                "step": "Tool Call Requested",
-                "tool_calls": [tc["name"] for tc in response.tool_calls],
-            }]
-        }
+    # Phase 2: ask_mode=True 后强制调用 ask 工具生成 inquiry_card
+    if from_tool_call and pending_action == "ask":
+        ask_full_tool = get_ask_tool(True)
+        llm_with_tools = base_llm.bind_tools(
+            [ask_full_tool],
+            tool_choice={"type": "function", "function": {"name": "ask"}},
+        )
+        response = llm_with_tools.invoke(model_messages)
+        if hasattr(response, "tool_calls") and response.tool_calls:
+            print("[DEBUG] StatusAgent: Forced ask tool call (Phase 2: generate inquiry_card)")
+            if hasattr(response, "name"):
+                response.name = "status_agent"
+            return {
+                "messages": [response],
+                "current_agent": "status_agent",
+                "_tool_caller": "status_agent",
+                "debug_log": [{
+                    "node": "status_agent",
+                    "step": "Tool Call Requested (ask forced, Phase 2)",
+                    "tool_calls": [tc["name"] for tc in response.tool_calls],
+                }],
+            }
     
-    # 没有工具调用，解析响应
-    parsed = _parse_response(response.content)
+    # 向后兼容：原 inquiry skill 的两阶段处理
+    elif from_tool_call and pending_action == "inquiry":
+        llm_with_tools = base_llm.bind_tools(
+            [ask_user],
+            tool_choice={"type": "function", "function": {"name": "ask_user"}},
+        )
+        response = llm_with_tools.invoke(model_messages)
+        if hasattr(response, "tool_calls") and response.tool_calls:
+            print("[DEBUG] StatusAgent: Forced ask_user tool call after inquiry skill")
+            if hasattr(response, "name"):
+                response.name = "status_agent"
+            return {
+                "messages": [response],
+                "current_agent": "status_agent",
+                "_tool_caller": "status_agent",
+                "debug_log": [{
+                    "node": "status_agent",
+                    "step": "Tool Call Requested (ask_user forced)",
+                    "tool_calls": [tc["name"] for tc in response.tool_calls],
+                }],
+            }
+    elif from_tool_call:
+        response = base_llm.invoke(model_messages)
+    else:
+        # 使用定制工具：status_agent 只允许使用 inquiry skill
+        inquiry_tool = create_inquiry_only_loader()
+<<<<<<< Current (Your changes)
+        llm_with_tools = base_llm.bind_tools([inquiry_tool])
+=======
+        # 允许子 Agent 直接进入 ask 两阶段提问（Phase 1: ask(action="enable")）
+        ask_tool = get_ask_tool(False)
+        llm_with_tools = base_llm.bind_tools([ask_tool, inquiry_tool])
+>>>>>>> Incoming (Background Agent changes)
+        response = llm_with_tools.invoke(model_messages)
+        if hasattr(response, "tool_calls") and response.tool_calls:
+            print(f"[DEBUG] StatusAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
+            if hasattr(response, "name"):
+                response.name = "status_agent"
+            return {
+                "messages": [response],
+                "current_agent": "status_agent",
+                "_tool_caller": "status_agent",
+                "debug_log": [{
+                    "node": "status_agent",
+                    "step": "Tool Call Requested",
+                    "tool_calls": [tc["name"] for tc in response.tool_calls],
+                }],
+            }
+    
+    # 解析响应（若决策已解析则复用）
+    if parsed is None:
+        parsed = _parse_response(response.content)
     
     result = {
         "next_action": "end_turn",
@@ -354,35 +334,28 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
     }
     
     # 检查是否需要提问
-    need_questions = bool(parsed.get("need_questions", False))
     inquiry_card = parsed.get("inquiry_card")
+    questions_list = inquiry_card.get("questions", []) if isinstance(inquiry_card, dict) else []
+    if from_tool_call and last_tool_content and not questions_list:
+        err_msg = "系统异常：已加载提问指令但未生成问题列表（inquiry_card.questions 为空）。请重试。"
+        result["status_report"] = None
+        result["inquiry_card"] = None
+        result["pending_questions"] = []
+        existing_responses = state.get("pending_responses", [])
+        result["pending_responses"] = existing_responses + [{"from": "status_agent", "content": err_msg, "phase": "after_status"}]
+        result["messages"] = [{"role": "assistant", "name": "status_agent", "content": err_msg}]
+        result["current_agent"] = "status_agent"
+        result["agent_resume_point"] = "continue_analysis"
+        result["completion_status"] = None
+        result["result_summary"] = None
+        return result
 
-    # 强约束：如果本轮是从提问 Skill 工具返回，说明 *一定* 需要提问（“调用工具”本身就是决策信号）
-    forced_need_questions = bool(from_tool_call and last_tool_content)
-    effective_need_questions = bool(need_questions or forced_need_questions)
-
-    if effective_need_questions and question_count < max_questions:
+    if questions_list and question_count < max_questions:
         # ⚠️ 严格模式（按你的要求）：不做任何“纠错二次调用”、不做任何“工程兜底造 inquiry_card”
         # - Phase 1：应由模型触发 tool_calls（上面已处理 tool_calls 分支）
         # - Phase 2：必须输出 inquiry_card.questions，否则直接报错并结束本轮（暴露问题，便于排查）
 
         # 至此：必须有 inquiry_card.questions，才能真正发起提问
-        questions_list = inquiry_card.get("questions", []) if isinstance(inquiry_card, dict) else []
-        if not questions_list:
-            err_msg = "系统异常：需要提问但未生成问题列表（inquiry_card.questions 为空）。请重试。"
-            result["status_report"] = None
-            result["inquiry_card"] = None
-            result["pending_questions"] = []
-            existing_responses = state.get("pending_responses", [])
-            result["pending_responses"] = existing_responses + [{"from": "status_agent", "content": err_msg, "phase": "after_status"}]
-            result["messages"] = [{"role": "assistant", "content": err_msg}]
-            # 防止本轮继续回到 main_agent 覆盖错误提示：进入“等待用户输入/重试”的暂停态
-            result["current_agent"] = "status_agent"
-            result["agent_resume_point"] = "continue_analysis"
-            result["completion_status"] = None
-            result["result_summary"] = None
-            return result
-
         print(f"[DEBUG] StatusAgent: Asking questions (count={len(questions_list)})")
 
         result["inquiry_card"] = inquiry_card
@@ -415,6 +388,7 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
         raw_assistant_msg = getattr(response, "content", "") or response_content
         result["messages"] = [{
             "role": "assistant",
+            "name": "status_agent",
             "content": raw_assistant_msg,
             "metadata": {
                 "task_id": parsed.get("task_id") if isinstance(parsed, dict) else "",
@@ -503,6 +477,7 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
         result["pending_responses"] = existing_responses
         result["messages"] = [{
             "role": "assistant",
+            "name": "status_agent",
             "content": f"（现状分析报告{new_report_id}已生成）",
             "metadata": {
                 "task_id": parsed.get("task_id"),
@@ -521,6 +496,11 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
     # === 合并任务管理更新 ===
     if task_updates and "task_registry" not in result:
         result["task_registry"] = task_updates.get("task_registry", state.get("task_registry", {}))
+
+    # 清理 handoff 指令，避免后续轮次误注入
+    result["_handoff_target"] = None
+    result["_handoff_instruction"] = None
+    result["instruction"] = None
     
     return result
 
@@ -572,7 +552,6 @@ def _parse_response(content: str) -> dict:
         return {
             "task_id": "",
             "thought": "",
-            "need_questions": False,
             "report_content": content.strip() if content else "暂时无法完成分析，请提供更多信息。",
         }
 
@@ -730,8 +709,8 @@ def _get_default_prompt() -> str:
 
 ## 你的任务
 1. 首先判断信息是否足够进行分析
-2. 如果信息不足，设置 `need_questions=true`（不需要填写 `question_goal`，目标在你心中即可）
-   - 如果设置了 `need_questions=true`，系统会自动加载「提问引导 Skill」的完整指令，你需要生成完整的 `inquiry_card`
+2. 如果信息不足，调用 `load_skill("inquiry")` 获取提问指令
+   - 工具返回后，必须生成完整的 `inquiry_card`
 3. 如果信息足够，输出完整的情感罗盘报告
 
 ## 输出格式
@@ -740,7 +719,6 @@ def _get_default_prompt() -> str:
 {{
   "task_id": "当前任务ID（例如 task_001）。",
   "thought": "本轮内部思考（给系统看的，不给用户看）。要求：简短、决策导向。",
-  "need_questions": false,
   "response": "如果需要提问，这里写你要对用户说的话",
   "report_content": "如果信息足够，这里输出完整的 Markdown 格式情感罗盘报告",
   "inquiry_card": null
@@ -748,10 +726,10 @@ def _get_default_prompt() -> str:
 ```
 
 **重要说明**：
-- 如果 `need_questions=true`，必须生成完整的 `inquiry_card`（包含 questions 数组、intro、reasoning）
-- 如果 `need_questions=false`，`inquiry_card` 设为 `null`
+- 仅当需要提问时才生成完整的 `inquiry_card`（包含 questions 数组、intro、reasoning）
+- 其他情况下，`inquiry_card` 设为 `null`
 
-如果 need_questions=false，report_content 必须包含以下结构：
+当 report_content 需要输出时，必须包含以下结构：
 
 ## 🧭 情感罗盘
 

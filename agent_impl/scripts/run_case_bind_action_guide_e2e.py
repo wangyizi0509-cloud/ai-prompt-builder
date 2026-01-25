@@ -4,10 +4,10 @@ E2E 测试脚本：Task-bound Action Guide Detail（按 PRD 流程多轮推进�
 特性：
 - 固定 session_id，确保跨轮次状态
 - 自动推进 Onboarding / Status / Plan 的提问（用统一的“长回答”回填）
-- 一旦产出 layer2_memory.action_guides，执行 bind_action_guide_detail 并校验：
-  - 写入 active task.bound_action_guides
+- 一旦产出 layer2_memory.action_guides，执行 context_loader(bind) 并校验：
+  - 写入 active task.bound_contexts
   - 重复绑定去重覆盖
-  - create_task 切换隔离
+  - task_manager(create) 切换隔离
   - K=3 FIFO 淘汰（尽力生成 >=4 guides，不够则标记为 blocked）
 
 用法：
@@ -115,7 +115,11 @@ def state_snippet(state: dict) -> dict:
         "tasks_count(main_agent)": len(tasks),
         "active_task_id": active.get("task_id") if isinstance(active, dict) else None,
         "active_bound_ids": (
-            [bg.get("guide_id") for bg in (active.get("bound_action_guides") or []) if isinstance(bg, dict)]
+            [
+                bg.get("ref_id")
+                for bg in (active.get("bound_contexts") or [])
+                if isinstance(bg, dict) and bg.get("type") == "action_guide"
+            ]
             if isinstance(active, dict)
             else []
         ),
@@ -276,10 +280,10 @@ def main():
         _, state2 = post_chat(
             client,
             session_id,
-            f"请调用工具 bind_action_guide_detail(guide_id='{guide_id}') 绑定这条行动指南，并继续给我下一步建议。",
+            f"请调用工具 context_loader(action='bind', context_type='action_guide', context_id='{guide_id}') 绑定这条行动指南，并继续给我下一步建议。",
         )
         active2 = get_active_task(get_tasks(state2)) or {}
-        bound2 = active2.get("bound_action_guides") or []
+        bound2 = [c for c in (active2.get("bound_contexts") or []) if c.get("type") == "action_guide"]
         bound_ids2 = [bg.get("guide_id") for bg in bound2 if isinstance(bg, dict)]
         report["cases"].append(
             CaseResult(
@@ -293,10 +297,10 @@ def main():
         _, state3 = post_chat(
             client,
             session_id,
-            f"再次调用 bind_action_guide_detail(guide_id='{guide_id}') 刷新快照",
+            f"再次调用 context_loader(action='bind', context_type='action_guide', context_id='{guide_id}') 刷新快照",
         )
         active3 = get_active_task(get_tasks(state3)) or {}
-        bound3 = active3.get("bound_action_guides") or []
+        bound3 = [c for c in (active3.get("bound_contexts") or []) if c.get("type") == "action_guide"]
         same3 = [bg for bg in bound3 if isinstance(bg, dict) and bg.get("guide_id") == guide_id]
         report["cases"].append(
             CaseResult(
@@ -310,14 +314,14 @@ def main():
         _, state4 = post_chat(
             client,
             session_id,
-            "请调用 create_task(task_id='taskB_case', summary='测试任务隔离') 并设为活跃。",
+            "请调用 task_manager(action='create', task_id='taskB_case', summary='测试任务隔离') 并设为活跃。",
         )
         tasks4 = get_tasks(state4)
         active4 = get_active_task(tasks4) or {}
-        old_task = next((t for t in tasks4 if isinstance(t, dict) and t.get("task_id") != active4.get("task_id") and (t.get("bound_action_guides") or [])), None)
+        old_task = next((t for t in tasks4 if isinstance(t, dict) and t.get("task_id") != active4.get("task_id") and (t.get("bound_contexts") or [])), None)
         ok4 = (
             active4.get("task_id") == "taskB_case"
-            and (active4.get("bound_action_guides") == [] or active4.get("bound_action_guides") is None)
+            and (active4.get("bound_contexts") == [] or active4.get("bound_contexts") is None)
             and (old_task is not None)
         )
         report["cases"].append(
@@ -359,10 +363,10 @@ def main():
 
         # 依次绑定 4 条到当前活跃任务，预期淘汰第 1 条
         for gid in gids[:4]:
-            _, state5 = post_chat(client, session_id, f"你必须调用 bind_action_guide_detail(guide_id='{gid}') 绑定到当前活跃任务。")
+            _, state5 = post_chat(client, session_id, f"你必须调用 context_loader(action='bind', context_type='action_guide', context_id='{gid}') 绑定到当前活跃任务。")
 
         active5 = get_active_task(get_tasks(state5)) or {}
-        bound5 = active5.get("bound_action_guides") or []
+        bound5 = [c for c in (active5.get("bound_contexts") or []) if c.get("type") == "action_guide"]
         bound_ids5 = [bg.get("guide_id") for bg in bound5 if isinstance(bg, dict)]
         ok5 = (len(bound_ids5) == 3 and gids[0] not in bound_ids5 and bound_ids5 == gids[1:4])
         report["cases"].append(

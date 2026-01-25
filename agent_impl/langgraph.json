@@ -1,10 +1,11 @@
 {
-  "dependencies": ["."],
   "graphs": {
-    "crushe_agent": "./agent.py:graph"
+    "crushe_agent": {
+      "path": "./agent.py:graph",
+      "description": "AI恋爱军师 Agent - 主工作流"
+    }
   },
-  "python_version": "3.11",
-  "image_distro": "wolfi",
-  "env": ".env"
+  "env": ".env",
+  "dependencies": ["."],
+  "python_version": "3.13"
 }
-

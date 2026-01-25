@@ -301,10 +301,10 @@ def _process_conversation(
     """
     处理对话压缩归档
     
-    生成：
-    1. 对话摘要：核心话题、关键结论
-    2. 关键话题标签
-    3. 提取高价值信息：用户透露的事实、情感状态变化等
+    新版 Prompt 一次输出包含：
+    1. 对话摘要 + 关键话题
+    2. layer1_info（Layer 1 长期信息，3×3 矩阵）
+    3. dynamic_intel（Layer 2 动态情报）
     """
     # 格式化对话
     formatted_messages = []
@@ -321,17 +321,29 @@ def _process_conversation(
             "__CONVERSATION_TEXT__": str(conversation_text or ""),
         },
     )
-    
+
+    llm_calls = 0
     response = llm.invoke(prompt)
+    llm_calls += 1
+    print(f"[OrganizeAgent] _process_conversation llm_calls={llm_calls}")
     parsed = _parse_json_response(response.content)
     
-    # [FIX] 确保 extracted_info 和 key_topics 是正确的类型
-    extracted_info = parsed.get("extracted_info", {})
+    # 解析 Layer 1 信息（注意：新 Prompt 输出字段名是 layer1_info）
+    extracted_info = parsed.get("layer1_info", {})
     if not isinstance(extracted_info, dict):
         extracted_info = {}
+    
+    # 解析关键话题
     key_topics = parsed.get("key_topics", [])
     if not isinstance(key_topics, list):
         key_topics = [str(key_topics)] if key_topics else []
+    
+    # 解析动态情报（Layer 2）
+    raw_dynamic_intel = parsed.get("dynamic_intel", [])
+    if not isinstance(raw_dynamic_intel, list):
+        raw_dynamic_intel = []
+    # 使用 _normalize_dynamic_intels 规范化为 DynamicIntelItem 格式
+    dynamic_intels = _normalize_dynamic_intels(raw_dynamic_intel)
     
     # 构建 ConversationArchive
     conversation_archive = ConversationArchive(
@@ -347,6 +359,7 @@ def _process_conversation(
     return {
         "summary": conversation_archive,
         "extracted_info": extracted_info,
+        "dynamic_intels": dynamic_intels,  # 新增：直接从 LLM 输出解析
         "archive_type": "conversation_archive",
     }
 
@@ -376,13 +389,25 @@ def extract_dynamic_intel_from_text(
     text: str,
     source_msg_id: Optional[str] = None,
 ) -> list[DynamicIntelItem]:
-    """从文本中提取动态情报"""
+    """从文本中提取动态情报（短期/时效性信息）"""
     if not text:
         return []
-    llm = get_llm(temperature=0.2)
-    prompt = f"""你是一名情报提取员，请从以下文本中提取【动态情报】。
+    
+    # 尝试从模板文件加载 Prompt
+    tpl = _load_prompt_template("dynamic_intel")
+    if tpl:
+        prompt = _render_prompt(tpl, {"__DYNAMIC_INTEL_TEXT__": text})
+    else:
+        # 回退到内联 Prompt（兜底）
+        prompt = f"""你是信息整理专家，请从以下文本中提取【动态情报】— 短期/时效性信息。
 
-动态情报定义：短期时效信息，包括日程、心情、状态、意图。
+动态情报是有时效性的信息，过一段时间就会失效或变化。
+
+典型类型：
+- schedule（日程）：近期计划、约定、行程，如"下周三要去上海出差"
+- mood（情绪）：当前心情、情绪变化，如"最近心情不太好"
+- status（状态）：短期状态、临时情况，如"最近在加班"
+- intent（意向）：近期打算、想法，如"想约她看电影"
 
 输入文本：
 {text}
@@ -390,16 +415,20 @@ def extract_dynamic_intel_from_text(
 请输出 JSON 数组，字段：
 - content: 情报内容（简洁，保留时间/情绪等关键细节）
 - category: schedule|mood|status|intent
-- subject: user|crush （信息主体）
-- expire_at: ISO 时间，可为空（如果为空将使用默认 TTL 计算）
+- subject: user|crush （信息主体：关于用户还是关于 Crush）
+- expire_at: ISO 时间，可为空（系统会根据 category 自动计算）
 - valid_from: ISO 时间，可为空
-- source_msg_id: 字符串，可为空
 - confidence: 0-1 浮点
+- confidence_reason: 置信度原因
 
 示例：
 [
-  {{"content":"下周三去上海出差","category":"schedule","subject":"crush","expire_at":"","valid_from":"","source_msg_id":"","confidence":0.9}}
-]"""
+  {{"content":"下周三去上海见 Crush","category":"schedule","subject":"user","expire_at":"","valid_from":"","confidence":0.95,"confidence_reason":"用户明确表述"}}
+]
+
+如果没有发现动态情报，输出空数组 []"""
+    
+    llm = get_llm(temperature=0.2)
     response = llm.invoke(prompt)
     raw_items = _parse_json_list(response.content)
     return _normalize_dynamic_intels(raw_items, source_msg_id=source_msg_id)
@@ -501,19 +530,41 @@ def _parse_json_list(content: str) -> list[dict]:
 def merge_extracted_info_to_context(
     existing_context: UserContext,
     extracted_info: dict,
+    source_type: Literal["onboarding", "conversation", "report"] = "conversation",
 ) -> UserContext:
     """
     将提取的信息合并到现有的用户上下文中
     
-    合并策略：追加到对应字段的 ai_provide 部分
+    合并策略：
+    - 新格式（v2）：按 user_provide/fact/ai_provide 分类写入对应字段
+    - 旧格式（v1）：兼容处理，写入 ai_provide（向后兼容）
+    
+    新格式 extracted_info 示例：
+    {
+        "user_info": {
+            "user_provide": ["用户说的信息1", "用户说的信息2"],
+            "fact": ["客观事实1"],
+            "ai_provide": ["AI分析结论1"]
+        },
+        ...
+    }
+    
+    旧格式 extracted_info 示例（向后兼容）：
+    {
+        "user_info": "字符串信息",
+        ...
+    }
     
     Args:
         existing_context: 现有的 3×3 矩阵
         extracted_info: 整理 Agent 提取的信息
+        source_type: 信息来源类型（用于创建 AtomicMemory）
     
     Returns:
         更新后的 UserContext
     """
+    from graph.context_types import create_atomic_memory
+    
     # [FIX] 防御性检查：确保 extracted_info 是 dict
     if not extracted_info or not isinstance(extracted_info, dict):
         return existing_context
@@ -525,34 +576,113 @@ def merge_extracted_info_to_context(
         "both_info": dict(existing_context.get("both_info", {})),
     }
     
-    # 合并 user_info
-    if extracted_info.get("user_info"):
-        existing_ai = updated["user_info"].get("ai_provide", "")
-        new_info = extracted_info["user_info"]
-        if existing_ai:
-            updated["user_info"]["ai_provide"] = f"{existing_ai}\n{new_info}"
-        else:
-            updated["user_info"]["ai_provide"] = new_info
+    # 确保每个维度都有三个来源字段（列表格式）
+    for dimension in ["user_info", "crush_info", "both_info"]:
+        for source in ["user_provide", "fact", "ai_provide"]:
+            if source not in updated[dimension]:
+                updated[dimension][source] = []
+            # 兼容旧的字符串格式：如果是字符串，转换为列表
+            elif isinstance(updated[dimension][source], str):
+                old_str = updated[dimension][source].strip()
+                if old_str:
+                    # 旧字符串格式迁移：创建一个 AtomicMemory
+                    updated[dimension][source] = [
+                        create_atomic_memory(old_str, source_type)
+                    ]
+                else:
+                    updated[dimension][source] = []
     
-    # 合并 crush_info
-    if extracted_info.get("crush_info"):
-        existing_ai = updated["crush_info"].get("ai_provide", "")
-        new_info = extracted_info["crush_info"]
-        if existing_ai:
-            updated["crush_info"]["ai_provide"] = f"{existing_ai}\n{new_info}"
-        else:
-            updated["crush_info"]["ai_provide"] = new_info
-    
-    # 合并 both_info
-    if extracted_info.get("both_info"):
-        existing_ai = updated["both_info"].get("ai_provide", "")
-        new_info = extracted_info["both_info"]
-        if existing_ai:
-            updated["both_info"]["ai_provide"] = f"{existing_ai}\n{new_info}"
-        else:
-            updated["both_info"]["ai_provide"] = new_info
+    # 合并 user_info, crush_info, both_info
+    for dimension in ["user_info", "crush_info", "both_info"]:
+        dim_info = extracted_info.get(dimension)
+        if not dim_info:
+            continue
+        
+        # 判断是新格式（dict with user_provide/fact/ai_provide）还是旧格式（string）
+        if isinstance(dim_info, dict):
+            # 新格式 v2：按来源分类
+            _merge_dimension_v2(updated[dimension], dim_info, source_type)
+        elif isinstance(dim_info, str) and dim_info.strip():
+            # 旧格式 v1：兼容处理，写入 ai_provide
+            _merge_dimension_v1(updated[dimension], dim_info, source_type)
     
     return UserContext(**updated)
+
+
+def _merge_dimension_v2(
+    target: dict,
+    source_info: dict,
+    source_type: Literal["onboarding", "conversation", "report"],
+) -> None:
+    """
+    合并新格式（v2）的信息到目标维度
+    
+    source_info 格式：
+    {
+        "user_provide": ["信息1", "信息2"],
+        "fact": ["事实1"],
+        "ai_provide": ["分析1"]
+    }
+    """
+    from graph.context_types import create_atomic_memory
+    
+    for field in ["user_provide", "fact", "ai_provide"]:
+        items = source_info.get(field, [])
+        if not items:
+            continue
+        
+        # 确保是列表
+        if isinstance(items, str):
+            items = [items] if items.strip() else []
+        elif not isinstance(items, list):
+            continue
+        
+        # 遍历每条信息，创建 AtomicMemory 并追加
+        for item in items:
+            if not item or not isinstance(item, str):
+                continue
+            content = item.strip()
+            if not content:
+                continue
+            
+            # 为 ai_provide 添加置信度
+            if field == "ai_provide":
+                atomic = create_atomic_memory(
+                    content, 
+                    source_type,
+                    confidence=0.8,
+                    confidence_reason="整理Agent从内容中提取"
+                )
+            else:
+                atomic = create_atomic_memory(content, source_type)
+            
+            target[field].append(atomic)
+
+
+def _merge_dimension_v1(
+    target: dict,
+    info_str: str,
+    source_type: Literal["onboarding", "conversation", "report"],
+) -> None:
+    """
+    合并旧格式（v1）的信息到目标维度（向后兼容）
+    
+    旧格式：直接是一个字符串，全部写入 ai_provide
+    """
+    from graph.context_types import create_atomic_memory
+    
+    content = info_str.strip()
+    if not content:
+        return
+    
+    # 旧格式默认写入 ai_provide（保持向后兼容）
+    atomic = create_atomic_memory(
+        content,
+        source_type,
+        confidence=0.8,
+        confidence_reason="整理Agent从内容中提取（旧格式兼容）"
+    )
+    target["ai_provide"].append(atomic)
 
 
 def summarize_task_reasoning(
@@ -613,7 +743,8 @@ def archive_completed_guide(
     result = organize_and_archive(guide, "action_guide", existing_context)
     updated_context = merge_extracted_info_to_context(
         existing_context, 
-        result.get("extracted_info", {})
+        result.get("extracted_info", {}),
+        source_type="report"  # 行动指南归档
     )
     
     return {
@@ -642,7 +773,8 @@ def archive_replaced_status_report(
     result = organize_and_archive(old_report, "status_report", existing_context)
     updated_context = merge_extracted_info_to_context(
         existing_context,
-        result.get("extracted_info", {})
+        result.get("extracted_info", {}),
+        source_type="report"  # 现状报告归档
     )
     dynamic_intels = extract_dynamic_intel_from_text(
         old_report.get("report_content", ""),
@@ -672,7 +804,8 @@ def archive_replaced_action_plan(
     result = organize_and_archive(old_plan, "action_plan", existing_context)
     updated_context = merge_extracted_info_to_context(
         existing_context,
-        result.get("extracted_info", {})
+        result.get("extracted_info", {}),
+        source_type="report"  # 行动规划归档
     )
     return {
         "plan_summary": result["summary"],
@@ -688,6 +821,8 @@ def archive_conversation_batch(
     """
     批量归档对话
     
+    新版：一次 LLM 调用同时获取 Layer 1 信息和动态情报，不再单独调用动态情报提取。
+    
     Args:
         messages_to_archive: 需要归档的消息列表
         existing_context: 现有用户上下文
@@ -696,6 +831,7 @@ def archive_conversation_batch(
         {
             "conversation_archive": ConversationArchive,
             "updated_context": UserContext,
+            "dynamic_intels": list[DynamicIntelItem],
         }
     """
     print(f"[OrganizeAgent] archive_conversation_batch called with {len(messages_to_archive)} messages")
@@ -712,11 +848,14 @@ def archive_conversation_batch(
     
     updated_context = merge_extracted_info_to_context(
         existing_context,
-        extracted_info
+        extracted_info,
+        source_type="conversation"  # 对话压缩
     )
     print(f"[OrganizeAgent] updated_context type: {type(updated_context)}")
-    dynamic_intels = extract_dynamic_intel_from_messages(messages_to_archive)
-    print(f"[OrganizeAgent] dynamic_intels type: {type(dynamic_intels)}")
+    
+    # 直接从 result 获取动态情报（不再单独调用 extract_dynamic_intel_from_messages）
+    dynamic_intels = result.get("dynamic_intels", [])
+    print(f"[OrganizeAgent] dynamic_intels count: {len(dynamic_intels)}")
     
     return {
         "conversation_archive": result["summary"],

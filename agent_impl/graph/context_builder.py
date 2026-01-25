@@ -83,6 +83,13 @@ LAYER2_DEFAULT_CONFIG = {
     "recent_summary_count": 2,   # 最近 N 份保留中等摘要
     "max_one_liner_count": 10,   # 最多保留 N 条一句话摘要
     "include_active_guides": True,  # 是否包含所有未执行指南
+    "max_dynamic_intels": 20,    # 动态情报最多注入条数
+    "max_in_progress_guides": 2,
+    "max_paused_guides": 2,
+    "max_pending_guides": 3,
+    "max_completed_guides": 5,
+    "max_cancelled_guides": 2,
+    "max_expired_guides": 2,
 }
 
 # Layer 3 默认配置
@@ -159,9 +166,11 @@ def _build_context_dict_payload(state: "AgentState", target_agent: str = "main_a
 
     # 对话历史
     messages = state.get("messages", [])
+    current_message_id = str(state.get("current_message_id") or "").strip()
     summaries = layer3_memory.get("conversation_summaries", []) if isinstance(layer3_memory, dict) else []
     conversation_history = _format_interleaved_history(
         messages=messages,
+        current_message_id=current_message_id,
         current_task_id=current_task_id,
         max_turns=max_recent_turns,
         summaries=summaries[:max_summary_count] if isinstance(summaries, list) else None,
@@ -369,7 +378,7 @@ def extract_layer2(state: "AgentState") -> str:
     # Layer 2.b: 动态部分
     
     # 3. 动态情报板
-    intel_section = _build_dynamic_intel_board(layer2_memory)
+    intel_section = _build_dynamic_intel_board(layer2_memory, config)
     if intel_section:
         has_content = True
         sections.append(intel_section)
@@ -379,7 +388,7 @@ def extract_layer2(state: "AgentState") -> str:
     if all_guides and config.get("include_active_guides", True):
         has_content = True
         sections.append("## 行动指南")
-        sections.append(_format_action_guide_items(all_guides))
+        sections.append(_format_action_guide_items(all_guides, config))
 
     # 5. 历史摘要
     history_section = _build_layer2_history_summaries(layer2_memory, config)
@@ -393,15 +402,24 @@ def extract_layer2(state: "AgentState") -> str:
     return "\n\n".join(sections)
 
 
-def _build_dynamic_intel_board(layer2_memory: Layer2Memory) -> str:
+def _build_dynamic_intel_board(layer2_memory: Layer2Memory, config: dict | None = None) -> str:
     """构建动态情报板"""
     intels = get_valid_dynamic_intels(layer2_memory)
     if not intels:
         return ""
+    config = config or LAYER2_DEFAULT_CONFIG
+    max_count = config.get("max_dynamic_intels", 20)
 
     # 按 subject 分组
     user_intels = []
     crush_intels = []
+
+    def _sort_key(item: dict) -> str:
+        return item.get("expire_at") or item.get("created_at") or ""
+
+    intels = sorted(intels, key=_sort_key)
+    if isinstance(max_count, int) and max_count > 0:
+        intels = intels[:max_count]
     
     for intel in intels:
         subject = intel.get("subject", "user")
@@ -532,7 +550,7 @@ def extract_layer3(state: "AgentState") -> str:
     2) 任务笔记（最多 8 条）
     3) 最近对话（25 轮）
     
-    输出格式：Markdown + 时间戳 [U/A/S 时间戳]
+    输出格式：Markdown + 时间戳（内容中不再标注 U/A/S）
     """
     messages = state.get("messages", [])
     layer3_memory = state.get("layer3_memory", {}) or {}
@@ -555,6 +573,7 @@ def extract_layer3(state: "AgentState") -> str:
 
     history = _format_interleaved_history(
         messages=messages,
+        current_message_id=str(state.get("current_message_id") or "").strip(),
         current_task_id=current_task_id,
         max_turns=max_recent_turns,
         summaries=summaries[:max_summary_count] if isinstance(summaries, list) else None,
@@ -565,9 +584,38 @@ def extract_layer3(state: "AgentState") -> str:
     return history or "无历史对话"
 
 
+def _apply_pre_model_history_filter(messages: list, current_message_id: str) -> list:
+    """
+    统一的 pre_model_hook：避免本轮用户消息在历史中重复出现。
+    只影响"传给模型的历史"，不修改原始 messages 存储。
+    
+    [FIX-2026-01-19] 增强版：
+    - 按消息 ID 去重，不按内容去重
+    - 保留同 ID 的“最新一条”，避免误删当前消息
+    """
+    safe_messages = list(messages) if isinstance(messages, list) else []
+    if not safe_messages:
+        return safe_messages
+
+    from graph.state import get_message_id
+
+    # 按 ID 去重：保留同 ID 的最后一条
+    seen_ids = set()
+    filtered_reversed = []
+    for msg in reversed(safe_messages):
+        msg_id = get_message_id(msg)
+        if msg_id:
+            if msg_id in seen_ids:
+                continue
+            seen_ids.add(msg_id)
+        filtered_reversed.append(msg)
+
+    return list(reversed(filtered_reversed))
+
 def _format_interleaved_history(
     messages: list,
     current_task_id: str,
+    current_message_id: str = "",
     max_turns: int = 25,
     summaries: list | None = None,
     scratchpad_task_id: str = "",
@@ -577,9 +625,11 @@ def _format_interleaved_history(
     """
     构建对话历史（Markdown + 时间戳）
     
-    格式：[U/A/S 时间戳] 内容
+    格式：[时间戳] 内容
     """
     lines: list[str] = []
+
+    messages = _apply_pre_model_history_filter(messages, current_message_id)
 
     # 历史摘要
     if summaries:
@@ -641,14 +691,9 @@ def _format_interleaved_history(
             continue
         if role in ("assistant", "ai"):
             content = _format_assistant_message_for_history(content)
-            role_tag = "A"
-        elif role == "system":
-            role_tag = "S"
-        else:
-            role_tag = "U"
         time_text = _format_display_time(_extract_message_time(msg)) or _format_display_time(datetime.now().isoformat())
         if content:
-            lines.append(f"[{role_tag} {time_text}] {content}")
+            lines.append(f"[{time_text}] {content}")
 
     return "\n".join(lines).strip()
 
@@ -691,13 +736,13 @@ def _format_assistant_message_for_history(content: str) -> str:
             questions = inquiry_card.get("questions", [])
             if questions:
                 question_texts = []
-                for q in questions:
+                for idx, q in enumerate(questions, 1):
                     if isinstance(q, dict):
                         q_text = q.get("question", "")
                         if q_text:
-                            question_texts.append(f"- {q_text}")
+                            question_texts.append(f"Q{idx}: {q_text}")
                     elif isinstance(q, str):
-                        question_texts.append(f"- {q}")
+                        question_texts.append(f"Q{idx}: {q}")
                 
                 if question_texts:
                     parts.append("【提问】\n" + "\n".join(question_texts))
@@ -739,6 +784,13 @@ def _extract_current_status_report(state: "AgentState") -> str:
         current = layer2_memory.get("current_status_report")
         if current:
             return _format_status_report_item(current)
+    legacy_report = state.get("status_report")
+    if isinstance(legacy_report, str) and legacy_report.strip():
+        return legacy_report
+    if isinstance(legacy_report, dict) and legacy_report:
+        if legacy_report.get("report_content"):
+            return str(legacy_report.get("report_content") or "")
+        return _format_status_report_item(legacy_report)
     return "暂无现状分析报告"
 
 
@@ -749,6 +801,11 @@ def _extract_current_action_plan(state: "AgentState") -> str:
         current = layer2_memory.get("current_action_plan")
         if current:
             return _format_action_plan_item(current)
+    legacy_plan = state.get("action_plan")
+    if isinstance(legacy_plan, str) and legacy_plan.strip():
+        return legacy_plan
+    if isinstance(legacy_plan, dict) and legacy_plan:
+        return _format_action_plan_item(legacy_plan)
     return "暂无行动规划"
 
 
@@ -766,7 +823,11 @@ def _extract_action_guides(state: "AgentState") -> str:
     if layer2_memory:
         all_guides = layer2_memory.get("action_guides", [])
         if all_guides:
-            return _format_action_guide_items(all_guides)
+            config = layer2_memory.get("extraction_config", LAYER2_DEFAULT_CONFIG)
+            return _format_action_guide_items(all_guides, config)
+    legacy_guides = state.get("action_guides")
+    if isinstance(legacy_guides, list) and legacy_guides:
+        return _format_legacy_action_guides(legacy_guides)
     return "暂无行动指南"
 
 
@@ -871,24 +932,55 @@ def _format_action_plan_item(item: ActionPlanItem) -> str:
     return "\n\n".join(parts) if parts else "暂无行动规划"
 
 
-def _format_action_guide_items(items: list[ActionGuideItem]) -> str:
+def _format_action_guide_items(items: list[ActionGuideItem], config: dict | None = None) -> str:
     """格式化行动指南列表（渐进式披露）"""
     if not items:
         return "暂无行动指南"
+    config = config or LAYER2_DEFAULT_CONFIG
     
     def _escape_cell(val: str) -> str:
         return (val or "").replace("|", "\\|").replace("\n", " ")
 
-    in_progress = [g for g in items if g.get("status") == "in_progress"]
-    paused = [g for g in items if g.get("status") == "paused"]
-    pending = [g for g in items if g.get("status") == "pending"]
-    others = [g for g in items if g.get("status") in ("completed", "cancelled", "expired")]
+    def _sort_by_time(g: dict, key: str) -> str:
+        return str(g.get(key) or "")
 
-    sections: list[str] = []
+    in_progress = sorted(
+        [g for g in items if g.get("status") == "in_progress"],
+        key=lambda g: _sort_by_time(g, "created_at"),
+        reverse=True,
+    )[: config.get("max_in_progress_guides", 2)]
+    paused = sorted(
+        [g for g in items if g.get("status") == "paused"],
+        key=lambda g: _sort_by_time(g, "created_at"),
+        reverse=True,
+    )[: config.get("max_paused_guides", 2)]
+    pending = sorted(
+        [g for g in items if g.get("status") == "pending"],
+        key=lambda g: _sort_by_time(g, "expected_start_at") or _sort_by_time(g, "created_at"),
+    )[: config.get("max_pending_guides", 3)]
+    completed = sorted(
+        [g for g in items if g.get("status") == "completed"],
+        key=lambda g: _sort_by_time(g, "completed_at") or _sort_by_time(g, "created_at"),
+        reverse=True,
+    )[: config.get("max_completed_guides", 5)]
+    cancelled = sorted(
+        [g for g in items if g.get("status") == "cancelled"],
+        key=lambda g: _sort_by_time(g, "created_at"),
+        reverse=True,
+    )[: config.get("max_cancelled_guides", 2)]
+    expired = sorted(
+        [g for g in items if g.get("status") == "expired"],
+        key=lambda g: _sort_by_time(g, "expire_at") or _sort_by_time(g, "created_at"),
+        reverse=True,
+    )[: config.get("max_expired_guides", 2)]
+
+    sections: list[str] = [
+        "> 需要查看某条指南的完整内容时，调用 context_loader(action=\"load\", context_type=\"action_guide\", context_id=\"指南ID\")"
+    ]
 
     # 🔥 进行中：完整展开
     if in_progress:
-        sections.append(f"### 🔥 进行中 ({len(in_progress)})")
+        sections.append(f"### 🔥 当前进行中 ({len(in_progress)})")
         for guide_item in in_progress:
             guide = guide_item.get("guide", {}) or {}
             guide_id = guide_item.get("id", "")
@@ -916,48 +1008,47 @@ def _format_action_guide_items(items: list[ActionGuideItem]) -> str:
                     sections.append(f"**话术要点**:\n{tps}")
             sections.append("---")
 
-    # ⏸️ 已暂停
-    if paused:
-        sections.append(f"### ⏸️ 已暂停 ({len(paused)})")
-        for guide_item in paused:
+    # 非进行中：元数据表格展示
+    other_guides = list(paused) + list(pending) + list(completed) + list(cancelled) + list(expired)
+    if other_guides:
+        sections.append("### 📋 其他指南")
+        sections.append("| id | title | status | summary |")
+        sections.append("|:---|:------|:-------|:--------|")
+        for guide_item in other_guides:
             guide_id = guide_item.get("id", "")
             title = guide_item.get("title") or "未命名指南"
-            summary = guide_item.get("summary") or guide_item.get("one_liner") or "暂无摘要"
-            sections.append(f"#### 【{guide_id}】{title}")
-            sections.append(f"**摘要**: {summary}")
-            sections.append("---")
-
-    # 📋 待执行
-    if pending:
-        sections.append(f"### 📋 待执行 ({len(pending)})")
-        for guide_item in pending:
-            guide_id = guide_item.get("id", "")
-            title = guide_item.get("title") or "未命名指南"
-            summary = guide_item.get("summary") or guide_item.get("one_liner") or "暂无摘要"
-            expected = guide_item.get("expected_start_at", "")
-            sections.append(f"#### 【{guide_id}】{title}")
-            if expected:
-                sections.append(f"> 预计开始: {_format_display_time(expected)[:5]}")
-            sections.append(f"**摘要**: {summary}")
-            sections.append("")
-
-    # 📁 其他记录
-    if others:
-        sections.append("### 📁 其他记录")
-        sections.append("| 状态 | 标题 | 简述 |")
-        sections.append("|:----|:----|:----|")
-        status_emoji = {
-            "completed": "✅ 已完成",
-            "cancelled": "❌ 已取消",
-            "expired": "⏰ 已过期",
-        }
-        for guide_item in others[:5]:
             status = guide_item.get("status", "")
-            title = guide_item.get("title") or "未命名指南"
-            one_liner = guide_item.get("one_liner") or "暂无"
-            sections.append(f"| {status_emoji.get(status, status)} | {_escape_cell(title)} | {_escape_cell(one_liner)} |")
+            summary = guide_item.get("summary") or guide_item.get("one_liner") or "暂无"
+            sections.append(
+                f"| {guide_id} | {_escape_cell(title)} | {status} | {_escape_cell(summary)} |"
+            )
 
     return "\n\n".join(sections) if sections else "暂无行动指南"
+
+
+def _format_legacy_action_guides(items: list[dict]) -> str:
+    """格式化旧版 action_guides（兼容直接注入完整内容）"""
+    parts: list[str] = []
+    for guide_item in items:
+        if not isinstance(guide_item, dict):
+            continue
+        content = ""
+        if isinstance(guide_item.get("guide_content"), str) and guide_item.get("guide_content"):
+            content = guide_item.get("guide_content") or ""
+        else:
+            nested = guide_item.get("guide") if isinstance(guide_item.get("guide"), dict) else {}
+            if isinstance(nested.get("guide_content"), str) and nested.get("guide_content"):
+                content = nested.get("guide_content") or ""
+        if content:
+            parts.append(content)
+            continue
+        title = guide_item.get("title") or guide_item.get("id") or "未命名指南"
+        summary = guide_item.get("summary") or guide_item.get("one_liner") or ""
+        if summary:
+            parts.append(f"## {title}\n\n{summary}")
+        else:
+            parts.append(f"## {title}")
+    return "\n\n".join(parts) if parts else "暂无行动指南"
 
 
 # ============================================================

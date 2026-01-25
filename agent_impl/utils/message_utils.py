@@ -6,8 +6,9 @@ def get_msg_role_and_content(msg: Any) -> tuple[str, str]:
     兼容 LangChain 消息对象和 TypedDict
     """
     if isinstance(msg, dict):
-        role = msg.get("role", "")
-        content = msg.get("content", "")
+        # 优先使用 role，如果 role 为空/None，回退到 type 字段
+        role = msg.get("role") or msg.get("type") or ""
+        content = msg.get("content") or ""
         if role == "human":
             role = "user"
         elif role == "ai":
@@ -30,21 +31,6 @@ def get_msg_role_and_content(msg: Any) -> tuple[str, str]:
     
     content = getattr(msg, "content", "")
     
-    # 特殊处理：如果是 AI 消息且包含工具调用
-    if (role == "assistant" or role == "ai"):
-        tool_calls = getattr(msg, "tool_calls", [])
-        if tool_calls and not content:
-            # 格式化工具调用信息，让模型在历史中能看到自己刚才的动作
-            calls = []
-            for tc in tool_calls:
-                name = tc.get("name", "unknown")
-                calls.append(f"{name}")
-            content = f"[已发起工具调用: {', '.join(calls)}]"
-        elif tool_calls:
-            # 如果既有内容又有调用，也补充一下
-            calls = [tc.get("name", "unknown") for tc in tool_calls]
-            content = f"{content}\n[附带工具调用: {', '.join(calls)}]"
-            
     return role, content
 
 

@@ -141,6 +141,7 @@ class AgentState(TypedDict, total=False):
     
     # === 用户输入 ===
     user_message: str  # 用户当前消息
+    current_message_id: Optional[str]  # 用户当前消息的唯一 ID（用于去重）
     
     # === Layer 1: 静态情报（分层长期记忆）===
     layer1_memory: Layer1Memory  # Layer 1 长期记忆（全量 + 提取配置）
@@ -216,6 +217,11 @@ class AgentState(TypedDict, total=False):
     # 最新一次工具输出（用于二阶段 Prompt 注入）
     _last_tool_outputs: list
     _last_tool_content: Optional[str]
+    # 工具触发的状态机切换信息
+    _handoff_target: Optional[str]
+    _handoff_instruction: Optional[str]
+    # 两阶段工具强制执行标记
+    _pending_action: Optional[str]
     collected_info: dict
     # 指令（Main Agent 给专家的 Brief）
     instruction: Optional[str]
@@ -233,6 +239,24 @@ class AgentState(TypedDict, total=False):
     question_streak_agent: Optional[str]        # 当前连续提问的 agent（main_agent/status_agent/plan_agent/guide_agent）
     question_streak_count: int                 # 当前连续提问轮次（仅对 question_streak_agent 生效）
     max_question_streak: int                   # 同一 agent 连续提问的最大轮次（默认 3）
+    
+    # === 提问模式（渐进式披露）===
+    # ask_mode=False 时：ask 工具只能设置为 enable（进入提问模式）
+    # ask_mode=True 时：ask 工具变为完整的提问 schema，强制模型调用
+    ask_mode: bool                              # 提问模式状态，默认 False
+    ask_mode_tool_message_id: Optional[str]     # Phase 1 的 ToolMessage ID，用于后续简化
+    
+    # === 解答模式（渐进式披露）===
+    # consult_mode=False 时：consult_answer 工具只能设置为 enable（进入解答模式）
+    # consult_mode=True 时：consult_answer 工具变为 complete 版本，模型输出 content + tool_call(complete)
+    consult_mode: bool                              # 解答模式状态，默认 False
+    consult_mode_tool_message_id: Optional[str]     # Phase 1 的 ToolMessage ID，用于后续简化
+    
+    # === 情感陪伴模式（渐进式披露）===
+    # emotion_mode=False 时：emotion_support 工具只能设置为 enable（进入陪伴模式）
+    # emotion_mode=True 时：emotion_support 工具变为 complete 版本，模型输出 content + tool_call(complete)
+    emotion_mode: bool                              # 情感陪伴模式状态，默认 False
+    emotion_mode_tool_message_id: Optional[str]     # Phase 1 的 ToolMessage ID，用于后续简化
     
     # === 循环控制 ===
     _iteration_count: int
@@ -261,11 +285,12 @@ def create_initial_state(user_message: str, **overrides) -> AgentState:
     layer3 = create_empty_layer3_memory()
     
     # 初始化 Layer 3 的消息，确保带有唯一 ID
-    first_msg_id = str(uuid.uuid4())
+    first_msg_id = str(overrides.get("current_message_id") or uuid.uuid4())
     layer3["all_messages"] = [{"role": "user", "content": user_message, "id": first_msg_id}]
     
     state = AgentState(
         user_message=user_message,
+        current_message_id=first_msg_id,
         messages=[{"role": "user", "content": user_message, "id": first_msg_id}],
         
         # Layer 1: 静态情报
@@ -305,6 +330,9 @@ def create_initial_state(user_message: str, **overrides) -> AgentState:
         # Agent 执行状态
         current_agent=None,
         agent_resume_point=None,
+        _handoff_target=None,
+        _handoff_instruction=None,
+        _pending_action=None,
         collected_info={},
         instruction=None,  # Main Agent 给专家的 Brief（v3.0）
         onboarding_completed=False,  # 默认未完成，正常进入 Onboarding
@@ -319,6 +347,18 @@ def create_initial_state(user_message: str, **overrides) -> AgentState:
         question_streak_agent=None,
         question_streak_count=0,
         max_question_streak=3,
+        
+        # 提问模式（渐进式披露）
+        ask_mode=False,
+        ask_mode_tool_message_id=None,
+        
+        # 解答模式（渐进式披露）
+        consult_mode=False,
+        consult_mode_tool_message_id=None,
+        
+        # 情感陪伴模式（渐进式披露）
+        emotion_mode=False,
+        emotion_mode_tool_message_id=None,
         
         # 循环控制
         _iteration_count=0,

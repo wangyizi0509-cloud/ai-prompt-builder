@@ -21,7 +21,8 @@ from utils.prompt_loader import parse_frontmatter
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "onboarding_agent.md"
 LOGIC_PATH = Path(__file__).parent / "onboarding_logic.md"
-LOG_PATH = Path("/Users/ant/Desktop/Crushe/模型策略/.cursor/debug.log")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+LOG_PATH = PROJECT_ROOT / ".cursor" / "debug.log"
 
 
 #region agent log
@@ -37,6 +38,7 @@ def _append_debug_log(run_id: str, hypothesis_id: str, location: str, message: s
         "timestamp": int(time.time() * 1000),
     }
     try:
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with LOG_PATH.open("a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except Exception:
@@ -251,6 +253,34 @@ def _extract_response_from_json(content: str) -> str:
         return content
 
 
+def _strip_preliminary_assessment_from_json(content: str) -> str:
+    """
+    清理 onboarding 的 preliminary_assessment，避免进入后续模型输入。
+    仅对 JSON 格式内容做字段移除，其他内容原样返回。
+    """
+    if not content:
+        return ""
+    content = content.strip()
+    try:
+        if "```json" in content:
+            json_str = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            json_str = content.split("```")[1].split("```")[0].strip()
+        elif content.startswith("{"):
+            start = content.find("{")
+            end = content.rfind("}") + 1
+            json_str = content[start:end]
+        else:
+            return content
+        data = json.loads(json_str)
+        if isinstance(data, dict) and "preliminary_assessment" in data:
+            data.pop("preliminary_assessment", None)
+            return json.dumps(data, ensure_ascii=False)
+        return content
+    except (json.JSONDecodeError, KeyError, IndexError):
+        return content
+
+
 def onboarding_agent_node(state: dict) -> dict:
     """
     Onboarding 节点：
@@ -361,7 +391,10 @@ def onboarding_agent_node(state: dict) -> dict:
                 }
             ],
             "messages": existing_messages + [
-                {"role": "assistant", "content": llm_resp.content},  # 保存原始输出以便后续提取
+                {
+                    "role": "assistant",
+                    "content": _strip_preliminary_assessment_from_json(llm_resp.content),
+                },
             ],
             "pending_questions": [question_text] if question_text else [],
             "route_to": "end",  # 结束本轮，等待用户回答
@@ -488,7 +521,12 @@ def onboarding_agent_node(state: dict) -> dict:
         ],
         # 顶层透传：便于前端在 state 更新时直接识别并渲染
         **({"preliminary_assessment": preliminary_assessment} if preliminary_assessment else {}),
-        "messages": existing_messages + [{"role": "assistant", "content": llm_resp.content}],
+        "messages": existing_messages + [
+            {
+                "role": "assistant",
+                "content": _strip_preliminary_assessment_from_json(llm_resp.content),
+            }
+        ],
     }
     #region agent log
     _append_debug_log(

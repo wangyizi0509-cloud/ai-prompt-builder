@@ -793,7 +793,7 @@ def create_bound_context(
     *,
     ref_id: Optional[str] = None,
     expire_at: Optional[str] = None,
-    source: str = "tool:bind_context",
+    source: str = "tool:context_loader",
     bound_at: Optional[str] = None,
 ) -> BoundContext:
     """创建通用绑定上下文"""
