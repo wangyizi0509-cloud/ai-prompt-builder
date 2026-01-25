@@ -31,3 +31,10 @@ agent_impl/logs/
 !index.html
 !prompt_builder.html
 !update_prompts.py
+
+# Python venvs (local)
+.venv/
+.venv*/
+
+# Local diagnostics
+agent_impl/lsof_*.txt
