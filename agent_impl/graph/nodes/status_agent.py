@@ -292,13 +292,9 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
     else:
         # 使用定制工具：status_agent 只允许使用 inquiry skill
         inquiry_tool = create_inquiry_only_loader()
-<<<<<<< Current (Your changes)
-        llm_with_tools = base_llm.bind_tools([inquiry_tool])
-=======
         # 允许子 Agent 直接进入 ask 两阶段提问（Phase 1: ask(action="enable")）
         ask_tool = get_ask_tool(False)
         llm_with_tools = base_llm.bind_tools([ask_tool, inquiry_tool])
->>>>>>> Incoming (Background Agent changes)
         response = llm_with_tools.invoke(model_messages)
         if hasattr(response, "tool_calls") and response.tool_calls:
             print(f"[DEBUG] StatusAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
