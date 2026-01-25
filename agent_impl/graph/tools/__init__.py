@@ -33,6 +33,42 @@ from .task_tools import (
     get_task_by_id,
 )
 
+from .context_loader import (
+    create_context_loader,
+    apply_context_loader_state_update,
+    is_context_loader_tool,
+)
+
+from .ask_tool import (
+    # 新版 ask 工具（状态驱动）
+    get_ask_tool,
+    ask_enable,
+    ask_questions,
+    ASK_MODE_STRATEGY,
+    ASK_MODE_SIMPLE,
+    # 向后兼容
+    ask_user,
+    AskUserInput,
+)
+
+from .consult_answer_tool import (
+    # 解答工具（状态驱动）
+    get_consult_tool,
+    consult_enable,
+    consult_complete,
+    CONSULT_MODE_STRATEGY,
+    CONSULT_MODE_SIMPLE,
+)
+
+from .emotion_support_tool import (
+    # 陪伴工具（状态驱动）
+    get_emotion_tool,
+    emotion_enable,
+    emotion_complete,
+    EMOTION_MODE_STRATEGY,
+    EMOTION_MODE_SIMPLE,
+)
+
 __all__ = [
     # 历史记录
     "get_full_status_history",
@@ -56,4 +92,29 @@ __all__ = [
     "get_task_list_for_agent",
     "get_active_task",
     "get_task_by_id",
+    # 上下文拉取工具
+    "create_context_loader",
+    "apply_context_loader_state_update",
+    "is_context_loader_tool",
+    # Ask 工具（状态驱动）
+    "get_ask_tool",
+    "ask_enable",
+    "ask_questions",
+    "ASK_MODE_STRATEGY",
+    "ASK_MODE_SIMPLE",
+    # 向后兼容
+    "ask_user",
+    "AskUserInput",
+    # Consult Answer 工具（状态驱动）
+    "get_consult_tool",
+    "consult_enable",
+    "consult_complete",
+    "CONSULT_MODE_STRATEGY",
+    "CONSULT_MODE_SIMPLE",
+    # Emotion Support 工具（状态驱动）
+    "get_emotion_tool",
+    "emotion_enable",
+    "emotion_complete",
+    "EMOTION_MODE_STRATEGY",
+    "EMOTION_MODE_SIMPLE",
 ]

@@ -1,49 +1,27 @@
 """
-Skills 模块 - 共享能力模块
+Skills 模块 - 入口导出
 
-基于 Anthropic Agent Skills 设计理念：渐进式披露（Progressive Disclosure）
-- PromptSkill: 动态扩展主 Agent 的 prompt（如咨询 Skills）
-- GeneratorSkill: 独立调用 LLM 生成结构化输出（如提问 Skill）
-- load_skill_instructions: 工具函数，供 Agent 自主调用加载技能指令
+当前架构：
+- Skill 元数据由 registry 自动扫描 definitions/ 目录
+- 各 Agent 使用 create_skill_loader() 创建定制工具（限制可用 skills）
+
+重要：不同 Agent 有不同的 Skill 权限
+- status_agent, plan_agent, guide_agent: 只能用 inquiry
+- main_agent: 可以用全部 skills
 """
 
-from .base import BaseSkill, PromptSkill, GeneratorSkill, SkillMetadata
-from .inquiry import InquirySkill, get_inquiry_skill
-from .consult import (
-    ConsultAnswerSkill, 
-    EmotionSupportSkill,
-    get_consult_answer_skill,
-    get_emotion_support_skill,
-)
+from .base import SkillMetadata
+from .registry import get_skill_registry
 from .tool import (
-    load_skill_instructions, 
-    load_inquiry_skill_instructions,
-    load_consult_answer_skill_instructions,
-    load_emotion_support_skill_instructions,
-    get_skill_tool, 
-    AVAILABLE_SKILLS
+    create_skill_loader,         # 工厂函数：创建定制工具
+    create_inquiry_only_loader,  # 便捷函数：只允许 inquiry
+    create_all_skills_loader,    # 便捷函数：允许全部
 )
 
 __all__ = [
-    # 基类
-    "BaseSkill",
-    "PromptSkill", 
-    "GeneratorSkill",
     "SkillMetadata",
-    # 提问 Skill
-    "InquirySkill",
-    "get_inquiry_skill",
-    # 咨询 Skills
-    "ConsultAnswerSkill",
-    "EmotionSupportSkill",
-    "get_consult_answer_skill",
-    "get_emotion_support_skill",
-    # 工具函数（用于 Tool-based 加载）
-    "load_skill_instructions",
-    "load_inquiry_skill_instructions",
-    "load_consult_answer_skill_instructions",
-    "load_emotion_support_skill_instructions",
-    "get_skill_tool",
-    "AVAILABLE_SKILLS",
+    "get_skill_registry",
+    "create_skill_loader",
+    "create_inquiry_only_loader",
+    "create_all_skills_loader",
 ]
-

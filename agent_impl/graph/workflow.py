@@ -10,7 +10,7 @@ LangGraph 工作流编排
 - 主 Agent 可以使用咨询 Skills 直接回复用户
 
 渐进式加载机制（Tool-based）：
-- Agent 可以通过专用工具（如 load_inquiry_skill_instructions）按需加载技能指令
+- Agent 可以通过 load_skill(skill_id) 工具按需加载技能指令
 - skill_tools 节点负责执行工具调用
 - 工具执行完成后自动返回调用它的 Agent
 
@@ -19,12 +19,14 @@ v2.1 更新：
 """
 
 from typing import Literal, Optional
+import json
 import os
+import uuid
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 
 from graph.state import AgentState
-from graph.state import convert_message_to_dict
+from graph.state import convert_message_to_dict, ensure_message_id
 from graph.nodes.router import router_node
 from graph.nodes.main_agent import main_agent_node
 from graph.nodes.status_agent import status_agent_node
@@ -32,21 +34,37 @@ from graph.nodes.plan_agent import plan_agent_node
 from graph.nodes.guide_agent import guide_agent_node
 from graph.nodes.finalizer import post_turn_finalize_node
 from onboarding.workflow import compile_onboarding_workflow
-from skills import (
-    load_inquiry_skill_instructions,
-    load_consult_answer_skill_instructions,
-    load_emotion_support_skill_instructions
+from skills import create_all_skills_loader
+from graph.tools.delegate_tools import (
+    delegate_to_status,
+    delegate_to_plan,
+    delegate_to_guide,
 )
-from skills.guide_loader import create_guide_loader_tool
+from graph.tools.ask_tool import (
+    get_ask_tool,
+    ask_user,  # 向后兼容
+    ASK_MODE_STRATEGY,
+    ASK_MODE_SIMPLE,
+)
+from graph.tools.consult_answer_tool import (
+    get_consult_tool,
+    CONSULT_MODE_STRATEGY,
+    CONSULT_MODE_SIMPLE,
+)
+from graph.tools.emotion_support_tool import (
+    get_emotion_tool,
+    EMOTION_MODE_STRATEGY,
+    EMOTION_MODE_SIMPLE,
+)
 from graph.tools.task_tools import (
     create_task_tools,
     apply_task_tool_state_update,
     is_task_tool,
 )
-from graph.tools.guide_bind_tools import (
-    create_guide_bind_tool,
-    apply_guide_bind_state_update,
-    is_guide_bind_tool,
+from graph.tools.context_loader import (
+    create_context_loader,
+    apply_context_loader_state_update,
+    is_context_loader_tool,
 )
 
 MAX_NODE_STEPS_PER_TURN = 18  # 单次 /api/chat invoke 内允许的最大节点步数（防止死循环）
@@ -63,6 +81,10 @@ def _wrap_step_counter(node_name: str, fn):
         out = fn(state) or {}
         if not isinstance(out, dict):
             out = {}
+        # 统一补齐消息 ID（已有 ID 不覆盖）
+        msgs = out.get("messages")
+        if isinstance(msgs, list) and msgs:
+            out["messages"] = [ensure_message_id(m)[1] for m in msgs]
         # [FIX] 优先使用节点返回的 _iteration_count（支持 Router 重置），否则从 state 读取
         if "_iteration_count" in out:
             # 节点显式设置了值（如 Router 重置为 0），从该值 +1 开始计数
@@ -147,7 +169,7 @@ def _has_tool_calls(state: AgentState) -> bool:
     return False
 
 
-def route_after_main_agent(state: AgentState) -> Literal["skill_tools", "status_agent", "plan_agent", "guide_agent", "end"]:
+def route_after_main_agent(state: AgentState) -> Literal["skill_tools", "end"]:
     """
     主 Agent 后的条件路由
     根据 next_action 决定下一步
@@ -165,22 +187,8 @@ def route_after_main_agent(state: AgentState) -> Literal["skill_tools", "status_
     if _has_tool_calls(state):
         return "skill_tools"
     
-    next_action = state.get("next_action", "end_turn")
-    
-    if next_action == "call_status":
-        return "status_agent"
-    elif next_action == "call_plan":
-        return "plan_agent"
-    elif next_action == "call_guide":
-        return "guide_agent"
-    elif next_action == "ask_user":
-        # 主 Agent 需要提问，但使用了 interrupt 机制，
-        # 如果代码走到这里，说明 interrupt 已经完成或被绕过，
-        # 且 Agent 显式返回了 ask_user（可能是为了结束这一轮 invoke）
-        return "end"
-    else:
-        # end_turn 结束本轮
-        return "end"
+    # 无工具调用则结束本轮
+    return "end"
 
 
 def route_after_sub_agent(state: AgentState) -> Literal["skill_tools", "main_agent", "end"]:
@@ -221,7 +229,7 @@ def route_after_guide_agent(state: AgentState) -> Literal["skill_tools", "main_a
     return route_after_sub_agent(state)
 
 
-def route_after_skill_tools(state: AgentState) -> Literal["main_agent", "status_agent", "plan_agent", "guide_agent"]:
+def route_after_skill_tools(state: AgentState) -> Literal["main_agent", "status_agent", "plan_agent", "guide_agent", "end"]:
     """
     skill_tools 节点执行完成后的路由
     
@@ -233,8 +241,22 @@ def route_after_skill_tools(state: AgentState) -> Literal["main_agent", "status_
         print("[WARN] Max node steps reached after skill_tools, returning to main_agent")
         return "main_agent"
 
+    handoff_target = state.get("_handoff_target") or ""
+    if handoff_target in ("status_agent", "plan_agent", "guide_agent"):
+        return handoff_target
+
+    # ask_user 工具触发后，本轮结束等待用户输入
+    last_tool_content = state.get("_last_tool_content") or ""
+    if last_tool_content:
+        try:
+            payload = json.loads(last_tool_content)
+            if payload.get("action") == "ask_user":
+                return "end"
+        except Exception:
+            pass
+
     current_agent = state.get("current_agent", "main_agent")
-    
+
     if current_agent == "status_agent":
         return "status_agent"
     elif current_agent == "plan_agent":
@@ -249,23 +271,48 @@ def skill_tools_node(state: AgentState) -> dict:
     """
     Skill 工具执行节点
     执行工具，并处理任务工具的状态更新
+    
+    Ask 工具两阶段处理：
+    - Phase 1: ask(action="enable") -> 设置 ask_mode=True，返回详细策略
+    - Phase 2: ask(questions=[...]) -> 设置 ask_mode=False，生成 inquiry_card
     """
     # 说明：tool 输出不会写入对话历史（见 context_builder），因此需要保证工具执行后能在"二阶段"被对应 Agent 注入。
-    # 其中 load_action_guide_detail 需要访问当前 state，故在此处用闭包动态创建。
     
     # 获取当前 Agent 名称（用于任务工具）
     current_agent = state.get("current_agent", "main_agent")
+    
+    # 获取当前 ask_mode 状态，决定使用哪个版本的 ask 工具
+    ask_mode = state.get("ask_mode", False)
+    ask_tool = get_ask_tool(ask_mode)
+    
+    # 获取当前 consult_mode 状态，决定使用哪个版本的 consult_answer 工具
+    consult_mode = state.get("consult_mode", False)
+    consult_tool = get_consult_tool(consult_mode)
+    
+    # 获取当前 emotion_mode 状态，决定使用哪个版本的 emotion_support 工具
+    emotion_mode = state.get("emotion_mode", False)
+    emotion_tool = get_emotion_tool(emotion_mode)
     
     # 创建任务工具
     task_tools = create_task_tools(lambda: state, agent_name=current_agent)
     
     tool_node = ToolNode([
-        load_inquiry_skill_instructions,
-        load_consult_answer_skill_instructions,
-        load_emotion_support_skill_instructions,
-        create_guide_loader_tool(lambda: state),
-        # 行动指南绑定工具
-        create_guide_bind_tool(lambda: state, current_agent),
+        # Skill 加载工具（工具名统一为 load_skill）
+        create_all_skills_loader(),
+        # 子 Agent 委派工具
+        delegate_to_status,
+        delegate_to_plan,
+        delegate_to_guide,
+        # 提问工具（状态驱动，根据 ask_mode 返回不同版本）
+        ask_tool,
+        # 向后兼容：保留 ask_user（实际上是 ask_questions 的别名）
+        ask_user,
+        # 解答工具（状态驱动，根据 consult_mode 返回不同版本）
+        consult_tool,
+        # 陪伴工具（状态驱动，根据 emotion_mode 返回不同版本）
+        emotion_tool,
+        # 通用上下文拉取工具（仅 main_agent 会调用，但 ToolNode 统一执行）
+        create_context_loader(lambda: state, current_agent),
         # 任务管理工具
         *task_tools,
     ])
@@ -273,6 +320,13 @@ def skill_tools_node(state: AgentState) -> dict:
     
     # 检查是否调用了任务工具或行动指南绑定工具，如果是则应用状态更新
     messages = state.get("messages", [])
+    ask_user_payload = None
+    ask_enable_payload = None  # Phase 1: 进入提问模式
+    consult_enable_payload = None  # Phase 1: 进入解答模式
+    consult_complete_payload = None  # Phase 2: 完成解答
+    emotion_enable_payload = None  # Phase 1: 进入陪伴模式
+    emotion_complete_payload = None  # Phase 2: 完成陪伴
+    
     for msg in reversed(messages):
         tool_calls = getattr(msg, "tool_calls", None) or (msg.get("tool_calls") if isinstance(msg, dict) else None)
         if tool_calls:
@@ -280,7 +334,77 @@ def skill_tools_node(state: AgentState) -> dict:
                 tool_name = tc.get("name", "") if isinstance(tc, dict) else ""
                 tool_args = tc.get("args", {}) if isinstance(tc, dict) else {}
                 
-                if is_task_tool(tool_name):
+                if tool_name in {"delegate_to_status", "delegate_to_plan", "delegate_to_guide"}:
+                    out["_handoff_target"] = {
+                        "delegate_to_status": "status_agent",
+                        "delegate_to_plan": "plan_agent",
+                        "delegate_to_guide": "guide_agent",
+                    }.get(tool_name, "")
+                    out["_handoff_instruction"] = tool_args.get("instruction", "")
+                    out["instruction"] = tool_args.get("instruction", "")
+                elif tool_name == "load_skill":
+                    if tool_args.get("skill_id") == "inquiry":
+                        out["_pending_action"] = "inquiry"
+                
+                # === Ask 工具两阶段处理 ===
+                elif tool_name == "ask":
+                    if tool_args.get("action") == "enable":
+                        # Phase 1: 进入提问模式
+                        ask_enable_payload = {
+                            "agent": current_agent,
+                            "tool_call_id": tc.get("id", ""),
+                        }
+                    elif "questions" in tool_args:
+                        # Phase 2: 执行提问（与原 ask_user 逻辑相同）
+                        ask_user_payload = {
+                            "questions": tool_args.get("questions") or [],
+                            "intro": tool_args.get("intro") or "",
+                            "reasoning": tool_args.get("reasoning") or "",
+                            "agent": current_agent,
+                        }
+                        out["_pending_action"] = None
+                
+                # 向后兼容：原 ask_user 工具
+                elif tool_name == "ask_user":
+                    ask_user_payload = {
+                        "questions": tool_args.get("questions") or [],
+                        "intro": tool_args.get("intro") or "",
+                        "reasoning": tool_args.get("reasoning") or "",
+                        "agent": current_agent,
+                    }
+                    out["_pending_action"] = None
+                
+                # === consult_answer 工具两阶段处理 ===
+                elif tool_name == "consult_answer":
+                    if tool_args.get("action") == "enable":
+                        # Phase 1: 进入解答模式
+                        consult_enable_payload = {
+                            "agent": current_agent,
+                            "tool_call_id": tc.get("id", ""),
+                        }
+                    elif tool_args.get("action") == "complete":
+                        # Phase 2: 完成解答
+                        consult_complete_payload = {
+                            "agent": current_agent,
+                            "tool_call_id": tc.get("id", ""),
+                        }
+                
+                # === emotion_support 工具两阶段处理 ===
+                elif tool_name == "emotion_support":
+                    if tool_args.get("action") == "enable":
+                        # Phase 1: 进入陪伴模式
+                        emotion_enable_payload = {
+                            "agent": current_agent,
+                            "tool_call_id": tc.get("id", ""),
+                        }
+                    elif tool_args.get("action") == "complete":
+                        # Phase 2: 完成陪伴
+                        emotion_complete_payload = {
+                            "agent": current_agent,
+                            "tool_call_id": tc.get("id", ""),
+                        }
+                    
+                elif is_task_tool(tool_name):
                     # 应用任务工具的状态更新
                     task_state_update = apply_task_tool_state_update(state, tool_name, tool_args, current_agent)
                     if task_state_update:
@@ -288,16 +412,134 @@ def skill_tools_node(state: AgentState) -> dict:
                         for key, value in task_state_update.items():
                             out[key] = value
                         print(f"[DEBUG] skill_tools_node: Applied task tool state update for {tool_name}")
-                
-                elif is_guide_bind_tool(tool_name):
-                    # 应用行动指南绑定工具的状态更新
-                    bind_state_update = apply_guide_bind_state_update(state, tool_name, tool_args, current_agent)
-                    if bind_state_update:
-                        # 合并状态更新
-                        for key, value in bind_state_update.items():
+
+                elif is_context_loader_tool(tool_name):
+                    context_state_update = apply_context_loader_state_update(state, tool_name, tool_args, current_agent)
+                    if context_state_update:
+                        for key, value in context_state_update.items():
                             out[key] = value
-                        print(f"[DEBUG] skill_tools_node: Applied guide bind state update for {tool_name}")
+                        print(f"[DEBUG] skill_tools_node: Applied context loader state update for {tool_name}")
             break
+    
+    # === Phase 1 处理：进入提问模式 ===
+    if ask_enable_payload:
+        tool_message_id = str(uuid.uuid4())
+        out["ask_mode"] = True
+        out["ask_mode_tool_message_id"] = tool_message_id
+        out["_pending_action"] = "ask"  # 强制下一步调用 ask
+        
+        # 生成带策略的 ToolMessage（替换 ToolNode 返回的简单消息）
+        strategy_content = f"已进入提问模式，请使用 ask 工具向用户提问。\n\n{ASK_MODE_STRATEGY}"
+        
+        # 找到原来的 tool message 并替换其内容
+        msgs = out.get("messages", [])
+        for i, m in enumerate(msgs):
+            md = convert_message_to_dict(m) if not isinstance(m, dict) else m
+            if md.get("role") == "tool" and md.get("name") == "ask":
+                msgs[i] = {
+                    "role": "tool",
+                    "id": tool_message_id,
+                    "name": "ask",
+                    "content": strategy_content,
+                    "tool_call_id": ask_enable_payload.get("tool_call_id", ""),
+                }
+                break
+        out["messages"] = msgs
+        print(f"[DEBUG] skill_tools_node: Phase 1 - entered ask_mode, tool_message_id={tool_message_id}")
+
+    # === Phase 1 处理：进入解答模式 ===
+    if consult_enable_payload:
+        tool_message_id = str(uuid.uuid4())
+        out["consult_mode"] = True
+        out["consult_mode_tool_message_id"] = tool_message_id
+        # 注意：不设置 _pending_action，模型自由输出 content + tool_call(complete)
+        
+        # 生成带策略的 ToolMessage
+        strategy_content = f"已进入解答模式，请根据以下策略回复用户。回复完成后，调用 consult_answer(action=\"complete\") 关闭解答模式。\n\n{CONSULT_MODE_STRATEGY}"
+        
+        msgs = out.get("messages", [])
+        for i, m in enumerate(msgs):
+            md = convert_message_to_dict(m) if not isinstance(m, dict) else m
+            if md.get("role") == "tool" and md.get("name") == "consult_answer":
+                msgs[i] = {
+                    "role": "tool",
+                    "id": tool_message_id,
+                    "name": "consult_answer",
+                    "content": strategy_content,
+                    "tool_call_id": consult_enable_payload.get("tool_call_id", ""),
+                }
+                break
+        out["messages"] = msgs
+        print(f"[DEBUG] skill_tools_node: Phase 1 - entered consult_mode, tool_message_id={tool_message_id}")
+    
+    # === Phase 2 处理：完成解答 ===
+    if consult_complete_payload:
+        out["consult_mode"] = False
+        # 生成关闭确认的 ToolMessage
+        msgs = out.get("messages", [])
+        for i, m in enumerate(msgs):
+            md = convert_message_to_dict(m) if not isinstance(m, dict) else m
+            if md.get("role") == "tool" and md.get("name") == "consult_answer":
+                msgs[i] = {
+                    "role": "tool",
+                    "id": md.get("id") or str(uuid.uuid4()),
+                    "name": "consult_answer",
+                    "content": "解答模式已关闭。",
+                    "tool_call_id": consult_complete_payload.get("tool_call_id", ""),
+                }
+                break
+        out["messages"] = msgs
+        print(f"[DEBUG] skill_tools_node: Phase 2 - consult_mode closed")
+
+    # === Phase 1 处理：进入陪伴模式 ===
+    if emotion_enable_payload:
+        tool_message_id = str(uuid.uuid4())
+        out["emotion_mode"] = True
+        out["emotion_mode_tool_message_id"] = tool_message_id
+        # 注意：不设置 _pending_action，模型自由输出 content + tool_call(complete)
+        
+        # 生成带策略的 ToolMessage
+        strategy_content = f"已进入陪伴模式，请根据以下策略回复用户。回复完成后，调用 emotion_support(action=\"complete\") 关闭陪伴模式。\n\n{EMOTION_MODE_STRATEGY}"
+        
+        msgs = out.get("messages", [])
+        for i, m in enumerate(msgs):
+            md = convert_message_to_dict(m) if not isinstance(m, dict) else m
+            if md.get("role") == "tool" and md.get("name") == "emotion_support":
+                msgs[i] = {
+                    "role": "tool",
+                    "id": tool_message_id,
+                    "name": "emotion_support",
+                    "content": strategy_content,
+                    "tool_call_id": emotion_enable_payload.get("tool_call_id", ""),
+                }
+                break
+        out["messages"] = msgs
+        print(f"[DEBUG] skill_tools_node: Phase 1 - entered emotion_mode, tool_message_id={tool_message_id}")
+    
+    # === Phase 2 处理：完成陪伴 ===
+    if emotion_complete_payload:
+        out["emotion_mode"] = False
+        # 生成关闭确认的 ToolMessage
+        msgs = out.get("messages", [])
+        for i, m in enumerate(msgs):
+            md = convert_message_to_dict(m) if not isinstance(m, dict) else m
+            if md.get("role") == "tool" and md.get("name") == "emotion_support":
+                msgs[i] = {
+                    "role": "tool",
+                    "id": md.get("id") or str(uuid.uuid4()),
+                    "name": "emotion_support",
+                    "content": "陪伴模式已关闭。",
+                    "tool_call_id": emotion_complete_payload.get("tool_call_id", ""),
+                }
+                break
+        out["messages"] = msgs
+        print(f"[DEBUG] skill_tools_node: Phase 2 - emotion_mode closed")
+
+    # 兜底：确保任务/上下文相关的状态更新从 tool 执行结果写回
+    if "layer3_memory" in state and "layer3_memory" not in out:
+        out["layer3_memory"] = state.get("layer3_memory")
+    if "task_registry" in state and "task_registry" not in out:
+        out["task_registry"] = state.get("task_registry")
 
     # 兼容：确保 tool 消息具备 tool_call_id（LangChain ToolMessage 必填，且不能为 None/空）
     # 在某些模式下，ToolNode 可能返回 dict 形式的消息；若缺 tool_call_id，会导致 add_messages 合并报错。
@@ -306,12 +548,19 @@ def skill_tools_node(state: AgentState) -> dict:
         return out
 
     # 尝试从上一条 AIMessage 的 tool_calls 中取回 tool_call_id（若需要兜底）
+    tool_call_map: dict[str, str] = {}
     fallback_tool_call_id = ""
     for m in reversed(state.get("messages", []) or []):
         # LangChain AIMessage
         tool_calls = getattr(m, "tool_calls", None)
         if tool_calls:
             try:
+                for tc in tool_calls:
+                    if isinstance(tc, dict):
+                        tc_id = str(tc.get("id") or "")
+                        tc_name = str(tc.get("name") or "")
+                        if tc_id:
+                            tool_call_map[tc_id] = tc_name
                 fallback_tool_call_id = str(tool_calls[0].get("id") or "")
             except Exception:
                 fallback_tool_call_id = ""
@@ -319,6 +568,12 @@ def skill_tools_node(state: AgentState) -> dict:
         # dict 形式
         if isinstance(m, dict) and m.get("tool_calls"):
             try:
+                for tc in m["tool_calls"]:
+                    if isinstance(tc, dict):
+                        tc_id = str(tc.get("id") or "")
+                        tc_name = str(tc.get("name") or "")
+                        if tc_id:
+                            tool_call_map[tc_id] = tc_name
                 fallback_tool_call_id = str(m["tool_calls"][0].get("id") or "")
             except Exception:
                 fallback_tool_call_id = ""
@@ -337,7 +592,11 @@ def skill_tools_node(state: AgentState) -> dict:
         # ToolNode 有时会返回 dict/ToolMessage，tool_call_id 可能存在但为 None；
         # 此时也必须补齐，否则 add_messages 合并可能失败或导致 tool 输出无法被下游 Agent 读取。
         if md.get("role") == "tool" and not md.get("tool_call_id"):
-            md["tool_call_id"] = fallback_tool_call_id or "tool_call_unknown"
+            md["tool_call_id"] = fallback_tool_call_id or ""
+        if md.get("role") == "tool" and not md.get("name"):
+            tc_id = md.get("tool_call_id") or ""
+            if tc_id and tc_id in tool_call_map:
+                md["name"] = tool_call_map[tc_id]
         normalized.append(md)
 
     out["messages"] = normalized
@@ -357,6 +616,72 @@ def skill_tools_node(state: AgentState) -> dict:
     if tool_outputs:
         out["_last_tool_outputs"] = tool_outputs
         out["_last_tool_content"] = tool_outputs[-1]["content"]
+
+    # === Phase 2 处理：执行提问 ===
+    if ask_user_payload:
+        questions = ask_user_payload.get("questions") or []
+        intro = ask_user_payload.get("intro") or ""
+        agent_name = ask_user_payload.get("agent") or current_agent
+        resume_map = {
+            "main_agent": "continue_decision",
+            "status_agent": "continue_analysis",
+            "plan_agent": "continue_planning",
+            "guide_agent": "continue_guide",
+        }
+        
+        # Phase 2 完成：恢复 ask_mode 为 False
+        out["ask_mode"] = False
+        
+        out["inquiry_card"] = {
+            "questions": questions,
+            "intro": intro,
+            "reasoning": ask_user_payload.get("reasoning") or "",
+        }
+        out["pending_questions"] = [
+            q.get("question", "") if isinstance(q, dict) else str(q) for q in questions
+        ]
+        out["current_agent"] = agent_name
+        out["agent_resume_point"] = resume_map.get(agent_name)
+
+        # 连续提问计数
+        streak_agent = state.get("question_streak_agent")
+        streak_count = int(state.get("question_streak_count", 0) or 0)
+        next_streak = (streak_count + 1) if (streak_agent == agent_name) else 1
+        out["question_streak_agent"] = agent_name
+        out["question_streak_count"] = next_streak
+        out["question_count"] = next_streak
+
+        response_content = intro.strip() or "为了更好地继续，我需要再了解一些细节～"
+        phase_map = {
+            "status_agent": "after_status",
+            "plan_agent": "after_plan",
+            "guide_agent": "after_guide",
+        }
+        existing_responses = state.get("pending_responses", [])
+        out["pending_responses"] = existing_responses + [{
+            "from": agent_name,
+            "content": response_content,
+            "phase": phase_map.get(agent_name, "immediate"),
+        }]
+        
+        # 生成提问结束的 ToolMessage 摘要
+        questions_summary = "\n".join([f"- {q.get('question', '')}" for q in questions if isinstance(q, dict)])
+        ask_end_content = f"提问模式结束。已生成以下问题：\n{questions_summary}"
+        
+        # 更新 normalized 中的 ask tool message 内容
+        for i, md in enumerate(normalized):
+            if md.get("role") == "tool" and md.get("name") in ("ask", "ask_user"):
+                normalized[i] = dict(md)
+                normalized[i]["content"] = ask_end_content
+                break
+        
+        out["messages"] = normalized + [{
+            "role": "assistant",
+            "name": agent_name,
+            "content": response_content,
+        }]
+        
+        print(f"[DEBUG] skill_tools_node: Phase 2 - ask_mode reset to False, {len(questions)} questions generated")
 
     return out
 
@@ -440,9 +765,6 @@ def create_workflow() -> StateGraph:
         route_after_main_agent,
         {
             "skill_tools": "skill_tools",  # 新增：工具调用
-            "status_agent": "status_agent",
-            "plan_agent": "plan_agent",
-            "guide_agent": "guide_agent",
             # "wait_user_input": "wait_user_input", # Removed in Phase 3
             "end": "post_turn_finalize",
         }
@@ -490,6 +812,7 @@ def create_workflow() -> StateGraph:
             "status_agent": "status_agent",
             "plan_agent": "plan_agent",
             "guide_agent": "guide_agent",
+            "end": "post_turn_finalize",
         }
     )
 
