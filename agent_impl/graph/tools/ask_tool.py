@@ -140,12 +140,3 @@ def get_ask_tool(ask_mode: bool) -> StructuredTool:
         return ask_enable
 
 
-# =============================================================================
-# 向后兼容：保留原 ask_user 接口
-# =============================================================================
-
-# 为了向后兼容，保留原来的 AskUserInput 类型别名
-AskUserInput = AskQuestionsInput
-
-# 保留原来的 ask_user 函数（实际上就是 ask_questions）
-ask_user = ask_questions

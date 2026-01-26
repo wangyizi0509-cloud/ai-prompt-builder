@@ -7,6 +7,7 @@ import json
 import os
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
+from langchain_deepseek import ChatDeepSeek
 from langchain_core.messages import AIMessage
 
 # 加载环境变量
@@ -36,10 +37,10 @@ def get_llm(temperature: float = 0.7):
         )
     
     elif provider == "deepseek":
-        return ChatOpenAI(
+        # 使用官方 ChatDeepSeek 集成，支持更稳定的 function calling
+        return ChatDeepSeek(
             model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
-            openai_api_key=os.getenv("DEEPSEEK_API_KEY"),
-            openai_api_base=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+            api_key=os.getenv("DEEPSEEK_API_KEY"),
             temperature=temperature,
         )
     

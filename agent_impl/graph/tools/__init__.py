@@ -39,6 +39,16 @@ from .context_loader import (
     is_context_loader_tool,
 )
 
+from .submit_tools import (
+    submit_status_report,
+    submit_action_plan,
+    submit_action_guide,
+    update_guide_status,
+    apply_submit_tool_state_update,
+    is_submit_tool,
+    SUBMIT_TOOL_NAMES,
+)
+
 from .ask_tool import (
     # 新版 ask 工具（状态驱动）
     get_ask_tool,
@@ -46,9 +56,6 @@ from .ask_tool import (
     ask_questions,
     ASK_MODE_STRATEGY,
     ASK_MODE_SIMPLE,
-    # 向后兼容
-    ask_user,
-    AskUserInput,
 )
 
 from .consult_answer_tool import (
@@ -96,15 +103,20 @@ __all__ = [
     "create_context_loader",
     "apply_context_loader_state_update",
     "is_context_loader_tool",
+    # 提交类工具
+    "submit_status_report",
+    "submit_action_plan",
+    "submit_action_guide",
+    "update_guide_status",
+    "apply_submit_tool_state_update",
+    "is_submit_tool",
+    "SUBMIT_TOOL_NAMES",
     # Ask 工具（状态驱动）
     "get_ask_tool",
     "ask_enable",
     "ask_questions",
     "ASK_MODE_STRATEGY",
     "ASK_MODE_SIMPLE",
-    # 向后兼容
-    "ask_user",
-    "AskUserInput",
     # Consult Answer 工具（状态驱动）
     "get_consult_tool",
     "consult_enable",

@@ -9,11 +9,14 @@ from graph.state import (
     AgentState,
     migrate_to_layered_memory,
     migrate_user_profile_to_context,
+)
+from graph.workflow import _wrap_step_counter
+from graph.context_types import (
+    create_empty_user_context,
+    create_empty_history_archive,
     get_active_action_guides,
     get_completed_action_guides,
 )
-from graph.workflow import _wrap_step_counter
-from graph.context_types import create_empty_user_context, create_empty_history_archive
 from tests.conftest import create_test_state, assert_state_valid
 
 
@@ -155,7 +158,8 @@ class TestStateManagement:
         """测试行动指南过滤函数"""
         # 创建包含多个指南的状态
         state = create_initial_state("测试")
-        state["action_guides"] = [
+        layer2_memory = state.get("layer2_memory", {})
+        layer2_memory["action_guides"] = [
             {"id": "guide1", "status": "pending", "content": "指南1"},
             {"id": "guide2", "status": "in_progress", "content": "指南2"},
             {"id": "guide3", "status": "completed", "content": "指南3"},
@@ -163,14 +167,15 @@ class TestStateManagement:
             {"id": "guide6", "status": "cancelled", "content": "指南6"},
             {"id": "guide4", "status": "pending", "content": "指南4"},
         ]
+        state["layer2_memory"] = layer2_memory
         
         # 测试获取活跃指南
-        active_guides = get_active_action_guides(state["action_guides"])
+        active_guides = get_active_action_guides(state["layer2_memory"])
         assert len(active_guides) == 4, "应该有4个活跃指南"
         assert all(g.get("status") in ["pending", "in_progress", "paused"] for g in active_guides), "活跃指南状态应该正确"
         
         # 测试获取终态指南（已归档）
-        completed_guides = get_completed_action_guides(state["action_guides"])
+        completed_guides = get_completed_action_guides(state["layer2_memory"])
         assert len(completed_guides) == 2, "应该有2个终态指南"
         assert all(g.get("status") in ["completed", "cancelled", "expired"] for g in completed_guides), "终态指南状态应该正确"
 

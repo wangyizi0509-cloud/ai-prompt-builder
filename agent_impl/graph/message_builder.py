@@ -36,13 +36,21 @@ if TYPE_CHECKING:
 # ============================================================
 
 # Virtual Ack 消息内容（用于语义隔离"阅读资料"和"开始对话"）
-VIRTUAL_ACK_MESSAGE = "收到，已阅档案。请问有什么需要帮助的？"
+# [FIX] 2026-01-26: 改用系统标记格式，避免模型模仿输出
+VIRTUAL_ACK_MESSAGE = "[SYS:DOSSIER_LOADED]"
 
 # Context Injection 消息前缀（用于识别和过滤）
 CONTEXT_INJECTION_PREFIX = "<dossier"
 
 # 默认历史轮次
 DEFAULT_MAX_TURNS = 10
+
+# submit_* 工具历史压缩标记（用于 AIMessage.tool_calls.args）
+SUBMIT_TOOL_COMPRESSION_FIELDS = {
+    "submit_status_report": ["report_markdown"],
+    "submit_action_plan": ["phases", "key_principles", "summary"],
+    "submit_action_guide": ["guide_markdown", "steps", "talking_points", "dos", "donts"],
+}
 
 
 # ============================================================
@@ -281,7 +289,7 @@ def build_conversation_history(
     # 过滤并转换消息
     filtered_messages: list[BaseMessage] = []
     
-    for msg in messages:
+    for i, msg in enumerate(messages):
         role, content = get_msg_role_and_content(msg)
         
         # 跳过无效消息
@@ -345,6 +353,20 @@ def build_conversation_history(
                     # 简化为简短版本，去掉详细策略
                     content = EMOTION_MODE_SIMPLE
 
+        # AIMessage 中的 submit_* tool_calls.args 压缩（仅历史消息）
+        if role in ("assistant", "ai") and tool_calls:
+            is_current_tool_turn = bool(state.get("_tool_caller")) and bool(last_tool_call_id)
+            if is_current_tool_turn:
+                is_current_tool_turn = any(
+                    isinstance(tc, dict) and str(tc.get("id") or "") == last_tool_call_id
+                    for tc in tool_calls
+                )
+            if not is_current_tool_turn:
+                tool_calls = _compress_submit_tool_calls(tool_calls)
+                if isinstance(msg, dict):
+                    msg = dict(msg)
+                    msg["tool_calls"] = tool_calls
+
         # 转换为标准 Message 类型
         base_message = _convert_to_base_message(msg, role, content)
         if base_message:
@@ -399,6 +421,35 @@ def _is_virtual_ack(role: str, content: str) -> bool:
     
     content_stripped = content.strip()
     return content_stripped == VIRTUAL_ACK_MESSAGE
+
+
+def _compress_submit_tool_calls(tool_calls: list) -> list:
+    """
+    压缩 submit_* 工具的 tool_calls.args（用于历史 AIMessage）
+    """
+    if not tool_calls:
+        return tool_calls
+
+    changed = False
+    compressed_calls = []
+    for tc in tool_calls:
+        if not isinstance(tc, dict):
+            compressed_calls.append(tc)
+            continue
+
+        tool_name = str(tc.get("name") or "")
+        if not tool_name and isinstance(tc.get("function"), dict):
+            tool_name = str(tc["function"].get("name") or "")
+
+        if tool_name in SUBMIT_TOOL_COMPRESSION_FIELDS:
+            new_tc = dict(tc)
+            new_tc["args"] = {"_compressed": True, "tool": tool_name}
+            compressed_calls.append(new_tc)
+            changed = True
+        else:
+            compressed_calls.append(tc)
+
+    return compressed_calls if changed else tool_calls
 
 
 def _convert_to_base_message(

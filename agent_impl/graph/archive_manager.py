@@ -41,8 +41,6 @@ from graph.context_types import (
     ActionPlanItem,
     create_empty_layer2_memory,
     DynamicIntelItem,
-    get_current_status_report,
-    get_active_action_guides,
     # Layer 3
     Layer3Memory,
     ConversationSummary,
@@ -51,11 +49,6 @@ from graph.context_types import (
     AgentTaskRegistry,
     TaskState,
     get_active_task,
-    # 向后兼容
-    HistoryArchive,
-    HistorySummary,
-    ConversationArchive,
-    create_empty_history_archive,
     # 处理状态
     start_layer_processing,
     finish_layer_processing,
@@ -88,9 +81,9 @@ LAYER2_ARCHIVE_CONFIG = {
 }
 
 LAYER3_ARCHIVE_CONFIG = {
-    "max_recent_turns": 4,          # 保留最近 N 轮完整对话
-    "compression_batch_size": 1,    # 每超出 batch_size 轮集中压缩一次（测试用）
-    "compression_threshold": 4,     # 超过此轮次开始检查是否需要压缩（测试用）
+    "max_recent_turns": 2,          # 保留最近 N 轮完整对话
+    "compression_batch_size": 1,    # 每超出 batch_size 轮集中压缩一次
+    "compression_threshold": 4,     # 超过此轮次开始检查是否需要压缩
     "max_summaries": 10,            # 最多保留的对话摘要数
     "reasoning_limit": 10,          # 任务思考过程记录保留条数 (n)
     "reasoning_compression_batch": 2, # 思考过程压缩批量大小 (n-5 到 n 条一起摘要)
@@ -109,29 +102,24 @@ def check_layer3_compression_needed(state: "AgentState") -> bool:
     检查 Layer 3 是否需要触发对话压缩
     
     触发条件：
-    - 对话轮次超过 compression_threshold（默认 4，生产环境建议 25+）
+    - 工作区对话轮次超过 compression_threshold（默认 25）
     - 且超出部分达到 compression_batch_size 的倍数
     
-    例如：阈值 4，批量大小 1（测试配置）
-    - 4 轮：不压缩（刚到阈值）
-    - 5 轮：触发压缩（超出 1 轮）
-    - 6 轮：触发压缩（超出 2 轮）
+    重要：使用工作区消息 (messages) 而非全量存储 (all_messages) 判断
+    因为 all_messages 是全量保留的历史记录，只增不减；
+    而 messages 是实际参与上下文的工作区消息，压缩后会减少。
     
-    生产配置示例：阈值 30，批量大小 5
-    - 29 轮：不压缩
-    - 35 轮：触发压缩（超出 5 轮）
+    例如：阈值 25，批量大小 1
+    - 24 轮：不压缩
+    - 25 轮：不压缩（刚到阈值）
+    - 26 轮：触发压缩（超出 1 轮）
     """
-    # 优先从 layer3_memory 获取消息
-    layer3_memory = state.get("layer3_memory")
-    has_layer3_memory = layer3_memory is not None and isinstance(layer3_memory, dict)
-    
-    if has_layer3_memory:
-        all_messages = layer3_memory.get("all_messages", [])
-    else:
-        all_messages = state.get("messages", [])
+    # [FIX] 使用工作区消息 (messages) 判断，而非全量存储 (all_messages)
+    # all_messages 是全量保留的，永远只增不减，会导致压缩条件永远满足
+    workspace_messages = state.get("messages", [])
     
     # 以用户消息数量为基准计算"轮次"
-    current_turns = count_user_turns(all_messages)
+    current_turns = count_user_turns(workspace_messages)
     
     threshold = LAYER3_ARCHIVE_CONFIG["compression_threshold"]
     batch_size = LAYER3_ARCHIVE_CONFIG["compression_batch_size"]
@@ -140,8 +128,7 @@ def check_layer3_compression_needed(state: "AgentState") -> bool:
     excess_turns = max(0, current_turns - threshold)
     should_trigger = current_turns > threshold and excess_turns % batch_size == 0
     print(f"[Archive] check_layer3_compression_needed: "
-          f"has_layer3_memory={has_layer3_memory}, "
-          f"all_messages_count={len(all_messages)}, "
+          f"workspace_messages={len(workspace_messages)}, "
           f"user_turns={current_turns}, "
           f"threshold={threshold}, batch_size={batch_size}, "
           f"excess={excess_turns}, result={should_trigger}")
@@ -157,31 +144,30 @@ def get_layer3_messages_to_compress(state: "AgentState") -> tuple[list[dict], li
     """
     获取 Layer 3 需要压缩的消息和保留的消息
     
+    重要：使用工作区消息 (messages) 而非全量存储 (all_messages)
+    压缩的目的是减少工作区的上下文窗口大小。
+    
     Returns:
         (to_compress, to_keep): 需要压缩的消息列表, 需要保留的消息列表
     """
-    # 优先从 layer3_memory 获取消息
-    layer3_memory = state.get("layer3_memory")
-    if layer3_memory:
-        all_messages = layer3_memory.get("all_messages", [])
-    else:
-        all_messages = state.get("messages", [])
+    # [FIX] 使用工作区消息 (messages) 进行压缩判断
+    workspace_messages = state.get("messages", [])
     
     max_recent = LAYER3_ARCHIVE_CONFIG["max_recent_turns"]
     
     # 以用户消息数量为基准计算轮次
-    user_turn_count = count_user_turns(all_messages)
+    user_turn_count = count_user_turns(workspace_messages)
     
     if user_turn_count <= max_recent:
-        return [], all_messages
+        return [], workspace_messages
     
     # 找到保留的最近 N 轮用户消息的边界
     # 从后往前数，找到第 max_recent 个用户消息的位置
     user_count = 0
-    split_index = len(all_messages)
-    for i in range(len(all_messages) - 1, -1, -1):
+    split_index = len(workspace_messages)
+    for i in range(len(workspace_messages) - 1, -1, -1):
         from utils.message_utils import get_msg_role_and_content
-        role, _ = get_msg_role_and_content(all_messages[i])
+        role, _ = get_msg_role_and_content(workspace_messages[i])
         if role == "user":
             user_count += 1
             if user_count == max_recent:
@@ -189,8 +175,8 @@ def get_layer3_messages_to_compress(state: "AgentState") -> tuple[list[dict], li
                 break
     
     # 在该用户消息之前的所有消息都压缩
-    to_compress = all_messages[:split_index]
-    to_keep = all_messages[split_index:]
+    to_compress = workspace_messages[:split_index]
+    to_keep = workspace_messages[split_index:]
     
     return to_compress, to_keep
 
@@ -253,7 +239,7 @@ def compress_layer3(state: "AgentState") -> dict:
     try:
         # 2. 调用整理 Agent 处理对话归档（这里会调用 LLM）
         print(f"[Archive] Calling archive_conversation_batch with {len(to_compress)} messages")
-        result = archive_conversation_batch(to_compress, existing_context)
+        result = archive_conversation_batch(to_compress, existing_context, layer2_memory)
         print(f"[Archive] archive_conversation_batch returned keys: {list(result.keys()) if isinstance(result, dict) else type(result)}")
         
         # 3. 创建对话摘要
@@ -505,7 +491,7 @@ def archive_guide_to_layer2(
         return {}
 
     # 调用整理 Agent
-    result = archive_completed_guide(guide, existing_context)
+    result = archive_completed_guide(guide, existing_context, layer2_memory)
     
     # 更新指南的摘要字段
     guide_summary = result.get("guide_summary", {})
@@ -563,7 +549,7 @@ def archive_status_to_layer2(
     existing_context = layer1_memory.get("full_data", create_empty_user_context())
     
     # 调用整理 Agent
-    result = archive_replaced_status_report(old_report, existing_context)
+    result = archive_replaced_status_report(old_report, existing_context, layer2_memory)
     
     # 更新报告的摘要字段
     status_summary = result.get("status_summary", {})
@@ -619,7 +605,7 @@ def archive_plan_to_layer2(
 
     existing_context = layer1_memory.get("full_data", create_empty_user_context())
 
-    result = archive_replaced_action_plan(old_plan, existing_context)
+    result = archive_replaced_action_plan(old_plan, existing_context, layer2_memory)
 
     plan_summary = result.get("plan_summary", {})
     old_plan["summary"] = plan_summary.get("summary", "")
@@ -649,177 +635,6 @@ def archive_plan_to_layer2(
         "layer1_memory": updated_layer1,
         "user_context": updated_context,  # 向后兼容
     }
-
-
-# ============================================================
-# 向后兼容：旧版归档函数
-# ============================================================
-
-def check_conversation_compression_needed(state: "AgentState") -> bool:
-    """
-    检查是否需要触发对话压缩（向后兼容）
-    
-    @deprecated: 请使用 check_layer3_compression_needed
-    """
-    return check_layer3_compression_needed(state)
-
-
-def compress_conversation(state: "AgentState") -> dict:
-    """
-    执行对话压缩（向后兼容）
-    
-    @deprecated: 请使用 compress_layer3
-    """
-    result = compress_layer3(state)
-    
-    # 同时更新旧版 history_archive
-    if result:
-        existing_archive = state.get("history_archive") or create_empty_history_archive()
-        
-        # 从 layer3_memory 获取新的摘要
-        layer3_memory = result.get("layer3_memory", {})
-        new_summaries = layer3_memory.get("conversation_summaries", [])
-        
-        if new_summaries:
-            # 转换为旧版格式
-            conv_archives = []
-            for summary in new_summaries:
-                conv_archive = ConversationArchive(
-                    id=summary.get("id", ""),
-                    summary=summary.get("summary", ""),
-                    start_time=summary.get("start_time", ""),
-                    end_time=summary.get("end_time", ""),
-                    turn_count=summary.get("turn_count", 0),
-                    key_topics=summary.get("key_topics", []),
-                    extracted_info=summary.get("extracted_info", {}),
-                )
-                conv_archives.append(conv_archive)
-            
-            updated_archive = HistoryArchive(
-                status_history=existing_archive.get("status_history", []),
-                plan_history=existing_archive.get("plan_history", []),
-                guide_history=existing_archive.get("guide_history", []),
-                conversation_archive=conv_archives,
-            )
-            result["history_archive"] = updated_archive
-    
-    return result
-
-
-def archive_guide_on_completion(
-    guide: ActionGuideItem,
-    state: "AgentState",
-) -> dict:
-    """
-    当行动指南完成时触发归档（向后兼容）
-    
-    @deprecated: 请使用 archive_guide_to_layer2
-    """
-    result = archive_guide_to_layer2(guide, state)
-    
-    # 同时更新旧版 history_archive
-    existing_archive = state.get("history_archive") or create_empty_history_archive()
-    
-    guide_summary = HistorySummary(
-        id=guide.get("id", ""),
-        summary=guide.get("summary", ""),
-        one_liner=guide.get("one_liner", ""),
-        created_at=guide.get("created_at", ""),
-        full_content=guide.get("guide", {}).get("guide_content", ""),
-    )
-    
-    updated_archive = add_to_history(existing_archive, guide_summary, "guide_history")
-    result["history_archive"] = updated_archive
-    
-    return result
-
-
-def archive_status_on_replacement(
-    old_report: dict,
-    state: "AgentState",
-) -> dict:
-    """
-    当现状分析被新版替换时触发归档（向后兼容）
-    
-    @deprecated: 请使用 archive_status_to_layer2
-    """
-    # 转换为新版格式
-    report_item = StatusReportItem(
-        id=old_report.get("id", str(uuid.uuid4())[:8]),
-        report_id=old_report.get("report_id", 0),
-        stage=old_report.get("stage", ""),
-        stage_description=old_report.get("stage_description", ""),
-        acr_analysis=old_report.get("acr_analysis", {}),
-        key_issues=old_report.get("key_issues", []),
-        risk_points=old_report.get("risk_points", []),
-        report_content=old_report.get("report_content", ""),
-        created_at=old_report.get("created_at", datetime.now().isoformat()),
-    )
-    
-    result = archive_status_to_layer2(report_item, state)
-    
-    # 同时更新旧版 history_archive
-    existing_archive = state.get("history_archive") or create_empty_history_archive()
-    
-    status_summary = HistorySummary(
-        id=report_item.get("id", ""),
-        summary=report_item.get("summary", ""),
-        one_liner=report_item.get("one_liner", ""),
-        created_at=report_item.get("created_at", ""),
-        full_content=report_item.get("report_content", ""),
-    )
-    
-    updated_archive = add_to_history(existing_archive, status_summary, "status_history")
-    result["history_archive"] = updated_archive
-    
-    return result
-
-
-def add_to_history(
-    existing_archive: HistoryArchive,
-    new_summary: HistorySummary,
-    history_type: str,
-) -> HistoryArchive:
-    """
-    添加新摘要到历史归档（向后兼容）
-    """
-    archive_dict = {
-        "status_history": list(existing_archive.get("status_history", [])),
-        "plan_history": list(existing_archive.get("plan_history", [])),
-        "guide_history": list(existing_archive.get("guide_history", [])),
-        "conversation_archive": list(existing_archive.get("conversation_archive", [])),
-    }
-    
-    if history_type in archive_dict:
-        archive_dict[history_type].insert(0, new_summary)
-        archive_dict[history_type] = downgrade_old_summaries(archive_dict[history_type])
-    
-    return HistoryArchive(**archive_dict)
-
-
-def downgrade_old_summaries(history_list: list[HistorySummary]) -> list[HistorySummary]:
-    """
-    降级旧的历史摘要（向后兼容）
-    """
-    recent_count = LAYER2_ARCHIVE_CONFIG["recent_summary_count"]
-    max_one_liner = LAYER2_ARCHIVE_CONFIG["max_one_liner_count"]
-    max_total = recent_count + max_one_liner
-    
-    processed = []
-    for i, item in enumerate(history_list[:max_total]):
-        if i < recent_count:
-            processed.append(item)
-        else:
-            downgraded = HistorySummary(
-                id=item.get("id", ""),
-                summary="",
-                one_liner=item.get("one_liner", item.get("summary", "")[:30]),
-                created_at=item.get("created_at", ""),
-                full_content=item.get("full_content", ""),
-            )
-            processed.append(downgraded)
-    
-    return processed
 
 
 # ============================================================
@@ -875,7 +690,7 @@ def refine_on_onboarding_complete(state: "AgentState") -> dict:
         return {}
 
     existing_context = layer1_memory.get("full_data", create_empty_user_context())
-    result = archive_conversation_batch(messages, existing_context)
+    result = archive_conversation_batch(messages, existing_context, layer2_memory)
 
     updated_context = result.get("updated_context", existing_context)
     updated_layer1 = StorageProcessor.save_layer1(updated_context, layer1_memory)

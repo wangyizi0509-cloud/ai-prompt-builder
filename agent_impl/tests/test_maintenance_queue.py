@@ -61,12 +61,22 @@ def test_fullstore_sync_appends_new_messages():
 
 def test_enqueues_layer3_compress_at_threshold_batch_point():
     layer3 = create_empty_layer3_memory()
-    # 50 个 user turn -> threshold 45, excess 5 => 触发压缩
-    layer3["all_messages"] = [{"role": "user", "content": f"u{i}", "id": f"u{i}"} for i in range(50)]
+    # 使用工作区 messages 触发：threshold=4，user_turns=5 => 触发压缩
+    layer3["all_messages"] = []
 
     state = {
         "layer3_memory": layer3,
-        "messages": layer3["all_messages"][-2:],  # 工作区随意给两条
+        "messages": [
+            {"role": "user", "content": "u1", "id": "u1"},
+            {"role": "assistant", "content": "a1", "id": "a1"},
+            {"role": "user", "content": "u2", "id": "u2"},
+            {"role": "assistant", "content": "a2", "id": "a2"},
+            {"role": "user", "content": "u3", "id": "u3"},
+            {"role": "assistant", "content": "a3", "id": "a3"},
+            {"role": "user", "content": "u4", "id": "u4"},
+            {"role": "assistant", "content": "a4", "id": "a4"},
+            {"role": "user", "content": "u5", "id": "u5"},
+        ],
         "maintenance_queue": [],
         "maintenance_flags": {},
     }

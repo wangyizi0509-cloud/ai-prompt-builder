@@ -2,17 +2,11 @@
 主 Agent 节点 (Main Agent)
 决策中枢，负责回应用户和决策下一步行动
 
-采用 Anthropic 渐进式加载模式（Tool-based）：
-- 系统提示只包含 Skills 的元数据（name + description）
-- 模型通过 load_skill 工具按需加载完整技能指令
-- 工作流自动处理工具调用循环
-
 支持的功能：
 1. 回应用户（简短、共情、承上启下）
 2. 决策下一步行动（调用子 Agent 或结束本轮）
-3. 如需提问，调用 load_skill 工具获取提问指令
-4. 子 Agent 返回后再决策（灵活判断，无固定流程）
-5. 根据意图类型使用咨询 Skills 直接回复（解答疑惑、情感陪伴）
+3. 子 Agent 返回后再决策（灵活判断，无固定流程）
+4. 根据意图类型使用咨询 Skills 直接回复（解答疑惑、情感陪伴）
 
 上下文架构更新 (v2.0)：
 - 使用分层上下文架构（Layer 0-4）
@@ -38,10 +32,9 @@ from graph.tools.delegate_tools import (
     delegate_to_plan,
     delegate_to_guide,
 )
-from graph.tools.ask_tool import get_ask_tool, ask_user
+from graph.tools.ask_tool import get_ask_tool
 from graph.tools.consult_answer_tool import get_consult_tool, consult_complete
 from graph.tools.emotion_support_tool import get_emotion_tool, emotion_complete
-from skills import create_all_skills_loader
 from skills.registry import get_skill_registry
 from utils.message_utils import get_msg_role_and_content
 from config import get_llm
@@ -81,9 +74,8 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
     职责：
     1. 回应用户（简短、共情、承上启下）
     2. 决策下一步行动（调用子 Agent 或结束本轮）
-    3. 如需技能指令，通过 load_skill 工具获取
-    4. 子 Agent 返回后再决策（灵活判断，无固定流程）
-    5. 使用咨询 Skills 直接回复（解答疑惑、情感陪伴）
+    3. 子 Agent 返回后再决策（灵活判断，无固定流程）
+    4. 使用咨询 Skills 直接回复（解答疑惑、情感陪伴）
     
     Args:
         state: 当前状态
@@ -127,11 +119,7 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
     emotion_mode = state.get("emotion_mode", False)
     emotion_tool = get_emotion_tool(emotion_mode)
     
-    # 使用定制工具：main_agent 可以使用全部 skills
-    all_skills_tool = create_all_skills_loader()
     tool_list = [
-        # Skill 加载工具（main_agent 专用，支持所有 Skills）
-        all_skills_tool,
         # 子 Agent 委派工具
         delegate_to_status,
         delegate_to_plan,
@@ -148,7 +136,7 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
         *task_tools,
     ]
     if from_tool_call:
-        print(f"[DEBUG] MainAgent: Second stage (from_tool_call), tools disabled to prevent loop")
+        print(f"[DEBUG] MainAgent: Detected return from tool call (from_tool_call)")
     
     if is_resuming:
         print(f"[DEBUG] MainAgent: Resuming from ask_user, question_count={state.get('question_count', 0)}")
@@ -200,15 +188,53 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
                 }]
             }
     
-    # 向后兼容：原 inquiry skill 的两阶段处理
-    elif from_tool_call and pending_action == "inquiry":
-        llm_with_tools = base_llm.bind_tools(
-            [ask_user],
-            tool_choice={"type": "function", "function": {"name": "ask_user"}},
-        )
+    elif from_tool_call and (consult_mode or emotion_mode or pending_action in {"consult_answer", "emotion_support"}):
+        # Phase 2: consult/emotion 两阶段技能
+        # 绑定对应的 complete 工具，让模型可以正常输出 content + tool_call(complete)
+        # 注意：不能不绑定工具，否则 DeepSeek 会在 content 里硬写 DSML 格式的工具调用
+        if consult_mode:
+            llm_with_complete = base_llm.bind_tools([consult_complete])
+        elif emotion_mode:
+            llm_with_complete = base_llm.bind_tools([emotion_complete])
+        else:
+            # fallback: 绑定完整工具列表（理论上不会走到这里）
+            llm_with_complete = base_llm.bind_tools(tool_list)
+        response = llm_with_complete.invoke(messages)
+        # 如果模型返回了 tool_calls（complete），立即返回处理
+        if hasattr(response, "tool_calls") and response.tool_calls:
+            mode_name = "consult" if consult_mode else "emotion"
+            print(f"[DEBUG] MainAgent: Model returned tool call in {mode_name}_mode Phase 2: {[tc['name'] for tc in response.tool_calls]}")
+            if hasattr(response, "name"):
+                response.name = "main_agent"
+            existing_responses = state.get("pending_responses", [])
+            response_content = response.content or ""
+            if response_content:
+                pending_responses = existing_responses + [{
+                    "from": "main_agent",
+                    "content": response_content,
+                    "phase": "immediate",
+                }]
+            else:
+                pending_responses = existing_responses
+            return {
+                "messages": [response],
+                "pending_responses": pending_responses,
+                "last_response_for_continuity": response_content or None,
+                "current_agent": "main_agent",
+                "_tool_caller": "main_agent",
+                "debug_log": [{
+                    "node": "main_agent",
+                    "step": f"Tool Call Requested ({mode_name}_mode Phase 2)",
+                    "tool_calls": [tc["name"] for tc in response.tool_calls],
+                }]
+            }
+        # 如果模型没有返回 tool_calls，继续往下走到兜底逻辑
+    elif from_tool_call:
+        # 非两阶段：允许链式工具调用（比如 task_manager -> delegate_to_status）
+        llm_with_tools = base_llm.bind_tools(tool_list)
         response = llm_with_tools.invoke(messages)
         if hasattr(response, "tool_calls") and response.tool_calls:
-            print("[DEBUG] MainAgent: Forced ask_user tool call after inquiry skill")
+            print(f"[DEBUG] MainAgent: Model requested tool call (chain): {[tc['name'] for tc in response.tool_calls]}")
             if hasattr(response, "name"):
                 response.name = "main_agent"
             return {
@@ -217,12 +243,10 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
                 "_tool_caller": "main_agent",
                 "debug_log": [{
                     "node": "main_agent",
-                    "step": "Tool Call Requested (ask_user forced)",
+                    "step": "Tool Call Requested (chain)",
                     "tool_calls": [tc["name"] for tc in response.tool_calls],
                 }]
             }
-    elif from_tool_call:
-        response = base_llm.invoke(messages)
     else:
         # 系统验收：用户明确要求调用 task_manager 时，直接生成 tool_call
         user_msg = state.get("user_message") if isinstance(state.get("user_message"), str) else ""
@@ -449,9 +473,7 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
 
 def _get_skills_metadata_prompt() -> str:
     """
-    获取所有 Skills 的元数据（第一层：Metadata Level）+ 工具使用说明
-    
-    只加载元数据，模型通过 load_skill 工具按需加载完整指令
+    获取所有 Skills 的元数据（第一层：Metadata Level）
     """
     registry = get_skill_registry()
     skills_metadata = registry.generate_metadata_prompt()
@@ -459,29 +481,9 @@ def _get_skills_metadata_prompt() -> str:
     return f"""
 ---
 
-## 📚 可用 Skills（通过工具按需加载）
+## 📚 可用 Skills
 
 {skills_metadata}
-
-### 🛠 Skill 调用规则（重要）
-
-**当你判断需要使用某个 Skill 时，必须优先调用 `load_skill(skill_id)` 工具！**
-
-1. **关于【提问 Skill (inquiry)】的严格限制**：
-   - ❌ **严禁**为了帮 Status/Plan/Guide Agent 收集信息而调用此 Skill。
-     - *Bad Case*: "为了帮你分析现状，我先问问你们认识多久了" -> **错误！** 此时应直接 `call_status`，让 Status Agent 自己去问。
-   - ✅ **仅当**你需要澄清**用户意图**（即你不知道用户想干嘛，或者需要确认是否开启新任务）或遇到只能你自己处理的问题且缺少信息时，才由你自己调用此 Skill。
-     - *Good Case*: "你是想让我帮你分析一下聊天记录，还是想让我直接教你怎么回？"
-
-2. **Skill 调用流程**：
-   - 🚫 **严禁**直接输出 JSON 结果（如 `next_action="ask_user"`）。
-   - ✅ **必须**先调用工具 `load_skill(skill_id)`：
-     - 意图不明、需要澄清 -> 调用 `load_skill("inquiry")`
-     - 纯咨询、情感困惑 -> 调用 `load_skill("consult_answer")`
-     - 情绪发泄、求安慰 -> 调用 `load_skill("emotion_support")`
-
-3. **第 2 步（工具返回后）**：系统会提供完整的 Skill 指令（包含 JSON 格式规范）。
-   - ✅ 此时再根据指令生成包含 `inquiry_card` 或专业回复的最终 JSON。
 
 ---
 """
@@ -580,9 +582,8 @@ def _get_default_prompt(from_sub_agent: bool = False, is_resuming: bool = False)
     """
     获取默认 Prompt
     
-    采用 Tool-based 渐进式加载模式：
-    - 系统提示只包含 Skills 的元数据
-    - 模型通过 load_skill 工具按需加载完整指令
+    采用 Tool-based 两阶段工具模式：
+    - ask / consult_answer / emotion_support 通过工具驱动
     """
     base_prompt = """你是小话，一个专业的 AI 恋爱军师。你的任务是帮助用户解决与 Crush 相处过程中的情感推进问题。
 

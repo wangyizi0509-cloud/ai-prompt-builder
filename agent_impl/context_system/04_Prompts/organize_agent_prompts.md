@@ -66,6 +66,24 @@
 完整内容：
 __GUIDE_FULL_CONTENT__
 
+## 已有信息（用于去重）
+
+### 已有的长期记忆（Layer 1）
+
+__EXISTING_LAYER1__
+
+### 已有的动态情报（Layer 2）
+
+__EXISTING_LAYER2__
+
+## 增量提取规则
+
+仅输出新增或更准确的信息；已存在的相同/相似信息不要重复输出。
+如需更新，用 update 格式：
+```json
+{"action": "update", "old": "旧内容关键词", "content": "更详细的新内容"}
+```
+
 ## 输出格式
 
 ```json
@@ -79,6 +97,8 @@ __GUIDE_FULL_CONTENT__
   }
 }
 ```
+
+说明：extracted_info 的列表项可以是字符串（新增）或 update 对象（更新）。
 
 **示例**：
 ```json
@@ -149,6 +169,24 @@ __GUIDE_FULL_CONTENT__
 完整报告：
 __STATUS_REPORT_CONTENT__
 
+## 已有信息（用于去重）
+
+### 已有的长期记忆（Layer 1）
+
+__EXISTING_LAYER1__
+
+### 已有的动态情报（Layer 2）
+
+__EXISTING_LAYER2__
+
+## 增量提取规则
+
+仅输出新增或更准确的信息；已存在的相同/相似信息不要重复输出。
+如需更新，用 update 格式：
+```json
+{"action": "update", "old": "旧内容关键词", "content": "更详细的新内容"}
+```
+
 ## 输出格式
 
 ```json
@@ -162,6 +200,8 @@ __STATUS_REPORT_CONTENT__
   }
 }
 ```
+
+说明：extracted_info 的列表项可以是字符串（新增）或 update 对象（更新）。
 
 **示例**：
 ```json
@@ -229,6 +269,24 @@ __STATUS_REPORT_CONTENT__
 完整规划：
 __PLAN_CONTENT__
 
+## 已有信息（用于去重）
+
+### 已有的长期记忆（Layer 1）
+
+__EXISTING_LAYER1__
+
+### 已有的动态情报（Layer 2）
+
+__EXISTING_LAYER2__
+
+## 增量提取规则
+
+仅输出新增或更准确的信息；已存在的相同/相似信息不要重复输出。
+如需更新，用 update 格式：
+```json
+{"action": "update", "old": "旧内容关键词", "content": "更详细的新内容"}
+```
+
 ## 输出格式
 
 ```json
@@ -242,6 +300,8 @@ __PLAN_CONTENT__
   }
 }
 ```
+
+说明：extracted_info 的列表项可以是字符串（新增）或 update 对象（更新）。
 
 **示例**：
 ```json
@@ -348,6 +408,31 @@ __PLAN_CONTENT__
 
 ---
 
+## 已有信息（必须对比，避免重复）
+
+### 已有的长期记忆（Layer 1）
+
+__EXISTING_LAYER1__
+
+### 已有的动态情报（Layer 2）
+
+__EXISTING_LAYER2__
+
+## 增量提取规则（很重要）
+
+你必须先对比上面的已有信息，只输出增量：
+
+| 场景 | 处理方式 |
+|:----|:--------|
+| 新信息，已有记忆中没有 | 正常输出到对应列表 |
+| 已有记忆中有相同/相似信息 | 不输出（跳过） |
+| 新信息比已有更详细/准确 | 输出 update 格式 |
+
+update 格式（只用于 layer1_info 的列表项）：
+```json
+{"action": "update", "old": "旧内容关键词", "content": "更详细的新内容"}
+```
+
 ## 输入
 
 __CONVERSATION_TEXT__
@@ -374,6 +459,8 @@ __CONVERSATION_TEXT__
   ]
 }
 ```
+
+说明：layer1_info 的列表项可以是字符串（新增）或 update 对象（更新）。
 
 **示例**：
 ```json

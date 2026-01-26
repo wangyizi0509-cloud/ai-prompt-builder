@@ -36,7 +36,7 @@ async def update_guide_status(request: UpdateGuideStatusRequest):
         create_empty_layer2_memory,
         is_valid_action_guide_status_transition,
     )
-    from graph.archive_manager import archive_guide_on_completion
+    from graph.archive_manager import archive_guide_to_layer2
     
     from api.sdk_client import session_to_thread_id, get_thread_state, update_thread_state
     thread_id = session_to_thread_id(request.session_id)
@@ -100,7 +100,7 @@ async def update_guide_status(request: UpdateGuideStatusRequest):
 
     if request.new_status in ("completed", "cancelled", "expired"):
         try:
-            archive_updates = archive_guide_on_completion(updated_guide, state)
+            archive_updates = archive_guide_to_layer2(updated_guide, state)
             for k in ("history_archive", "user_context", "layer1_memory", "layer2_memory", "layer3_memory"):
                 if k in archive_updates:
                     state[k] = archive_updates[k]

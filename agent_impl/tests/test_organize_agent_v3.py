@@ -21,8 +21,15 @@ sys.path.insert(0, str(project_root / "agent_impl"))
 from graph.nodes.organize_agent import (
     organize_and_archive,
     archive_conversation_batch,
+    merge_extracted_info_to_context,
 )
-from graph.context_types import UserContext
+from graph.context_types import (
+    UserContext,
+    create_atomic_memory,
+    create_dynamic_intel_item,
+    create_empty_layer2_memory,
+)
+from graph.storage_strategy import StorageProcessor
 
 
 def create_empty_context() -> UserContext:
@@ -204,6 +211,67 @@ def test_source_classification():
     print("  （置信度区间仍需人工核对）")
 
 
+def test_incremental_dedup_unit():
+    """测试 4：增量去重（不依赖 LLM）"""
+    print("\n" + "=" * 60)
+    print("测试 4：增量去重（不依赖 LLM）")
+    print("=" * 60)
+
+    # 1) Layer 1 去重：已有信息 + 新提取信息
+    existing_context = create_empty_context()
+    existing_context["user_info"]["user_provide"].append(
+        create_atomic_memory("用户是学生，学习好", "conversation")
+    )
+
+    extracted_info = {
+        "user_info": {
+            "user_provide": ["用户是学生，学习好", "用户会画画"],
+            "fact": [],
+            "ai_provide": [],
+        },
+        "crush_info": {"user_provide": [], "fact": [], "ai_provide": []},
+        "both_info": {"user_provide": [], "fact": [], "ai_provide": []},
+    }
+
+    updated_context = merge_extracted_info_to_context(
+        existing_context,
+        extracted_info,
+        source_type="conversation",
+    )
+    user_contents = [
+        item.get("content", "")
+        for item in updated_context["user_info"]["user_provide"]
+        if isinstance(item, dict)
+    ]
+
+    print("\n✅ Layer 1 去重检查：")
+    print("  结果：", user_contents)
+    print("  期望：只保留 1 条 '用户是学生，学习好'，并新增 '用户会画画'")
+
+    # 2) Layer 2 去重：相似动态情报只保留一条
+    layer2_memory = create_empty_layer2_memory()
+    intel_a = create_dynamic_intel_item(
+        content="Crush这周要加班",
+        category="schedule",
+        subject="crush",
+        confidence_reason="测试",
+    )
+    intel_b = create_dynamic_intel_item(
+        content="Crush这周要加班。",
+        category="schedule",
+        subject="crush",
+        confidence_reason="测试更新",
+    )
+
+    layer2_memory = StorageProcessor.upsert_dynamic_intel(layer2_memory, intel_a)
+    layer2_memory = StorageProcessor.upsert_dynamic_intel(layer2_memory, intel_b)
+
+    print("\n✅ Layer 2 去重检查：")
+    print("  动态情报条数：", len(layer2_memory.get("dynamic_intels", [])))
+    print("  内容：", [i.get("content") for i in layer2_memory.get("dynamic_intels", [])])
+    print("  期望：条数=1，内容为最新版本")
+
+
 def main():
     """运行所有测试"""
     print("🚀 开始测试 Organize Agent v3 优化效果")
@@ -218,6 +286,7 @@ def main():
     test_waste_filter()
     test_layer_separation()
     test_source_classification()
+    test_incremental_dedup_unit()
 
     print("\n" + "=" * 60)
     print("✅ 测试完成！请检查上述输出是否符合预期。")

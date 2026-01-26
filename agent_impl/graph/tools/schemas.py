@@ -48,6 +48,63 @@ class ContextLoaderInput(BaseModel):
     expire_at: str = Field(default="", description="过期时间 ISO 格式（bind/refresh 时可选）")
 
 
+class SubmitStatusReportInput(BaseModel):
+    report_markdown: str = Field(description="现状分析报告 Markdown 内容")
+    stage: str = Field(default="", description="关系阶段（可选）")
+    stage_description: str = Field(default="", description="阶段描述（可选）")
+    acr_analysis: dict = Field(default_factory=dict, description="A/C/R 维度分析（可选）")
+    key_issues: list[str] = Field(default_factory=list, description="核心问题列表（可选）")
+    risk_points: list[str] = Field(default_factory=list, description="风险点列表（可选）")
+
+
+class SubmitActionPlanInput(BaseModel):
+    goal: str = Field(description="阶段性目标")
+    strategy: str = Field(description="核心策略方向")
+    phases: list[dict] = Field(default_factory=list, description="分阶段计划")
+    key_principles: list[str] = Field(default_factory=list, description="关键原则列表")
+    summary: str = Field(default="", description="规划总结（可选）")
+
+
+class SubmitActionGuideInput(BaseModel):
+    title: str = Field(description="指南标题")
+    one_liner: str = Field(description="一句话摘要")
+    guide_markdown: str = Field(description="完整行动指南 Markdown")
+    current_task: str = Field(default="", description="当前任务（可选）")
+    steps: list[str] = Field(default_factory=list, description="执行步骤（可选）")
+    talking_points: list[str] = Field(default_factory=list, description="话术要点（可选）")
+    dos: list[str] = Field(default_factory=list, description="该做的（可选）")
+    donts: list[str] = Field(default_factory=list, description="不该做的（可选）")
+    next_milestone: str = Field(default="", description="下一个里程碑（可选）")
+
+
+class UpdateGuideStatusInput(BaseModel):
+    guide_id: str = Field(description="指南唯一 ID（ActionGuideItem.id）")
+    new_status: Literal[
+        "pending",
+        "in_progress",
+        "completed",
+        "cancelled",
+        "paused",
+        "expired",
+    ] = Field(description="目标状态")
+    reason: str = Field(default="", description="更新原因（可选）")
+
+
+class UpdateGuideContentInput(BaseModel):
+    """更新行动指南内容（原地更新，保留编号）"""
+    guide_id: str = Field(description="指南唯一 ID（ActionGuideItem.id）")
+    title: str = Field(default="", description="新标题（可选，不填则保留原标题）")
+    one_liner: str = Field(default="", description="新一句话摘要（可选）")
+    guide_markdown: str = Field(description="更新后的完整行动指南 Markdown")
+    current_task: str = Field(default="", description="当前任务（可选）")
+    steps: list[str] = Field(default_factory=list, description="执行步骤（可选）")
+    talking_points: list[str] = Field(default_factory=list, description="话术要点（可选）")
+    dos: list[str] = Field(default_factory=list, description="该做的（可选）")
+    donts: list[str] = Field(default_factory=list, description="不该做的（可选）")
+    next_milestone: str = Field(default="", description="下一个里程碑（可选）")
+    update_reason: str = Field(default="", description="更新原因（用于历史追溯）")
+
+
 def tool_response(success: bool, message: str, data: Optional[Any] = None) -> str:
     payload = {"success": success, "message": message}
     if data is not None:

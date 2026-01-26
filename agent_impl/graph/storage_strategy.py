@@ -266,6 +266,32 @@ class StorageProcessor:
         def _key(item: DynamicIntelItem) -> str:
             return item.get("id") or f"{item.get('content','')}-{item.get('category','')}-{item.get('subject','')}"
 
+        def _is_semantically_duplicate(existing_content: str, new_content: str) -> bool:
+            existing = (existing_content or "").strip().lower()
+            new = (new_content or "").strip().lower()
+            if not existing or not new:
+                return False
+            if existing == new:
+                return True
+
+            def _normalize(text: str) -> str:
+                return (
+                    text.replace("'", "")
+                    .replace('"', "")
+                    .replace("：", ":")
+                    .replace("、", ",")
+                    .replace(" ", "")
+                )
+
+            if _normalize(existing) == _normalize(new):
+                return True
+
+            if len(existing) > 5 and len(new) > 5:
+                if existing in new or new in existing:
+                    return True
+
+            return False
+
         incoming_key = _key(intel)
         replaced = False
         for i, item in enumerate(intels):
@@ -273,6 +299,14 @@ class StorageProcessor:
                 intels[i] = intel
                 replaced = True
                 break
+        if not replaced:
+            incoming_content = str(intel.get("content") or "")
+            for i, item in enumerate(intels):
+                existing_content = str(item.get("content") or "")
+                if _is_semantically_duplicate(existing_content, incoming_content):
+                    intels[i] = intel
+                    replaced = True
+                    break
         if not replaced:
             intels.append(intel)
 

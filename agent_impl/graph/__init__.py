@@ -16,8 +16,6 @@ from .state import (
     migrate_to_layered_memory,
     get_active_action_guides,
     get_completed_action_guides,
-    sync_layer1_to_user_context,
-    sync_messages_to_layer3,
 )
 from .context_types import (
     # Layer 1 - 静态情报（原子记忆结构）
@@ -107,11 +105,6 @@ from .archive_manager import (
     compress_layer3,
     archive_guide_to_layer2,
     archive_status_to_layer2,
-    # 向后兼容
-    check_conversation_compression_needed,
-    compress_conversation,
-    archive_guide_on_completion,
-    archive_status_on_replacement,
     process_archiving_if_needed,
     get_archive_stats,
     get_full_history_content,
@@ -134,8 +127,6 @@ __all__ = [
     "migrate_to_layered_memory",
     "get_active_action_guides",
     "get_completed_action_guides",
-    "sync_layer1_to_user_context",
-    "sync_messages_to_layer3",
     # Context Types - Layer 1
     "AtomicMemory",
     "UserContext",
@@ -220,11 +211,6 @@ __all__ = [
     "compress_layer3",
     "archive_guide_to_layer2",
     "archive_status_to_layer2",
-    # Archive Manager - 向后兼容
-    "check_conversation_compression_needed",
-    "compress_conversation",
-    "archive_guide_on_completion",
-    "archive_status_on_replacement",
     "process_archiving_if_needed",
     "get_archive_stats",
     "get_full_history_content",

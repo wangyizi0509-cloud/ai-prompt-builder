@@ -147,6 +147,20 @@ class ActionGuideContent(TypedDict, total=False):
     guide_content: str          # Markdown 格式的完整指南
 
 
+class ActionGuideContentSnapshot(TypedDict, total=False):
+    """
+    行动指南内容历史快照
+    
+    用于存储指南内容更新前的版本，供 debug 使用。
+    """
+    version: int                         # 版本号
+    guide: ActionGuideContent            # 旧的指南内容
+    title: str                           # 旧的标题
+    one_liner: Optional[str]             # 旧的一句话摘要
+    updated_at: str                      # 更新时间 ISO 格式
+    update_reason: str                   # 更新原因
+
+
 class ActionGuideItem(TypedDict, total=False):
     """
     行动指南项
@@ -172,6 +186,10 @@ class ActionGuideItem(TypedDict, total=False):
     ]
     guide: ActionGuideContent            # 指南内容
     created_at: str                      # 创建时间 ISO 格式
+    
+    # 版本管理（内容更新追踪）
+    version: int                         # 版本号（每次内容更新+1，默认1）
+    content_history: list[ActionGuideContentSnapshot]  # 历史版本快照（仅存储，不对外暴露）
     
     # 时间管理
     expected_start_at: Optional[str]     # 预计开始时间（Agent 生成）
@@ -639,6 +657,8 @@ def create_action_guide_item(
         status=status,
         guide=guide,
         created_at=datetime.now().isoformat(),
+        version=1,                    # 初始版本号
+        content_history=[],           # 初始无历史
         expected_start_at=None,
         expire_at=None,
         completed_at=None,

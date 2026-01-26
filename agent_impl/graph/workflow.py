@@ -42,7 +42,6 @@ from graph.tools.delegate_tools import (
 )
 from graph.tools.ask_tool import (
     get_ask_tool,
-    ask_user,  # 向后兼容
     ASK_MODE_STRATEGY,
     ASK_MODE_SIMPLE,
 )
@@ -65,6 +64,15 @@ from graph.tools.context_loader import (
     create_context_loader,
     apply_context_loader_state_update,
     is_context_loader_tool,
+)
+from graph.tools.submit_tools import (
+    submit_status_report,
+    submit_action_plan,
+    submit_action_guide,
+    update_guide_status,
+    update_guide_content,
+    apply_submit_tool_state_update,
+    is_submit_tool,
 )
 
 MAX_NODE_STEPS_PER_TURN = 18  # 单次 /api/chat invoke 内允许的最大节点步数（防止死循环）
@@ -234,6 +242,16 @@ def route_after_skill_tools(state: AgentState) -> Literal["main_agent", "status_
     skill_tools 节点执行完成后的路由
     
     返回到调用工具的 Agent，让它继续处理
+    
+    [FIX] 2026-01-26: 添加 submit tool 完成检查
+    - 当子 Agent 调用 submit tool 完成任务后，应该路由回 main_agent
+    - 而不是继续路由回原来的子 Agent
+    
+    [FIX] 2026-01-26: 修复 ask 两阶段流程
+    - Phase 1: ask(action="enable") → 设置 ask_mode=True, _pending_action="ask"
+      此时应该返回调用者 Agent 继续执行 Phase 2
+    - Phase 2: ask(questions=[...]) → 生成 inquiry_card
+      此时应该返回 "end" 等待用户输入
     """
     iteration = int(state.get("_iteration_count", 0) or 0)
     if iteration >= MAX_NODE_STEPS_PER_TURN:
@@ -241,11 +259,49 @@ def route_after_skill_tools(state: AgentState) -> Literal["main_agent", "status_
         print("[WARN] Max node steps reached after skill_tools, returning to main_agent")
         return "main_agent"
 
+    # [FIX] Phase 1 完成后：_pending_action="ask" 表示需要继续执行 Phase 2
+    # 此时不应该结束，而应该返回调用者 Agent
+    pending_action = state.get("_pending_action")
+    if pending_action == "ask":
+        # Phase 1 刚完成，需要返回调用者 Agent 执行 Phase 2
+        current_agent = state.get("current_agent", "main_agent")
+        print(f"[DEBUG] route_after_skill_tools: Phase 1 completed, returning to {current_agent} for Phase 2")
+        if current_agent == "status_agent":
+            return "status_agent"
+        elif current_agent == "plan_agent":
+            return "plan_agent"
+        elif current_agent == "guide_agent":
+            return "guide_agent"
+        else:
+            return "main_agent"
+
+    # Phase 2 完成后：已生成 inquiry_card 或 pending_questions，等待用户输入
+    if state.get("inquiry_card") or state.get("pending_questions"):
+        return "end"
+    
+    # 如果有 current_agent 和 agent_resume_point，且没有 pending_action
+    # 说明是需要等待用户输入的状态（但不是 ask Phase 1）
+    if state.get("current_agent") and state.get("agent_resume_point"):
+        return "end"
+    
+    # [FIX] consult_answer/emotion_support complete 后，本轮直接结束，不再回到 main_agent
+    if state.get("_reply_skill_complete"):
+        print("[DEBUG] route_after_skill_tools: Reply skill completed (consult/emotion), ending turn")
+        return "end"
+
+    # [FIX] submit tool 完成后，子 Agent 任务结束，回到 main_agent 再决策
+    submit_result = state.get("_submit_result")
+    if isinstance(submit_result, dict):
+        submit_type = submit_result.get("type", "")
+        if submit_type in ("status_report", "action_plan", "action_guide", "guide_status_update", "guide_content_update"):
+            print(f"[DEBUG] route_after_skill_tools: Submit tool completed ({submit_type}), routing to main_agent")
+            return "main_agent"
+
     handoff_target = state.get("_handoff_target") or ""
     if handoff_target in ("status_agent", "plan_agent", "guide_agent"):
         return handoff_target
 
-    # ask_user 工具触发后，本轮结束等待用户输入
+    # 兜底：检查工具输出 action
     last_tool_content = state.get("_last_tool_content") or ""
     if last_tool_content:
         try:
@@ -305,8 +361,6 @@ def skill_tools_node(state: AgentState) -> dict:
         delegate_to_guide,
         # 提问工具（状态驱动，根据 ask_mode 返回不同版本）
         ask_tool,
-        # 向后兼容：保留 ask_user（实际上是 ask_questions 的别名）
-        ask_user,
         # 解答工具（状态驱动，根据 consult_mode 返回不同版本）
         consult_tool,
         # 陪伴工具（状态驱动，根据 emotion_mode 返回不同版本）
@@ -315,6 +369,12 @@ def skill_tools_node(state: AgentState) -> dict:
         create_context_loader(lambda: state, current_agent),
         # 任务管理工具
         *task_tools,
+        # 提交类工具（子 Agent 产出）
+        submit_status_report,
+        submit_action_plan,
+        submit_action_guide,
+        update_guide_status,
+        update_guide_content,
     ])
     out = tool_node.invoke(state)
     
@@ -342,10 +402,22 @@ def skill_tools_node(state: AgentState) -> dict:
                     }.get(tool_name, "")
                     out["_handoff_instruction"] = tool_args.get("instruction", "")
                     out["instruction"] = tool_args.get("instruction", "")
-                elif tool_name == "load_skill":
-                    if tool_args.get("skill_id") == "inquiry":
-                        out["_pending_action"] = "inquiry"
-                
+                    # [FIX] 2026-01-26: 清除所有可能干扰 route_after_skill_tools 路由判断的状态
+                    # 这些状态在 route_after_skill_tools 中的检查顺序在 _handoff_target 之前
+                    # 如果不清除，会导致路由函数提前返回错误的目标
+                    # 
+                    # 污染场景示例：
+                    # 1. status_agent 完成 -> _submit_result 残留 -> main_agent 调用 delegate_to_plan -> 错误路由到 main_agent
+                    # 2. Agent A 进入 ask Phase 1 -> _pending_action="ask" 残留 -> handoff 到 B -> 错误路由回 A
+                    # 3. Agent A 生成 inquiry_card -> 残留 -> handoff 到 B -> 错误 return "end"
+                    # 4. main_agent 用 consult 回复 -> _reply_skill_complete 残留 -> handoff 到 B -> 错误 return "end"
+                    out["_submit_result"] = None
+                    out["_pending_action"] = None
+                    out["_reply_skill_complete"] = None
+                    out["inquiry_card"] = None
+                    out["pending_questions"] = []
+                    out["agent_resume_point"] = None
+                    # 注意：current_agent 在 handoff 后会被目标 Agent 节点重新设置，这里不清除
                 # === Ask 工具两阶段处理 ===
                 elif tool_name == "ask":
                     if tool_args.get("action") == "enable":
@@ -363,16 +435,6 @@ def skill_tools_node(state: AgentState) -> dict:
                             "agent": current_agent,
                         }
                         out["_pending_action"] = None
-                
-                # 向后兼容：原 ask_user 工具
-                elif tool_name == "ask_user":
-                    ask_user_payload = {
-                        "questions": tool_args.get("questions") or [],
-                        "intro": tool_args.get("intro") or "",
-                        "reasoning": tool_args.get("reasoning") or "",
-                        "agent": current_agent,
-                    }
-                    out["_pending_action"] = None
                 
                 # === consult_answer 工具两阶段处理 ===
                 elif tool_name == "consult_answer":
@@ -419,6 +481,46 @@ def skill_tools_node(state: AgentState) -> dict:
                         for key, value in context_state_update.items():
                             out[key] = value
                         print(f"[DEBUG] skill_tools_node: Applied context loader state update for {tool_name}")
+                elif is_submit_tool(tool_name):
+                    submit_state_update = apply_submit_tool_state_update(state, tool_name, tool_args)
+                    if submit_state_update:
+                        for key, value in submit_state_update.items():
+                            out[key] = value
+                        print(f"[DEBUG] skill_tools_node: Applied submit tool state update for {tool_name}")
+                        
+                        # [FIX] 2026-01-26: 设置完成信号，让 main_agent 知道子 agent 任务完成
+                        submit_result = submit_state_update.get("_submit_result", {})
+                        submit_type = submit_result.get("type", "")
+                        if submit_type == "status_report":
+                            out["completion_status"] = "COMPLETED"
+                            out["result_summary"] = f"现状分析完成：报告{submit_result.get('report_id', '')}"
+                            out["current_agent"] = None  # 清除，表示任务完成
+                            out["agent_resume_point"] = None
+                            out["_handoff_target"] = None  # 清除 handoff，避免路由误判
+                        elif submit_type == "action_plan":
+                            out["completion_status"] = "COMPLETED"
+                            out["result_summary"] = f"行动规划完成：计划{submit_result.get('plan_id', '')}"
+                            out["current_agent"] = None
+                            out["agent_resume_point"] = None
+                            out["_handoff_target"] = None
+                        elif submit_type == "action_guide":
+                            out["completion_status"] = "COMPLETED"
+                            out["result_summary"] = f"行动指南完成：指南{submit_result.get('guide_id', '')}"
+                            out["current_agent"] = None
+                            out["agent_resume_point"] = None
+                            out["_handoff_target"] = None
+                        elif submit_type == "guide_status_update":
+                            out["completion_status"] = "COMPLETED"
+                            out["result_summary"] = f"行动指南状态更新：{submit_result.get('new_status', '')}"
+                            out["current_agent"] = None
+                            out["agent_resume_point"] = None
+                            out["_handoff_target"] = None
+                        elif submit_type == "guide_content_update":
+                            out["completion_status"] = "COMPLETED"
+                            out["result_summary"] = f"行动指南内容更新：指南{submit_result.get('guide_id', '')}"
+                            out["current_agent"] = None
+                            out["agent_resume_point"] = None
+                            out["_handoff_target"] = None
             break
     
     # === Phase 1 处理：进入提问模式 ===
@@ -427,6 +529,10 @@ def skill_tools_node(state: AgentState) -> dict:
         out["ask_mode"] = True
         out["ask_mode_tool_message_id"] = tool_message_id
         out["_pending_action"] = "ask"  # 强制下一步调用 ask
+        
+        # [FIX] 2026-01-26: 清理旧的 agent_resume_point，避免影响路由判断
+        # Phase 1 时不应该有 resume_point，它只在 Phase 2 完成后才设置
+        out["agent_resume_point"] = None
         
         # 生成带策略的 ToolMessage（替换 ToolNode 返回的简单消息）
         strategy_content = f"已进入提问模式，请使用 ask 工具向用户提问。\n\n{ASK_MODE_STRATEGY}"
@@ -454,6 +560,9 @@ def skill_tools_node(state: AgentState) -> dict:
         out["consult_mode_tool_message_id"] = tool_message_id
         # 注意：不设置 _pending_action，模型自由输出 content + tool_call(complete)
         
+        # [FIX] 2026-01-26: 清理旧的 agent_resume_point，避免影响路由判断
+        out["agent_resume_point"] = None
+        
         # 生成带策略的 ToolMessage
         strategy_content = f"已进入解答模式，请根据以下策略回复用户。回复完成后，调用 consult_answer(action=\"complete\") 关闭解答模式。\n\n{CONSULT_MODE_STRATEGY}"
         
@@ -475,6 +584,7 @@ def skill_tools_node(state: AgentState) -> dict:
     # === Phase 2 处理：完成解答 ===
     if consult_complete_payload:
         out["consult_mode"] = False
+        out["_reply_skill_complete"] = True  # 标记回复技能已完成，用于路由直接结束
         # 生成关闭确认的 ToolMessage
         msgs = out.get("messages", [])
         for i, m in enumerate(msgs):
@@ -489,7 +599,7 @@ def skill_tools_node(state: AgentState) -> dict:
                 }
                 break
         out["messages"] = msgs
-        print(f"[DEBUG] skill_tools_node: Phase 2 - consult_mode closed")
+        print(f"[DEBUG] skill_tools_node: Phase 2 - consult_mode closed, marking _reply_skill_complete")
 
     # === Phase 1 处理：进入陪伴模式 ===
     if emotion_enable_payload:
@@ -497,6 +607,9 @@ def skill_tools_node(state: AgentState) -> dict:
         out["emotion_mode"] = True
         out["emotion_mode_tool_message_id"] = tool_message_id
         # 注意：不设置 _pending_action，模型自由输出 content + tool_call(complete)
+        
+        # [FIX] 2026-01-26: 清理旧的 agent_resume_point，避免影响路由判断
+        out["agent_resume_point"] = None
         
         # 生成带策略的 ToolMessage
         strategy_content = f"已进入陪伴模式，请根据以下策略回复用户。回复完成后，调用 emotion_support(action=\"complete\") 关闭陪伴模式。\n\n{EMOTION_MODE_STRATEGY}"
@@ -519,6 +632,7 @@ def skill_tools_node(state: AgentState) -> dict:
     # === Phase 2 处理：完成陪伴 ===
     if emotion_complete_payload:
         out["emotion_mode"] = False
+        out["_reply_skill_complete"] = True  # 标记回复技能已完成，用于路由直接结束
         # 生成关闭确认的 ToolMessage
         msgs = out.get("messages", [])
         for i, m in enumerate(msgs):
@@ -533,7 +647,7 @@ def skill_tools_node(state: AgentState) -> dict:
                 }
                 break
         out["messages"] = msgs
-        print(f"[DEBUG] skill_tools_node: Phase 2 - emotion_mode closed")
+        print(f"[DEBUG] skill_tools_node: Phase 2 - emotion_mode closed, marking _reply_skill_complete")
 
     # 兜底：确保任务/上下文相关的状态更新从 tool 执行结果写回
     if "layer3_memory" in state and "layer3_memory" not in out:
@@ -670,7 +784,7 @@ def skill_tools_node(state: AgentState) -> dict:
         
         # 更新 normalized 中的 ask tool message 内容
         for i, md in enumerate(normalized):
-            if md.get("role") == "tool" and md.get("name") in ("ask", "ask_user"):
+            if md.get("role") == "tool" and md.get("name") == "ask":
                 normalized[i] = dict(md)
                 normalized[i]["content"] = ask_end_content
                 break

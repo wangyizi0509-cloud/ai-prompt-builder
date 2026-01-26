@@ -28,6 +28,7 @@ from graph.context_types import (
     ConversationArchive,
     ActionGuideItem,
     ActionPlanItem,
+    Layer2Memory,
     DynamicIntelItem,
     create_dynamic_intel_item,
 )
@@ -86,6 +87,23 @@ def _render_prompt(template: str, mapping: dict[str, str]) -> str:
     return out.strip()
 
 
+def _build_existing_context_blocks(
+    existing_context: Optional[UserContext],
+    existing_layer2_memory: Optional[Layer2Memory],
+) -> tuple[str, str]:
+    from graph.context_builder import _build_layer1_static_intel, _build_dynamic_intel_board
+
+    layer1_text = _build_layer1_static_intel(existing_context) if existing_context else ""
+    if not layer1_text:
+        layer1_text = "暂无"
+
+    layer2_text = _build_dynamic_intel_board(existing_layer2_memory) if existing_layer2_memory else ""
+    if not layer2_text:
+        layer2_text = "暂无"
+
+    return layer1_text, layer2_text
+
+
 # ============================================================
 # 输入类型定义
 # ============================================================
@@ -118,6 +136,7 @@ def organize_and_archive(
     content: Any,
     content_type: ArchiveType,
     existing_user_context: Optional[UserContext] = None,
+    existing_layer2_memory: Optional[Layer2Memory] = None,
 ) -> dict:
     """
     整理并归档信息
@@ -142,13 +161,13 @@ def organize_and_archive(
     
     # 根据类型选择不同的处理策略
     if content_type == "action_guide":
-        return _process_action_guide(content, llm, existing_user_context)
+        return _process_action_guide(content, llm, existing_user_context, existing_layer2_memory)
     elif content_type == "status_report":
-        return _process_status_report(content, llm, existing_user_context)
+        return _process_status_report(content, llm, existing_user_context, existing_layer2_memory)
     elif content_type == "action_plan":
-        return _process_action_plan(content, llm, existing_user_context)
+        return _process_action_plan(content, llm, existing_user_context, existing_layer2_memory)
     elif content_type == "conversation":
-        return _process_conversation(content, llm, existing_user_context)
+        return _process_conversation(content, llm, existing_user_context, existing_layer2_memory)
     else:
         raise ValueError(f"Unknown content_type: {content_type}")
 
@@ -161,6 +180,7 @@ def _process_action_guide(
     guide: ActionGuideItem,
     llm,
     existing_context: Optional[UserContext],
+    existing_layer2_memory: Optional[Layer2Memory],
 ) -> dict:
     """
     处理行动指南归档
@@ -175,11 +195,14 @@ def _process_action_guide(
     current_task = guide_content.get("current_task", "未命名任务")
 
     tpl = _load_prompt_template("action_guide")
+    layer1_text, layer2_text = _build_existing_context_blocks(existing_context, existing_layer2_memory)
     prompt = _render_prompt(
         tpl,
         {
             "__GUIDE_CURRENT_TASK__": str(current_task or ""),
             "__GUIDE_FULL_CONTENT__": str(full_content or ""),
+            "__EXISTING_LAYER1__": layer1_text,
+            "__EXISTING_LAYER2__": layer2_text,
         },
     )
     
@@ -206,6 +229,7 @@ def _process_status_report(
     report: dict,
     llm,
     existing_context: Optional[UserContext],
+    existing_layer2_memory: Optional[Layer2Memory],
 ) -> dict:
     """
     处理现状分析归档
@@ -220,12 +244,15 @@ def _process_status_report(
     summary_text = report.get("summary", "")
 
     tpl = _load_prompt_template("status_report")
+    layer1_text, layer2_text = _build_existing_context_blocks(existing_context, existing_layer2_memory)
     prompt = _render_prompt(
         tpl,
         {
             "__STATUS_STAGE__": str(stage or ""),
             "__STATUS_SUMMARY_TEXT__": str(summary_text or ""),
             "__STATUS_REPORT_CONTENT__": str(report_content or ""),
+            "__EXISTING_LAYER1__": layer1_text,
+            "__EXISTING_LAYER2__": layer2_text,
         },
     )
     
@@ -252,6 +279,7 @@ def _process_action_plan(
     plan: ActionPlanItem,
     llm,
     existing_context: Optional[UserContext],
+    existing_layer2_memory: Optional[Layer2Memory],
 ) -> dict:
     """
     处理行动规划归档
@@ -266,12 +294,15 @@ def _process_action_plan(
     strategy = plan.get("strategy", "")
 
     tpl = _load_prompt_template("action_plan")
+    layer1_text, layer2_text = _build_existing_context_blocks(existing_context, existing_layer2_memory)
     prompt = _render_prompt(
         tpl,
         {
             "__PLAN_GOAL__": str(goal or ""),
             "__PLAN_STRATEGY__": str(strategy or ""),
             "__PLAN_CONTENT__": str(plan_content or ""),
+            "__EXISTING_LAYER1__": layer1_text,
+            "__EXISTING_LAYER2__": layer2_text,
         },
     )
 
@@ -297,6 +328,7 @@ def _process_conversation(
     messages: list[dict],
     llm,
     existing_context: Optional[UserContext],
+    existing_layer2_memory: Optional[Layer2Memory],
 ) -> dict:
     """
     处理对话压缩归档
@@ -306,6 +338,11 @@ def _process_conversation(
     2. layer1_info（Layer 1 长期信息，3×3 矩阵）
     3. dynamic_intel（Layer 2 动态情报）
     """
+    existing_layer1_text, existing_layer2_text = _build_existing_context_blocks(
+        existing_context,
+        existing_layer2_memory,
+    )
+
     # 格式化对话
     formatted_messages = []
     for msg in messages:
@@ -319,6 +356,8 @@ def _process_conversation(
         tpl,
         {
             "__CONVERSATION_TEXT__": str(conversation_text or ""),
+            "__EXISTING_LAYER1__": str(existing_layer1_text or ""),
+            "__EXISTING_LAYER2__": str(existing_layer2_text or ""),
         },
     )
 
@@ -609,6 +648,36 @@ def merge_extracted_info_to_context(
     return UserContext(**updated)
 
 
+def _is_semantically_duplicate(existing_content: str, new_content: str) -> bool:
+    """
+    判断两条信息是否语义重复（轻量级，避免额外 LLM 调用）
+    """
+    existing = (existing_content or "").strip().lower()
+    new = (new_content or "").strip().lower()
+    if not existing or not new:
+        return False
+    if existing == new:
+        return True
+
+    def _normalize(text: str) -> str:
+        return (
+            text.replace("'", "")
+            .replace('"', "")
+            .replace("：", ":")
+            .replace("、", ",")
+            .replace(" ", "")
+        )
+
+    if _normalize(existing) == _normalize(new):
+        return True
+
+    if len(existing) > 5 and len(new) > 5:
+        if existing in new or new in existing:
+            return True
+
+    return False
+
+
 def _merge_dimension_v2(
     target: dict,
     source_info: dict,
@@ -636,26 +705,91 @@ def _merge_dimension_v2(
             items = [items] if items.strip() else []
         elif not isinstance(items, list):
             continue
-        
-        # 遍历每条信息，创建 AtomicMemory 并追加
+
+        # 遍历每条信息，创建 AtomicMemory 并追加（带去重与更新）
         for item in items:
-            if not item or not isinstance(item, str):
+            if not item:
                 continue
-            content = item.strip()
+
+            action = ""
+            old_keyword = ""
+            content = ""
+            if isinstance(item, dict):
+                action = str(item.get("action") or "").strip().lower()
+                old_keyword = str(item.get("old") or "").strip()
+                content = str(item.get("content") or "").strip()
+            elif isinstance(item, str):
+                content = item.strip()
+            else:
+                continue
+
             if not content:
                 continue
-            
-            # 为 ai_provide 添加置信度
+
+            if action == "update":
+                replaced = False
+                if old_keyword:
+                    for i, existing in enumerate(target[field]):
+                        existing_content = (
+                            str(existing.get("content") or "") if isinstance(existing, dict) else str(existing)
+                        )
+                        if old_keyword in existing_content:
+                            target[field][i] = create_atomic_memory(
+                                content,
+                                source_type,
+                                confidence=0.8 if field == "ai_provide" else None,
+                                confidence_reason="整理Agent从内容中提取" if field == "ai_provide" else None,
+                            )
+                            replaced = True
+                            break
+                if not replaced:
+                    for i, existing in enumerate(target[field]):
+                        existing_content = (
+                            str(existing.get("content") or "") if isinstance(existing, dict) else str(existing)
+                        )
+                        if _is_semantically_duplicate(existing_content, content):
+                            target[field][i] = create_atomic_memory(
+                                content,
+                                source_type,
+                                confidence=0.8 if field == "ai_provide" else None,
+                                confidence_reason="整理Agent从内容中提取" if field == "ai_provide" else None,
+                            )
+                            replaced = True
+                            break
+                if not replaced:
+                    if field == "ai_provide":
+                        atomic = create_atomic_memory(
+                            content,
+                            source_type,
+                            confidence=0.8,
+                            confidence_reason="整理Agent从内容中提取",
+                        )
+                    else:
+                        atomic = create_atomic_memory(content, source_type)
+                    target[field].append(atomic)
+                continue
+
+            is_duplicate = False
+            for existing in target[field]:
+                existing_content = (
+                    str(existing.get("content") or "") if isinstance(existing, dict) else str(existing)
+                )
+                if _is_semantically_duplicate(existing_content, content):
+                    is_duplicate = True
+                    break
+            if is_duplicate:
+                continue
+
             if field == "ai_provide":
                 atomic = create_atomic_memory(
-                    content, 
+                    content,
                     source_type,
                     confidence=0.8,
-                    confidence_reason="整理Agent从内容中提取"
+                    confidence_reason="整理Agent从内容中提取",
                 )
             else:
                 atomic = create_atomic_memory(content, source_type)
-            
+
             target[field].append(atomic)
 
 
@@ -726,6 +860,7 @@ def summarize_task_reasoning(
 def archive_completed_guide(
     guide: ActionGuideItem,
     existing_context: UserContext,
+    existing_layer2_memory: Optional[Layer2Memory] = None,
 ) -> dict:
     """
     归档已完成的行动指南
@@ -740,7 +875,7 @@ def archive_completed_guide(
             "updated_context": UserContext,
         }
     """
-    result = organize_and_archive(guide, "action_guide", existing_context)
+    result = organize_and_archive(guide, "action_guide", existing_context, existing_layer2_memory)
     updated_context = merge_extracted_info_to_context(
         existing_context, 
         result.get("extracted_info", {}),
@@ -756,6 +891,7 @@ def archive_completed_guide(
 def archive_replaced_status_report(
     old_report: dict,
     existing_context: UserContext,
+    existing_layer2_memory: Optional[Layer2Memory] = None,
 ) -> dict:
     """
     归档被替换的现状分析报告
@@ -770,7 +906,7 @@ def archive_replaced_status_report(
             "updated_context": UserContext,
         }
     """
-    result = organize_and_archive(old_report, "status_report", existing_context)
+    result = organize_and_archive(old_report, "status_report", existing_context, existing_layer2_memory)
     updated_context = merge_extracted_info_to_context(
         existing_context,
         result.get("extracted_info", {}),
@@ -791,6 +927,7 @@ def archive_replaced_status_report(
 def archive_replaced_action_plan(
     old_plan: ActionPlanItem,
     existing_context: UserContext,
+    existing_layer2_memory: Optional[Layer2Memory] = None,
 ) -> dict:
     """
     归档被替换的行动规划
@@ -801,7 +938,7 @@ def archive_replaced_action_plan(
             "updated_context": UserContext,
         }
     """
-    result = organize_and_archive(old_plan, "action_plan", existing_context)
+    result = organize_and_archive(old_plan, "action_plan", existing_context, existing_layer2_memory)
     updated_context = merge_extracted_info_to_context(
         existing_context,
         result.get("extracted_info", {}),
@@ -817,6 +954,7 @@ def archive_replaced_action_plan(
 def archive_conversation_batch(
     messages_to_archive: list[dict],
     existing_context: UserContext,
+    existing_layer2_memory: Optional[Layer2Memory] = None,
 ) -> dict:
     """
     批量归档对话
@@ -835,7 +973,12 @@ def archive_conversation_batch(
         }
     """
     print(f"[OrganizeAgent] archive_conversation_batch called with {len(messages_to_archive)} messages")
-    result = organize_and_archive(messages_to_archive, "conversation", existing_context)
+    result = organize_and_archive(
+        messages_to_archive,
+        "conversation",
+        existing_context,
+        existing_layer2_memory,
+    )
     print(f"[OrganizeAgent] organize_and_archive returned: {list(result.keys()) if isinstance(result, dict) else type(result)}")
     
     extracted_info = result.get("extracted_info", {})

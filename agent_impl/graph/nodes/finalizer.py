@@ -116,9 +116,8 @@ def _consume_maintenance_queue_inline(state: dict, queue: list[dict]) -> dict:
 
             elif task_type == "layer3_compress":
                 # [DEBUG] 检查压缩输入状态
-                l3_mem = working_state.get("layer3_memory") or {}
-                all_msgs = l3_mem.get("all_messages", [])
-                print(f"[Finalizer] layer3_compress: working_state has layer3_memory={bool(l3_mem)}, all_messages={len(all_msgs)}")
+                workspace_msgs = working_state.get("messages", []) or []
+                print(f"[Finalizer] layer3_compress: workspace_messages={len(workspace_msgs)}")
                 task_updates = compress_layer3(working_state)
                 print(f"[Finalizer] layer3_compress returned: {list(task_updates.keys()) if task_updates else 'empty'}")
 
@@ -262,16 +261,15 @@ def post_turn_finalize_node(state: dict) -> dict:
             _enqueue(queue, task_type="onboarding_refine", task_key="onboarding_refine")
             _set_flag(updates, working_state, "onboarding_refine_queued", True)
 
-    # 2.2 对话压缩（Layer3）—— 使用 working_state 进行检查
+    # 2.2 对话压缩（Layer3）—— 基于工作区消息 (messages) 判断，而非全量存储
     # [DEBUG] 输出压缩检查的详细信息
-    layer3_mem = working_state.get("layer3_memory") or {}
-    all_msgs = layer3_mem.get("all_messages", []) if isinstance(layer3_mem, dict) else []
-    user_turns = count_user_turns(all_msgs)
-    threshold = LAYER3_ARCHIVE_CONFIG.get("compression_threshold", 4)
+    workspace_msgs = working_state.get("messages", []) or []
+    user_turns = count_user_turns(workspace_msgs)
+    threshold = LAYER3_ARCHIVE_CONFIG.get("compression_threshold", 25)
     batch_size = LAYER3_ARCHIVE_CONFIG.get("compression_batch_size", 1)
     excess = user_turns - threshold if user_turns > threshold else 0
     should_compress = excess > 0 and excess % batch_size == 0
-    print(f"[Finalizer] Compression check: all_messages={len(all_msgs)}, user_turns={user_turns}, threshold={threshold}, batch_size={batch_size}, excess={excess}, should_compress={should_compress}")
+    print(f"[Finalizer] Compression check: workspace_messages={len(workspace_msgs)}, user_turns={user_turns}, threshold={threshold}, batch_size={batch_size}, excess={excess}, should_compress={should_compress}")
     
     if check_layer3_compression_needed(working_state):
         if not _queue_has(queue, "layer3_compress", "layer3_compress"):

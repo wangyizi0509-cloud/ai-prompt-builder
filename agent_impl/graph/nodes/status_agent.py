@@ -2,10 +2,6 @@
 现状分析 Agent 节点 (Status Analysis Agent)
 负责诊断用户问题、判断 ACR 阶段、定位 L/T 线
 
-采用 Tool-based 渐进式加载模式：
-- 系统提示只包含 Skills 的元数据
-- 模型通过 load_skill 工具按需加载完整指令
-
 上下文架构更新 (v2.0)：
 - 使用分层上下文架构（Layer 0-4）
 - 通过 context_builder 统一组装上下文
@@ -22,15 +18,10 @@ from datetime import datetime
 
 from graph.state import AgentState, StatusReport
 from graph.message_builder import build_messages_for_model
-from graph.context_types import (
-    create_new_task,
-    get_active_task,
-    create_empty_layer2_memory,
-    create_status_report_item,
-)
+from graph.context_types import create_new_task
 from utils.message_utils import get_msg_role_and_content
-from skills import create_inquiry_only_loader
-from graph.tools.ask_tool import get_ask_tool, ask_user
+from graph.tools.ask_tool import get_ask_tool
+from graph.tools.submit_tools import submit_status_report
 from config import get_llm
 
 
@@ -192,6 +183,40 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
     if from_tool_call:
         print(f"[DEBUG] StatusAgent: Continuing after tool call (last_role={last_msg_role})")
     
+    submit_result = state.get("_submit_result")
+    if from_tool_call and isinstance(submit_result, dict) and submit_result.get("type") == "status_report":
+        report_id = submit_result.get("report_id", "")
+        # === 设置完成信号 ===
+        result = {
+            "completion_status": "COMPLETED",
+            "result_summary": f"现状分析完成：报告{report_id}",
+            "current_agent": None,
+            "agent_resume_point": None,
+            "question_count": 0,
+            "collected_info": {},
+            "inquiry_card": None,
+            "pending_questions": [],
+            "messages": [{
+                "role": "assistant",
+                "name": "status_agent",
+                "content": f"（现状分析报告{report_id}已生成）",
+            }],
+            "pending_responses": state.get("pending_responses", []),
+            "_tool_caller": None,
+            "_submit_result": None,
+            "_last_tool_outputs": None,
+            "_last_tool_content": None,
+            "_handoff_target": None,
+            "_handoff_instruction": None,
+            "instruction": None,
+        }
+        task_complete_updates = _complete_current_task(state)
+        if "task_registry" in task_complete_updates:
+            result["task_registry"] = task_complete_updates.get("task_registry", {})
+        if task_updates and "task_registry" not in result:
+            result["task_registry"] = task_updates.get("task_registry", state.get("task_registry", {}))
+        return result
+
     # 准备 LLM（工具绑定在决策后进行）
     base_llm = get_llm(temperature=0.5)
     if from_tool_call:
@@ -240,7 +265,6 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
     ask_mode = state.get("ask_mode", False)
     print(f"[DEBUG] StatusAgent: Invoking LLM (from_tool_call={from_tool_call}, ask_mode={ask_mode})")
     response = None
-    parsed = None
     pending_action = state.get("_pending_action") or ""
     
     # Phase 2: ask_mode=True 后强制调用 ask 工具生成 inquiry_card
@@ -266,15 +290,13 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
                 }],
             }
     
-    # 向后兼容：原 inquiry skill 的两阶段处理
-    elif from_tool_call and pending_action == "inquiry":
-        llm_with_tools = base_llm.bind_tools(
-            [ask_user],
-            tool_choice={"type": "function", "function": {"name": "ask_user"}},
-        )
+    elif from_tool_call:
+        # 允许在委派后继续发起 ask/submit 工具调用
+        ask_tool = get_ask_tool(False)
+        llm_with_tools = base_llm.bind_tools([ask_tool, submit_status_report])
         response = llm_with_tools.invoke(model_messages)
         if hasattr(response, "tool_calls") and response.tool_calls:
-            print("[DEBUG] StatusAgent: Forced ask_user tool call after inquiry skill")
+            print(f"[DEBUG] StatusAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
             if hasattr(response, "name"):
                 response.name = "status_agent"
             return {
@@ -283,18 +305,15 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
                 "_tool_caller": "status_agent",
                 "debug_log": [{
                     "node": "status_agent",
-                    "step": "Tool Call Requested (ask_user forced)",
+                    "step": "Tool Call Requested",
                     "tool_calls": [tc["name"] for tc in response.tool_calls],
                 }],
             }
-    elif from_tool_call:
-        response = base_llm.invoke(model_messages)
     else:
         # 使用定制工具：status_agent 只允许使用 inquiry skill
-        inquiry_tool = create_inquiry_only_loader()
         # 允许子 Agent 直接进入 ask 两阶段提问（Phase 1: ask(action="enable")）
         ask_tool = get_ask_tool(False)
-        llm_with_tools = base_llm.bind_tools([ask_tool, inquiry_tool])
+        llm_with_tools = base_llm.bind_tools([ask_tool, submit_status_report])
         response = llm_with_tools.invoke(model_messages)
         if hasattr(response, "tool_calls") and response.tool_calls:
             print(f"[DEBUG] StatusAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
@@ -311,193 +330,44 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
                 }],
             }
     
-    # 解析响应（若决策已解析则复用）
-    if parsed is None:
-        parsed = _parse_response(response.content)
-    
-    result = {
-        "next_action": "end_turn",
-        "debug_log": [{
-            "node": "status_agent",
-            "step": "Response Generated",
-            "prompt_source": prompt_source,
-            "prompt_fallback": prompt_fallback,
-            # "prompt": prompt,  # [FIX] 移除完整 prompt 存储，防止 state 爆炸
-            "response": response.content[:500] + "..." if len(response.content) > 500 else response.content,
-            "parsed_result": parsed,
-            "question_count": question_count,
-        }],
-    }
-    
-    # 检查是否需要提问
-    inquiry_card = parsed.get("inquiry_card")
-    questions_list = inquiry_card.get("questions", []) if isinstance(inquiry_card, dict) else []
-    if from_tool_call and last_tool_content and not questions_list:
-        err_msg = "系统异常：已加载提问指令但未生成问题列表（inquiry_card.questions 为空）。请重试。"
-        result["status_report"] = None
-        result["inquiry_card"] = None
-        result["pending_questions"] = []
-        existing_responses = state.get("pending_responses", [])
-        result["pending_responses"] = existing_responses + [{"from": "status_agent", "content": err_msg, "phase": "after_status"}]
-        result["messages"] = [{"role": "assistant", "name": "status_agent", "content": err_msg}]
-        result["current_agent"] = "status_agent"
-        result["agent_resume_point"] = "continue_analysis"
-        result["completion_status"] = None
-        result["result_summary"] = None
-        return result
-
-    if questions_list and question_count < max_questions:
-        # ⚠️ 严格模式（按你的要求）：不做任何“纠错二次调用”、不做任何“工程兜底造 inquiry_card”
-        # - Phase 1：应由模型触发 tool_calls（上面已处理 tool_calls 分支）
-        # - Phase 2：必须输出 inquiry_card.questions，否则直接报错并结束本轮（暴露问题，便于排查）
-
-        # 至此：必须有 inquiry_card.questions，才能真正发起提问
-        print(f"[DEBUG] StatusAgent: Asking questions (count={len(questions_list)})")
-
-        result["inquiry_card"] = inquiry_card
-        result["pending_questions"] = [
-            q.get("question", "") if isinstance(q, dict) else str(q)
-            for q in questions_list
-        ]
-
-        # === 设置恢复状态 ===
-        result["current_agent"] = "status_agent"
-        result["agent_resume_point"] = "continue_analysis"
-        result["question_count"] = question_count + 1
-
-        # 信息不足时，不生成报告，等待用户回答
-        result["status_report"] = None
-        response_content = (parsed.get("response") or "").strip()
-        if not response_content:
-            response_content = (inquiry_card.get("intro") or "").strip()
-        if not response_content:
-            response_content = "为了更准确地分析你们的情况，我需要再了解一些细节～"
-
-        existing_responses = state.get("pending_responses", [])
-        result["pending_responses"] = existing_responses + [{
-            "from": "status_agent",
-            "content": response_content,
-            "phase": "after_status"
-        }]
-
-        # 保留模型原始输出（应包含 inquiry_card），便于 context_builder 从历史中抽取【提问】
-        raw_assistant_msg = getattr(response, "content", "") or response_content
-        result["messages"] = [{
-            "role": "assistant",
-            "name": "status_agent",
-            "content": raw_assistant_msg,
-            "metadata": {
-                "task_id": parsed.get("task_id") if isinstance(parsed, dict) else "",
-                "thought": parsed.get("thought") if isinstance(parsed, dict) else "",
-            }
-        }]
-
-        result["completion_status"] = None
-        result["result_summary"] = None
-
-    else:
-        # 不需要提问（或提问次数已达上限），生成报告
-        
-        # === 分配报告编号 ===
-        report_counter = state.get("report_counter", {"status_report": 0, "action_plan": 0, "action_guide": 0})
-        new_report_id = report_counter.get("status_report", 0) + 1
-        
-        # 构建带编号的报告（前端使用 Markdown string）
-        # 真实 API 下，模型可能返回 report_content=null（None），这里必须做强健兜底，避免 TypeError
-        report_content_raw = parsed.get("report_content")
-        report_content = report_content_raw if isinstance(report_content_raw, str) else ""
-        if not report_content.strip():
-            # fallback：尽量使用模型原始输出（至少保证是 string，避免“空报告”导致前端体验崩坏）
-            raw_text = getattr(response, "content", "") or ""
-            report_content = raw_text.strip()
-        if not report_content.strip():
-            report_content = "暂时无法生成完整的现状分析报告，请补充更多关键信息（如你们最近一次互动、对方的具体反应）。"
-        result["status_report"] = report_content  # Markdown string for frontend rendering
-        # 单独存储报告编号，便于其他模块引用
-        result["status_report_id"] = new_report_id
-        
-        # 更新报告计数器
-        result["report_counter"] = {
-            **report_counter,
-            "status_report": new_report_id
+    # [FIX] 2026-01-26: 改进兜底逻辑
+    # 如果已经有 _submit_result（说明之前已经提交过），不应该报错
+    # 这种情况通常是路由错误导致的，应该直接返回 main_agent
+    existing_submit = state.get("_submit_result")
+    if isinstance(existing_submit, dict) and existing_submit.get("type") == "status_report":
+        print("[DEBUG] StatusAgent: Already submitted, clearing state and returning to main_agent")
+        return {
+            "completion_status": "COMPLETED",
+            "result_summary": f"现状分析已完成（报告{existing_submit.get('report_id', '')}）",
+            "current_agent": None,
+            "agent_resume_point": None,
+            "_tool_caller": None,
+            "_submit_result": None,  # 清理，避免重复处理
         }
-
-        # === 写入 Layer 2 真源（current_status_report + status_report_history）===
-        layer2_memory = state.get("layer2_memory") or create_empty_layer2_memory()
-        
-        # 获取当前报告和历史报告
-        old_current = layer2_memory.get("current_status_report")
-        history = list(layer2_memory.get("status_report_history", []))
-        
-        # 将旧 current 移入历史（summary/one_liner 由异步归档补齐）
-        if old_current:
-            history.insert(0, old_current)
-
-        new_report_item = create_status_report_item(
-            report_content=report_content,
-            report_id=new_report_id,
-            stage=parsed.get("stage", ""),
-            stage_description=parsed.get("stage_description", ""),
-            acr_analysis=parsed.get("acr_analysis", {}) or {},
-            key_issues=parsed.get("key_issues", []) or [],
-            risk_points=parsed.get("risk_points", []) or [],
-        )
-
-        updated_layer2 = dict(layer2_memory)
-        updated_layer2["current_status_report"] = new_report_item
-        updated_layer2["status_report_history"] = history
-        updated_layer2["last_updated"] = datetime.now().isoformat()
-        updated_layer2["version"] = layer2_memory.get("version", 1) + 1
-        result["layer2_memory"] = updated_layer2
-        
-        # === 清除恢复状态 ===
-        result["current_agent"] = None
-        result["agent_resume_point"] = None
-        result["question_count"] = 0
-        result["collected_info"] = {}
-        # 显式清除 inquiry_card，避免残留上一轮的问题
-        result["inquiry_card"] = None
-        result["pending_questions"] = []
-        
-        # === 设置完成信号 ===
-        result["completion_status"] = "COMPLETED"
-        result["result_summary"] = f"现状分析完成：{(report_content or '')[:50]}..."
-        
-        # === 完成当前任务（归档思考过程，不删除）===
-        task_complete_updates = _complete_current_task(state)
-        result["task_registry"] = task_complete_updates.get("task_registry", state.get("task_registry", {}))
-        
-        # === 在 Layer 3 记录报告产出 ===
-        # 子 Agent 完成时发送简短通知，完整报告在看板（status_report）中展示
-        existing_responses = state.get("pending_responses", [])
-        result["pending_responses"] = existing_responses
-        result["messages"] = [{
-            "role": "assistant",
-            "name": "status_agent",
-            "content": f"（现状分析报告{new_report_id}已生成）",
-            "metadata": {
-                "task_id": parsed.get("task_id"),
-                "thought": parsed.get("thought"),
-            }
-        }]
-        
-        print(f"[DEBUG] StatusAgent: Report {new_report_id} generated")
-        
-    # === 清除工具调用来源（防止无限循环） ===
-    result["_tool_caller"] = None
-    # 清除工具输出缓存，避免后续轮次误注入
-    result["_last_tool_outputs"] = None
-    result["_last_tool_content"] = None
     
-    # === 合并任务管理更新 ===
+    # 未触发工具调用，视为失败（硬切）
+    err_msg = "系统异常：未调用 submit_status_report 工具提交现状分析报告。请重试。"
+    result = {
+        "status_report": None,
+        "inquiry_card": None,
+        "pending_questions": [],
+        "pending_responses": state.get("pending_responses", []) + [{
+            "from": "status_agent",
+            "content": err_msg,
+            "phase": "after_status",
+        }],
+        "messages": [{"role": "assistant", "name": "status_agent", "content": err_msg}],
+        "current_agent": "status_agent",
+        "agent_resume_point": "continue_analysis",
+        "completion_status": None,
+        "result_summary": None,
+        "_tool_caller": None,
+        "_submit_result": None,
+        "_last_tool_outputs": None,
+        "_last_tool_content": None,
+    }
     if task_updates and "task_registry" not in result:
         result["task_registry"] = task_updates.get("task_registry", state.get("task_registry", {}))
-
-    # 清理 handoff 指令，避免后续轮次误注入
-    result["_handoff_target"] = None
-    result["_handoff_instruction"] = None
-    result["instruction"] = None
-    
     return result
 
 
@@ -705,8 +575,7 @@ def _get_default_prompt() -> str:
 
 ## 你的任务
 1. 首先判断信息是否足够进行分析
-2. 如果信息不足，调用 `load_skill("inquiry")` 获取提问指令
-   - 工具返回后，必须生成完整的 `inquiry_card`
+2. 如果信息不足，使用 `ask` 两阶段提问（先 `ask(action="enable")`，再 `ask(questions=[...], intro=..., reasoning=...)`）
 3. 如果信息足够，输出完整的情感罗盘报告
 
 ## 输出格式

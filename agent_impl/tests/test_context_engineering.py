@@ -27,7 +27,7 @@ from tests.conftest import (
 
 from graph.state import create_initial_state
 from graph.crush_chat_storage import CrushChatManager, create_crush_chat_manager
-from graph.archive_manager import check_conversation_compression_needed, check_layer3_compression_needed, LAYER3_ARCHIVE_CONFIG
+from graph.archive_manager import check_layer3_compression_needed, LAYER3_ARCHIVE_CONFIG
 
 
 # ============================================================
@@ -257,7 +257,7 @@ class TestConversationCompression:
         
         for msg_count, expected in test_cases:
             state = {"messages": [{"role": "user", "content": f"msg{i}"} for i in range(msg_count)]}
-            result = check_conversation_compression_needed(state)
+            result = check_layer3_compression_needed(state)
             print(f"  消息数 {msg_count}: 需要压缩={result}, 预期={expected}")
             assert result == expected, f"消息数 {msg_count} 时压缩判断错误"
         

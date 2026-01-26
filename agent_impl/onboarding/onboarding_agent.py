@@ -375,6 +375,9 @@ def onboarding_agent_node(state: dict) -> dict:
     updated_info = _merge_collected(updated_info, user_message)
 
     if needs_more and turn_count < max_turns:
+        # 仅注入“回复 + 问题”到消息历史，避免混入结构化或内部字段
+        question_suffix = f"\n\n问题：{question_text}" if question_text else ""
+        onboarding_message = f"{response_text}{question_suffix}".strip()
         # 不使用 interrupt，直接返回提问卡和回复，结束本轮
         result = {
             "onboarding_completed": False,
@@ -393,7 +396,8 @@ def onboarding_agent_node(state: dict) -> dict:
             "messages": existing_messages + [
                 {
                     "role": "assistant",
-                    "content": _strip_preliminary_assessment_from_json(llm_resp.content),
+                    "name": "onboarding_agent",
+                    "content": onboarding_message,
                 },
             ],
             "pending_questions": [question_text] if question_text else [],
@@ -505,6 +509,10 @@ def onboarding_agent_node(state: dict) -> dict:
                 "call_to_action": "",
             }
 
+    onboarding_ack = (
+        "[SYS:ONBOARDING_DONE] 用户初次注册流程已完成，可以正式进入业务流程。"
+        f"\n参考建议：{handoff.get('suggested_action')}（仅供参考，最终由主流程决定）"
+    )
     result = {
         "onboarding_completed": True,
         "onboarding_handoff": handoff,
@@ -524,7 +532,8 @@ def onboarding_agent_node(state: dict) -> dict:
         "messages": existing_messages + [
             {
                 "role": "assistant",
-                "content": _strip_preliminary_assessment_from_json(llm_resp.content),
+                "name": "onboarding_agent",
+                "content": onboarding_ack,
             }
         ],
     }

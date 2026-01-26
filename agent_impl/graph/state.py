@@ -220,8 +220,12 @@ class AgentState(TypedDict, total=False):
     # 工具触发的状态机切换信息
     _handoff_target: Optional[str]
     _handoff_instruction: Optional[str]
+    # Submit 工具执行结果（用于路由判断）
+    _submit_result: Optional[dict]
     # 两阶段工具强制执行标记
     _pending_action: Optional[str]
+    # 回复技能（consult_answer/emotion_support）完成标记，用于路由直接结束
+    _reply_skill_complete: Optional[bool]
     collected_info: dict
     # 指令（Main Agent 给专家的 Brief）
     instruction: Optional[str]
@@ -263,6 +267,12 @@ class AgentState(TypedDict, total=False):
 
     # === 调试日志 ===
     debug_log: Annotated[list[dict], add]
+
+    # === 维护任务队列（异步提纯/归档）===
+    # 这些字段必须在 TypedDict 中声明，否则 LangGraph 不会持久化！
+    maintenance_queue: list[dict]           # 维护任务队列
+    maintenance_flags: dict                 # 维护状态标记（如 onboarding_refine_done）
+    maintenance_last_finalized_at: Optional[str]  # 最后一次 finalize 的时间戳
 
 
 # ============================================================
@@ -332,7 +342,9 @@ def create_initial_state(user_message: str, **overrides) -> AgentState:
         agent_resume_point=None,
         _handoff_target=None,
         _handoff_instruction=None,
+        _submit_result=None,
         _pending_action=None,
+        _reply_skill_complete=None,
         collected_info={},
         instruction=None,  # Main Agent 给专家的 Brief（v3.0）
         onboarding_completed=False,  # 默认未完成，正常进入 Onboarding
@@ -528,28 +540,6 @@ def get_completed_action_guides(action_guides: list[ActionGuideItem]) -> list[Ac
         guide for guide in action_guides
         if guide.get("status") in ("completed", "cancelled", "expired")
     ]
-
-
-def sync_layer1_to_user_context(state: AgentState) -> AgentState:
-    """
-    同步 Layer 1 长期记忆到 user_context 字段（向后兼容）
-    
-    在更新 layer1_memory 后调用此函数，确保旧代码仍能正常工作
-    """
-    if state.get("layer1_memory"):
-        state["user_context"] = state["layer1_memory"].get("full_data", create_empty_user_context())
-    return state
-
-
-def sync_messages_to_layer3(state: AgentState) -> AgentState:
-    """
-    同步 messages 到 Layer 3 长期记忆
-    
-    在消息更新后调用此函数，保持 layer3_memory 与 messages 同步
-    """
-    if state.get("layer3_memory") and state.get("messages"):
-        state["layer3_memory"]["all_messages"] = list(state["messages"])
-    return state
 
 
 # ============================================================

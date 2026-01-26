@@ -2,10 +2,6 @@
 行动指南 Agent 节点 (Action Guide Agent)
 负责生成具体的 SOP 任务包
 
-采用 Tool-based 渐进式加载模式：
-- 系统提示只包含 Skills 的元数据
-- 模型通过 load_skill 工具按需加载完整指令
-
 上下文架构更新 (v2.0)：
 - 使用分层上下文架构（Layer 0-4）
 - 通过 context_builder 统一组装上下文
@@ -23,17 +19,10 @@ from datetime import datetime
 
 from graph.state import AgentState, ActionGuide
 from graph.message_builder import build_messages_for_model
-from graph.context_types import (
-    ActionGuideItem,
-    ActionGuideContent,
-    create_action_guide_item,
-    create_empty_layer2_memory,
-    create_new_task,
-    is_valid_action_guide_status_transition,
-)
+from graph.context_types import create_new_task
 from utils.message_utils import get_msg_role_and_content
-from skills import create_inquiry_only_loader
-from graph.tools.ask_tool import get_ask_tool, ask_user
+from graph.tools.ask_tool import get_ask_tool
+from graph.tools.submit_tools import submit_action_guide, update_guide_status, update_guide_content
 from config import get_llm
 
 
@@ -150,6 +139,54 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
     if from_tool_call:
         print(f"[DEBUG] GuideAgent: Continuing after tool call (last_role={last_msg_role})")
     
+    submit_result = state.get("_submit_result")
+    if from_tool_call and isinstance(submit_result, dict):
+        submit_type = submit_result.get("type")
+        if submit_type in {"action_guide", "guide_status_update", "guide_content_update"}:
+            if submit_type == "action_guide":
+                guide_id = submit_result.get("guide_id", "")
+                message_text = f"（行动指南{guide_id}已生成）"
+                summary_text = f"行动指南完成：指南{guide_id}"
+            elif submit_type == "guide_content_update":
+                guide_id = submit_result.get("guide_id", "")
+                message_text = f"（行动指南{guide_id}内容已更新）"
+                summary_text = f"行动指南内容已更新：指南{guide_id}"
+            else:
+                message_text = "（行动指南状态已更新）"
+                summary_text = "行动指南状态已更新"
+
+            result = {
+                "completion_status": "COMPLETED",
+                "result_summary": summary_text,
+                "current_agent": None,
+                "agent_resume_point": None,
+                "question_streak_agent": None,
+                "question_streak_count": 0,
+                "question_count": 0,
+                "collected_info": {},
+                "inquiry_card": None,
+                "pending_questions": [],
+                "messages": [{
+                    "role": "assistant",
+                    "name": "guide_agent",
+                    "content": message_text,
+                }],
+                "pending_responses": state.get("pending_responses", []),
+                "_tool_caller": None,
+                "_submit_result": None,
+                "_last_tool_outputs": None,
+                "_last_tool_content": None,
+                "_handoff_target": None,
+                "_handoff_instruction": None,
+                "instruction": None,
+            }
+            task_complete_updates = _complete_current_task(state)
+            if "task_registry" in task_complete_updates:
+                result["task_registry"] = task_complete_updates.get("task_registry", {})
+            if task_updates and "task_registry" not in result:
+                result["task_registry"] = task_updates.get("task_registry", state.get("task_registry", {}))
+            return result
+
     # 准备 LLM（工具绑定在决策后进行）
     base_llm = get_llm(temperature=0.6)
     if from_tool_call:
@@ -182,8 +219,6 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
                         last_tool_content = cached_content
                         break
 
-    tool_call_is_inquiry = bool(from_tool_call and last_tool_content)
-
     # [FIX] 当从工具调用返回时，不应该再次添加用户的上一条输入
     # 否则模型会看到错误的消息栈，误以为用户已确认，跳过提问
     current_input = "" if from_tool_call else state.get("user_message", "")
@@ -200,7 +235,6 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
     ask_mode = state.get("ask_mode", False)
     print(f"[DEBUG] GuideAgent: Invoking LLM (from_tool_call={from_tool_call}, ask_mode={ask_mode})")
     response = None
-    parsed = None
     pending_action = state.get("_pending_action") or ""
     
     # Phase 2: ask_mode=True 后强制调用 ask 工具生成 inquiry_card
@@ -226,15 +260,16 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
                 }],
             }
     
-    # 向后兼容：原 inquiry skill 的两阶段处理
-    elif from_tool_call and pending_action == "inquiry":
+    elif from_tool_call:
+        # 允许在委派后继续发起 ask/submit/update 工具调用
+        ask_tool = get_ask_tool(False)
         llm_with_tools = base_llm.bind_tools(
-            [ask_user],
-            tool_choice={"type": "function", "function": {"name": "ask_user"}},
+            [ask_tool, submit_action_guide, update_guide_status, update_guide_content],
+            parallel_tool_calls=True,
         )
         response = llm_with_tools.invoke(model_messages)
         if hasattr(response, "tool_calls") and response.tool_calls:
-            print("[DEBUG] GuideAgent: Forced ask_user tool call after inquiry skill")
+            print(f"[DEBUG] GuideAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
             if hasattr(response, "name"):
                 response.name = "guide_agent"
             return {
@@ -243,18 +278,18 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
                 "_tool_caller": "guide_agent",
                 "debug_log": [{
                     "node": "guide_agent",
-                    "step": "Tool Call Requested (ask_user forced)",
+                    "step": "Tool Call Requested",
                     "tool_calls": [tc["name"] for tc in response.tool_calls],
                 }],
             }
-    elif from_tool_call:
-        response = base_llm.invoke(model_messages)
     else:
         # 使用定制工具：guide_agent 只允许使用 inquiry skill
-        inquiry_tool = create_inquiry_only_loader()
         # 允许子 Agent 直接进入 ask 两阶段提问（Phase 1: ask(action="enable")）
         ask_tool = get_ask_tool(False)
-        llm_with_tools = base_llm.bind_tools([ask_tool, inquiry_tool])
+        llm_with_tools = base_llm.bind_tools(
+            [ask_tool, submit_action_guide, update_guide_status, update_guide_content],
+            parallel_tool_calls=True,
+        )
         response = llm_with_tools.invoke(model_messages)
         if hasattr(response, "tool_calls") and response.tool_calls:
             print(f"[DEBUG] GuideAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
@@ -271,276 +306,50 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
                 }],
             }
     
-    # 解析响应（若决策已解析则复用）
-    if parsed is None:
-        parsed = _parse_response(response.content)
-
-    # === 处理 guide_status_updates（状态机）===
-    status_updates = parsed.get("guide_status_updates", []) or []
-    layer2_memory = state.get("layer2_memory") or create_empty_layer2_memory()
-    all_guides = list(layer2_memory.get("action_guides", []))
-    did_update_status = False
-
-    if isinstance(status_updates, list) and status_updates:
-        for upd in status_updates:
-            if not isinstance(upd, dict):
-                continue
-            gid = str(upd.get("guide_id") or "").strip()
-            new_status = str(upd.get("new_status") or "").strip()
-            reason = str(upd.get("reason") or "").strip()
-            if not gid or not new_status:
-                continue
-
-            for i, g in enumerate(all_guides):
-                if not isinstance(g, dict):
-                    continue
-                if str(g.get("id") or "") != gid:
-                    continue
-
-                current_status = str(g.get("status") or "pending")
-                if not is_valid_action_guide_status_transition(current_status, new_status):
-                    # 非法流转：忽略，但保留在 debug_log 里方便排查
-                    print(f"[WARN] GuideAgent: invalid status transition {current_status} -> {new_status} for {gid}")
-                    break
-
-                updated = dict(g)
-                updated["status"] = new_status
-
-                # 终态补齐时间戳
-                if new_status in ("completed", "cancelled", "expired"):
-                    updated["completed_at"] = datetime.now().isoformat()
-
-                # 记录原因：优先填 one_liner，其次填 summary（便于后续归档记录）
-                if reason:
-                    if not updated.get("one_liner"):
-                        updated["one_liner"] = reason
-                    if new_status in ("cancelled", "expired") and not updated.get("summary"):
-                        updated["summary"] = reason
-
-                all_guides[i] = updated
-                did_update_status = True
-                break
-
-        if did_update_status:
-            updated_layer2 = dict(layer2_memory)
-            updated_layer2["action_guides"] = all_guides
-            updated_layer2["last_updated"] = datetime.now().isoformat()
-            updated_layer2["version"] = layer2_memory.get("version", 1) + 1
-            layer2_memory = updated_layer2
+    # [FIX] 2026-01-26: 改进兜底逻辑
+    # 如果已经有 _submit_result（说明之前已经提交过），不应该报错
+    # 这种情况通常是路由错误导致的，应该直接返回 main_agent
+    existing_submit = state.get("_submit_result")
+    if isinstance(existing_submit, dict) and existing_submit.get("type") in ("action_guide", "guide_status_update", "guide_content_update"):
+        print("[DEBUG] GuideAgent: Already submitted, clearing state and returning to main_agent")
+        if existing_submit.get("type") == "action_guide":
+            result_summary = f"行动指南已完成（指南{existing_submit.get('guide_id', '')}）"
+        elif existing_submit.get("type") == "guide_content_update":
+            result_summary = f"行动指南内容已更新（指南{existing_submit.get('guide_id', '')}）"
+        else:
+            result_summary = "行动指南状态已更新"
+        return {
+            "completion_status": "COMPLETED",
+            "result_summary": result_summary,
+            "current_agent": None,
+            "agent_resume_point": None,
+            "_tool_caller": None,
+            "_submit_result": None,  # 清理，避免重复处理
+        }
     
+    # 未触发工具调用，视为失败（硬切）
+    err_msg = "系统异常：未调用 submit_action_guide 或 update_guide_status 工具提交行动指南结果。请重试。"
     result = {
-        "next_action": "end_turn",
-        "debug_log": [{
-            "node": "guide_agent",
-            "step": "Response Generated",
-            "prompt_source": prompt_source,
-            "prompt_fallback": prompt_fallback,
-            # "prompt": prompt,  # [FIX] 移除完整 prompt 存储，防止 state 爆炸
-            "response": response.content[:500] + "..." if len(response.content) > 500 else response.content,
-            "parsed_result": parsed,
-            "question_count": question_count,
+        "action_guide": None,
+        "inquiry_card": None,
+        "pending_questions": [],
+        "pending_responses": state.get("pending_responses", []) + [{
+            "from": "guide_agent",
+            "content": err_msg,
+            "phase": "after_guide",
         }],
+        "messages": [{"role": "assistant", "name": "guide_agent", "content": err_msg}],
+        "current_agent": "guide_agent",
+        "agent_resume_point": "continue_guide",
+        "completion_status": None,
+        "result_summary": None,
+        "_tool_caller": None,
+        "_submit_result": None,
+        "_last_tool_outputs": None,
+        "_last_tool_content": None,
     }
-    if did_update_status:
-        result["layer2_memory"] = layer2_memory
-        result["action_guides"] = layer2_memory.get("action_guides", [])
-    
-    # 检查是否需要提问
-    inquiry_card = parsed.get("inquiry_card")
-    questions_list = inquiry_card.get("questions", []) if isinstance(inquiry_card, dict) else []
-    next_streak = (streak_count + 1) if (streak_agent == "guide_agent") else 1
-    allow_ask = next_streak <= max_streak
-    if tool_call_is_inquiry and not questions_list and from_tool_call and last_tool_content:
-        err_msg = "系统异常：已加载提问指令但未生成问题列表（inquiry_card.questions 为空）。请重试。"
-        result["action_guide"] = None
-        result["inquiry_card"] = None
-        result["pending_questions"] = []
-        existing_responses = state.get("pending_responses", [])
-        result["pending_responses"] = existing_responses + [{"from": "guide_agent", "content": err_msg, "phase": "after_guide"}]
-        result["messages"] = [{"role": "assistant", "name": "guide_agent", "content": err_msg}]
-        result["current_agent"] = "guide_agent"
-        result["agent_resume_point"] = "continue_guide"
-        result["completion_status"] = None
-        result["result_summary"] = None
-        return result
-
-    if questions_list and allow_ask:
-        print(f"[DEBUG] GuideAgent: Generated {len(inquiry_card.get('questions', []))} questions")
-        
-        result["inquiry_card"] = inquiry_card
-        result["pending_questions"] = [q.get("question", "") if isinstance(q, dict) else str(q) for q in questions_list]
-        
-        # === 设置恢复状态 ===
-        result["current_agent"] = "guide_agent"
-        result["agent_resume_point"] = "continue_guide"
-        # 连续提问计数
-        result["question_streak_agent"] = "guide_agent"
-        result["question_streak_count"] = next_streak
-        # 旧字段：保持与 streak 对齐
-        result["question_count"] = next_streak
-        
-        # 信息不足时，不生成指南，等待用户回答
-        result["action_guide"] = None
-        response_content = parsed.get("response", "")
-        # 如果 Agent 没有生成回复，使用 intro 作为引导语
-        if not response_content.strip() and inquiry_card.get("intro"):
-            response_content = inquiry_card.get("intro")
-        elif not response_content.strip():
-            response_content = "为了给你更具体的行动建议，我需要再了解一些细节～"
-        # 累积到 pending_responses（不覆盖之前的消息）
-        existing_responses = state.get("pending_responses", [])
-        result["pending_responses"] = existing_responses + [{
-            "from": "guide_agent", 
-            "content": response_content,
-            "phase": "after_guide"  # 行动指南阶段的提问
-        }]
-        # 保留原始 LLM 输出，确保下一轮上下文能看到完整问题列表
-        raw_assistant_msg = response.content if getattr(response, "content", None) else response_content
-        result["messages"] = [{
-            "role": "assistant",
-            "name": "guide_agent",
-            "content": raw_assistant_msg,
-            "metadata": {
-                "task_id": parsed.get("task_id"),
-                "thought": parsed.get("thought"),
-            }
-        }]
-        # 未完成，不设置完成信号
-        result["completion_status"] = None
-        result["result_summary"] = None
-
-    else:
-        # 不需要提问，生成指南
-        
-        # === 分配指南编号 ===
-        report_counter = state.get("report_counter", {"status_report": 0, "action_plan": 0, "action_guide": 0})
-        new_guide_id = report_counter.get("action_guide", 0) + 1
-        
-        # 获取 Markdown 内容（允许 guide_content=null：仅做状态更新，不生成新指南）
-        guide_content = parsed.get("guide_content", "")
-
-        if not guide_content and did_update_status:
-            # 仅更新状态：不新增指南，直接完成本轮
-            result["completion_status"] = "COMPLETED"
-            result["result_summary"] = "行动指南状态已更新"
-            result["current_agent"] = None
-            result["agent_resume_point"] = None
-            result["question_count"] = 0
-            result["inquiry_card"] = None
-            result["pending_questions"] = []
-            result["messages"] = [{
-                "role": "assistant",
-                "name": "guide_agent",
-                "content": "（行动指南状态已更新）",
-                "metadata": {
-                    "task_id": parsed.get("task_id"),
-                    "thought": parsed.get("thought"),
-                }
-            }]
-            # 仍然完成当前任务（如果本轮由 guide_agent 触发）
-            task_complete_updates = _complete_current_task(state)
-            if "task_registry" in task_complete_updates:
-                result["task_registry"] = task_complete_updates.get("task_registry", {})
-            result["_tool_caller"] = None
-            if task_updates and "task_registry" in task_updates:
-                result["task_registry"] = task_updates.get("task_registry", {})
-            result["_handoff_target"] = None
-            result["_handoff_instruction"] = None
-            result["instruction"] = None
-            return result
-        
-        # 构建新的指南条目（v3.1 真源：ActionGuideItem -> layer2_memory）
-        guide_payload: ActionGuideContent = {
-            "current_task": parsed.get("current_task", "") or f"指南{new_guide_id}",
-            "steps": parsed.get("steps", []) or [],
-            "talking_points": parsed.get("talking_points", []) or [],
-            "dos": parsed.get("dos", []) or [],
-            "donts": parsed.get("donts", []) or [],
-            "next_milestone": parsed.get("next_milestone", "") or "",
-            "guide_content": guide_content,
-        }
-        title = parsed.get("title") or guide_payload.get("current_task") or f"指南{new_guide_id}"
-        raw_one_liner = parsed.get("one_liner") or parsed.get("summary") or ""
-        one_liner = (str(raw_one_liner)[:30] if raw_one_liner else str(title)[:30])
-
-        new_guide_item: ActionGuideItem = create_action_guide_item(
-            guide=guide_payload,
-            guide_id=new_guide_id,
-            status="pending",
-            title=title,
-            one_liner=one_liner,
-        )
-        
-        # 写入 Layer2 真源（action_guides）——优先基于前面可能已更新过状态的 layer2_memory
-        all_guides = list(layer2_memory.get("action_guides", []))
-        updated_layer2 = dict(layer2_memory)
-        updated_layer2["action_guides"] = all_guides + [new_guide_item]
-        updated_layer2["last_updated"] = datetime.now().isoformat()
-        updated_layer2["version"] = layer2_memory.get("version", 1) + 1
-        result["layer2_memory"] = updated_layer2
-
-        # 向后兼容：同时更新旧字段 action_guides
-        result["action_guides"] = updated_layer2["action_guides"]
-        
-        # 兼容旧版：保留单个字段
-        result["action_guide"] = guide_content
-        
-        # 更新报告计数器
-        result["report_counter"] = {
-            **report_counter,
-            "action_guide": new_guide_id
-        }
-        
-        # === 清除恢复状态 ===
-        result["current_agent"] = None
-        result["agent_resume_point"] = None
-        # 非提问动作：清零“连续提问计数”
-        result["question_streak_agent"] = None
-        result["question_streak_count"] = 0
-        # 旧字段清零
-        result["question_count"] = 0
-        result["collected_info"] = {}
-        # 显式清除 inquiry_card，避免残留上一轮的问题
-        result["inquiry_card"] = None
-        result["pending_questions"] = []
-        
-        # === 设置完成信号 ===
-        result["completion_status"] = "COMPLETED"
-        result["result_summary"] = f"行动指南完成：{parsed.get('guide_content', '')[:50]}..."
-        
-        # === 完成当前任务 ===
-        task_complete_updates = _complete_current_task(state)
-        if "task_registry" in task_complete_updates:
-            result["task_registry"] = task_complete_updates.get("task_registry", {})
-        
-        # === 在 Layer 3 记录指南产出 ===
-        existing_responses = state.get("pending_responses", [])
-        result["pending_responses"] = existing_responses
-        result["messages"] = [{
-            "role": "assistant",
-            "name": "guide_agent",
-            "content": f"（行动指南{new_guide_id}已生成）",
-            "metadata": {
-                "task_id": parsed.get("task_id"),
-                "thought": parsed.get("thought"),
-            }
-        }]
-        
-        print(f"[DEBUG] GuideAgent: Guide {new_guide_id} generated")
-        
-    # === 清除工具调用来源（防止无限循环） ===
-    result["_tool_caller"] = None
-    
-    # === 合并任务管理更新 ===
-    if task_updates:
-        if "task_registry" in task_updates:
-            result["task_registry"] = task_updates.get("task_registry", {})
-
-    # 清理 handoff 指令，避免后续轮次误注入
-    result["_handoff_target"] = None
-    result["_handoff_instruction"] = None
-    result["instruction"] = None
-    
+    if task_updates and "task_registry" not in result:
+        result["task_registry"] = task_updates.get("task_registry", state.get("task_registry", {}))
     return result
 
 
@@ -760,8 +569,7 @@ def _get_default_prompt() -> str:
 
 ## 你的任务
 1. 首先判断信息是否足够生成具体的行动指南
-2. 如果信息不足，调用 `load_skill("inquiry")` 获取提问指令
-   - 工具返回后，必须生成完整的 `inquiry_card`
+2. 如果信息不足，使用 `ask` 两阶段提问（先 `ask(action="enable")`，再 `ask(questions=[...], intro=..., reasoning=...)`）
 3. 如果信息足够，输出完整的行动指南
 
 ## 输出格式

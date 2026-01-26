@@ -2,10 +2,6 @@
 行动规划 Agent 节点 (Action Plan Agent)
 负责制定宏观战略规划
 
-采用 Tool-based 渐进式加载模式：
-- 系统提示只包含 Skills 的元数据
-- 模型通过 load_skill 工具按需加载完整指令
-
 上下文架构更新 (v2.0)：
 - 使用分层上下文架构（Layer 0-4）
 - 通过 context_builder 统一组装上下文
@@ -22,14 +18,10 @@ from datetime import datetime
 
 from graph.state import AgentState, ActionPlan
 from graph.message_builder import build_messages_for_model
-from graph.context_types import (
-    create_new_task,
-    create_empty_layer2_memory,
-    create_action_plan_item,
-)
+from graph.context_types import create_new_task
 from utils.message_utils import get_msg_role_and_content
-from skills import create_inquiry_only_loader
-from graph.tools.ask_tool import get_ask_tool, ask_user
+from graph.tools.ask_tool import get_ask_tool
+from graph.tools.submit_tools import submit_action_plan
 from config import get_llm
 
 
@@ -146,6 +138,41 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
     if from_tool_call:
         print(f"[DEBUG] PlanAgent: Continuing after tool call (last_role={last_msg_role})")
     
+    submit_result = state.get("_submit_result")
+    if from_tool_call and isinstance(submit_result, dict) and submit_result.get("type") == "action_plan":
+        plan_id = submit_result.get("plan_id", "")
+        result = {
+            "completion_status": "COMPLETED",
+            "result_summary": f"行动规划完成：规划{plan_id}",
+            "current_agent": None,
+            "agent_resume_point": None,
+            "question_streak_agent": None,
+            "question_streak_count": 0,
+            "question_count": 0,
+            "collected_info": {},
+            "inquiry_card": None,
+            "pending_questions": [],
+            "messages": [{
+                "role": "assistant",
+                "name": "plan_agent",
+                "content": f"（行动规划{plan_id}已生成）",
+            }],
+            "pending_responses": state.get("pending_responses", []),
+            "_tool_caller": None,
+            "_submit_result": None,
+            "_last_tool_outputs": None,
+            "_last_tool_content": None,
+            "_handoff_target": None,
+            "_handoff_instruction": None,
+            "instruction": None,
+        }
+        task_complete_updates = _complete_current_task(state)
+        if "task_registry" in task_complete_updates:
+            result["task_registry"] = task_complete_updates.get("task_registry", {})
+        if task_updates and "task_registry" not in result:
+            result["task_registry"] = task_updates.get("task_registry", state.get("task_registry", {}))
+        return result
+
     # 准备 LLM（工具绑定在决策后进行）
     base_llm = get_llm(temperature=0.6)
     if from_tool_call:
@@ -198,7 +225,6 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
     ask_mode = state.get("ask_mode", False)
     print(f"[DEBUG] PlanAgent: Invoking LLM (from_tool_call={from_tool_call}, ask_mode={ask_mode})")
     response = None
-    parsed = None
     pending_action = state.get("_pending_action") or ""
     
     # Phase 2: ask_mode=True 后强制调用 ask 工具生成 inquiry_card
@@ -224,15 +250,13 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
                 }],
             }
     
-    # 向后兼容：原 inquiry skill 的两阶段处理
-    elif from_tool_call and pending_action == "inquiry":
-        llm_with_tools = base_llm.bind_tools(
-            [ask_user],
-            tool_choice={"type": "function", "function": {"name": "ask_user"}},
-        )
+    elif from_tool_call:
+        # 允许在委派后继续发起 ask/submit 工具调用
+        ask_tool = get_ask_tool(False)
+        llm_with_tools = base_llm.bind_tools([ask_tool, submit_action_plan])
         response = llm_with_tools.invoke(model_messages)
         if hasattr(response, "tool_calls") and response.tool_calls:
-            print("[DEBUG] PlanAgent: Forced ask_user tool call after inquiry skill")
+            print(f"[DEBUG] PlanAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
             if hasattr(response, "name"):
                 response.name = "plan_agent"
             return {
@@ -241,18 +265,15 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
                 "_tool_caller": "plan_agent",
                 "debug_log": [{
                     "node": "plan_agent",
-                    "step": "Tool Call Requested (ask_user forced)",
+                    "step": "Tool Call Requested",
                     "tool_calls": [tc["name"] for tc in response.tool_calls],
                 }],
             }
-    elif from_tool_call:
-        response = base_llm.invoke(model_messages)
     else:
         # 使用定制工具：plan_agent 只允许使用 inquiry skill
-        inquiry_tool = create_inquiry_only_loader()
         # 允许子 Agent 直接进入 ask 两阶段提问（Phase 1: ask(action="enable")）
         ask_tool = get_ask_tool(False)
-        llm_with_tools = base_llm.bind_tools([ask_tool, inquiry_tool])
+        llm_with_tools = base_llm.bind_tools([ask_tool, submit_action_plan])
         response = llm_with_tools.invoke(model_messages)
         if hasattr(response, "tool_calls") and response.tool_calls:
             print(f"[DEBUG] PlanAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
@@ -269,194 +290,44 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
                 }],
             }
     
-    # 解析响应（若决策已解析则复用）
-    if parsed is None:
-        parsed = _parse_response(response.content)
-    
-    result = {
-        "next_action": "end_turn",
-        "debug_log": [{
-            "node": "plan_agent",
-            "step": "Response Generated",
-            "prompt_source": prompt_source,
-            "prompt_fallback": prompt_fallback,
-            # "prompt": prompt,  # [FIX] 移除完整 prompt 存储，防止 state 爆炸
-            "response": response.content[:500] + "..." if len(response.content) > 500 else response.content,
-            "parsed_result": parsed,
-            "question_count": question_count,
-        }],
-    }
-    
-    # 检查是否需要提问
-    inquiry_card = parsed.get("inquiry_card")
-    questions_list = inquiry_card.get("questions", []) if isinstance(inquiry_card, dict) else []
-    next_streak = (streak_count + 1) if (streak_agent == "plan_agent") else 1
-    allow_ask = next_streak <= max_streak
-    
-    # 检查模型是否生成了规划内容（goal, strategy 等）
-    has_plan_content = bool(parsed.get("goal") or parsed.get("strategy") or parsed.get("phases"))
-    
-    # [FIX] 允许模型在加载 inquiry skill 后改变决策：
-    # - 如果模型生成了规划内容，说明它认为信息足够，允许直接输出规划
-    # - 只有在模型既没有生成问题也没有生成规划时才报错
-    if from_tool_call and last_tool_content and not questions_list and not has_plan_content:
-        err_msg = "系统异常：已加载提问指令但未生成问题列表或规划内容。请重试。"
-        result["action_plan"] = None
-        result["inquiry_card"] = None
-        result["pending_questions"] = []
-        existing_responses = state.get("pending_responses", [])
-        result["pending_responses"] = existing_responses + [{"from": "plan_agent", "content": err_msg, "phase": "after_plan"}]
-        result["messages"] = [{"role": "assistant", "name": "plan_agent", "content": err_msg}]
-        result["current_agent"] = "plan_agent"
-        result["agent_resume_point"] = "continue_planning"
-        result["completion_status"] = None
-        result["result_summary"] = None
-        return result
-    
-    # 如果模型加载了 inquiry skill 但决定直接生成规划，记录日志
-    if from_tool_call and last_tool_content and has_plan_content and not questions_list:
-        print(f"[DEBUG] PlanAgent: Model loaded inquiry skill but decided info is sufficient, generating plan directly")
-
-    if questions_list and allow_ask:
-        print(f"[DEBUG] PlanAgent: Generated {len(inquiry_card.get('questions', []))} questions")
-        
-        result["inquiry_card"] = inquiry_card
-        result["pending_questions"] = [q.get("question", "") if isinstance(q, dict) else str(q) for q in questions_list]
-        
-        # === 设置恢复状态 ===
-        result["current_agent"] = "plan_agent"
-        result["agent_resume_point"] = "continue_planning"
-        # 连续提问计数
-        result["question_streak_agent"] = "plan_agent"
-        result["question_streak_count"] = next_streak
-        # 旧字段：保持与 streak 对齐
-        result["question_count"] = next_streak
-        
-        # 信息不足时，不生成规划，等待用户回答
-        result["action_plan"] = None
-        response_content = parsed.get("response", "")
-        # 如果 Agent 没有生成回复，使用 intro 作为引导语
-        if not response_content.strip() and inquiry_card.get("intro"):
-            response_content = inquiry_card.get("intro")
-        elif not response_content.strip():
-            response_content = "为了给你制定更精准的计划，我需要再了解一些情况～"
-        # 累积到 pending_responses（不覆盖之前的消息）
-        existing_responses = state.get("pending_responses", [])
-        result["pending_responses"] = existing_responses + [{
-            "from": "plan_agent", 
-            "content": response_content,
-            "phase": "after_plan"  # 行动规划阶段的提问
-        }]
-        # 保留原始 LLM 输出，确保下一轮上下文能看到完整问题列表
-        raw_assistant_msg = response.content if getattr(response, "content", None) else response_content
-        result["messages"] = [{
-            "role": "assistant",
-            "name": "plan_agent",
-            "content": raw_assistant_msg,
-            "metadata": {
-                "task_id": parsed.get("task_id"),
-                "thought": parsed.get("thought"),
-            }
-        }]
-        # 未完成，不设置完成信号
-        result["completion_status"] = None
-        result["result_summary"] = None
-
-    else:
-        # 不需要提问或已生成规划
-        # === 分配规划编号 ===
-        report_counter = state.get("report_counter", {"status_report": 0, "action_plan": 0, "action_guide": 0})
-        new_plan_id = report_counter.get("action_plan", 0) + 1
-        
-        plan_markdown = _format_plan_as_markdown(parsed)
-        result["action_plan"] = plan_markdown  # Markdown string for frontend rendering
-        result["action_plan_id"] = new_plan_id
-        
-        # 更新报告计数器
-        result["report_counter"] = {
-            **report_counter,
-            "action_plan": new_plan_id
+    # [FIX] 2026-01-26: 改进兜底逻辑
+    # 如果已经有 _submit_result（说明之前已经提交过），不应该报错
+    # 这种情况通常是路由错误导致的，应该直接返回 main_agent
+    existing_submit = state.get("_submit_result")
+    if isinstance(existing_submit, dict) and existing_submit.get("type") == "action_plan":
+        print("[DEBUG] PlanAgent: Already submitted, clearing state and returning to main_agent")
+        return {
+            "completion_status": "COMPLETED",
+            "result_summary": f"行动规划已完成（规划{existing_submit.get('plan_id', '')}）",
+            "current_agent": None,
+            "agent_resume_point": None,
+            "_tool_caller": None,
+            "_submit_result": None,  # 清理，避免重复处理
         }
-
-        # === 写入 Layer 2 真源（current_action_plan + action_plan_history）===
-        layer2_memory = state.get("layer2_memory") or create_empty_layer2_memory()
-        
-        # 获取当前规划和历史规划
-        old_current = layer2_memory.get("current_action_plan")
-        history = list(layer2_memory.get("action_plan_history", []))
-        
-        # 将旧 current 移入历史（summary/one_liner 由异步归档补齐）
-        if old_current:
-            history.insert(0, old_current)
-
-        new_plan_item = create_action_plan_item(
-            plan_content=plan_markdown,
-            plan_id=new_plan_id,
-            goal=parsed.get("goal", "") or "",
-            strategy=parsed.get("strategy", "") or "",
-            phases=parsed.get("phases", []) or [],
-            key_principles=parsed.get("key_principles", []) or [],
-        )
-
-        updated_layer2 = dict(layer2_memory)
-        updated_layer2["current_action_plan"] = new_plan_item
-        updated_layer2["action_plan_history"] = history
-        updated_layer2["last_updated"] = datetime.now().isoformat()
-        updated_layer2["version"] = layer2_memory.get("version", 1) + 1
-        result["layer2_memory"] = updated_layer2
-        
-        # === 清除恢复状态 ===
-        result["current_agent"] = None
-        result["agent_resume_point"] = None
-        # 非提问动作：清零“连续提问计数”
-        result["question_streak_agent"] = None
-        result["question_streak_count"] = 0
-        # 旧字段清零
-        result["question_count"] = 0
-        result["collected_info"] = {}
-        # 显式清除 inquiry_card，避免残留上一轮的问题
-        result["inquiry_card"] = None
-        result["pending_questions"] = []
-        
-        # === 设置完成信号 ===
-        result["completion_status"] = "COMPLETED"
-        result["result_summary"] = f"行动规划完成：{parsed.get('goal', '')} - {parsed.get('strategy', '')}"
-        
-        # === 完成当前任务 ===
-        task_complete_updates = _complete_current_task(state)
-        if "task_registry" in task_complete_updates:
-            result["task_registry"] = task_complete_updates.get("task_registry", {})
-        
-        # === 在 Layer 3 记录规划产出 ===
-        result["messages"] = [{
-            "role": "assistant",
-            "name": "plan_agent",
-            "content": f"（行动规划{new_plan_id}已生成）",
-            "metadata": {
-                "task_id": parsed.get("task_id"),
-                "thought": parsed.get("thought"),
-            }
-        }]
-        
-        print(f"[DEBUG] PlanAgent: Plan {new_plan_id} generated")
-            
-        # 保留现有的 pending_responses，不覆盖
-        existing_responses = state.get("pending_responses", [])
-        result["pending_responses"] = existing_responses
-        
-    # === 清除工具调用来源（防止无限循环） ===
-    result["_tool_caller"] = None
     
-    # === 合并任务管理更新 ===
-    if task_updates:
-        if "task_registry" in task_updates:
-            result["task_registry"] = task_updates.get("task_registry", {})
-
-    # 清理 handoff 指令，避免后续轮次误注入
-    result["_handoff_target"] = None
-    result["_handoff_instruction"] = None
-    result["instruction"] = None
-    
+    # 未触发工具调用，视为失败（硬切）
+    err_msg = "系统异常：未调用 submit_action_plan 工具提交行动规划。请重试。"
+    result = {
+        "action_plan": None,
+        "inquiry_card": None,
+        "pending_questions": [],
+        "pending_responses": state.get("pending_responses", []) + [{
+            "from": "plan_agent",
+            "content": err_msg,
+            "phase": "after_plan",
+        }],
+        "messages": [{"role": "assistant", "name": "plan_agent", "content": err_msg}],
+        "current_agent": "plan_agent",
+        "agent_resume_point": "continue_planning",
+        "completion_status": None,
+        "result_summary": None,
+        "_tool_caller": None,
+        "_submit_result": None,
+        "_last_tool_outputs": None,
+        "_last_tool_content": None,
+    }
+    if task_updates and "task_registry" not in result:
+        result["task_registry"] = task_updates.get("task_registry", state.get("task_registry", {}))
     return result
 
 
@@ -614,8 +485,7 @@ def _get_default_prompt() -> str:
 
 ## 你的任务
 1. 判断信息是否足够制定规划
-2. 如果信息不足，调用 `load_skill("inquiry")` 获取提问指令
-   - 工具返回后，必须生成完整的 `inquiry_card`
+2. 如果信息不足，使用 `ask` 两阶段提问（先 `ask(action="enable")`，再 `ask(questions=[...], intro=..., reasoning=...)`）
 3. 如果信息足够，输出规划结果
 
 ## 输出格式

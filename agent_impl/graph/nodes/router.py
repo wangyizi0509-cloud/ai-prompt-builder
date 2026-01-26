@@ -98,9 +98,11 @@ def router_node(state: AgentState) -> dict[str, Any]:
         "result_summary": None,
         "_tool_caller": None,  # [FIX] 重置工具调用标记，防止 Skill 指令一直挂着
         "_pending_action": None,  # 重置两阶段工具标记
+        "_reply_skill_complete": None,  # 重置回复技能完成标记
         "_handoff_target": None,
         "_handoff_instruction": None,
         "_iteration_count": 0,  # [FIX] 重置单轮步数计数器，避免跨轮次累积导致流程被卡死（Studio 模式下不走 server.py）
+        "_submit_result": None,  # [FIX] 2026-01-26: 重置 submit tool 结果，避免跨轮次残留
     }
     if fallback_user_message:
         base_update["user_message"] = fallback_user_message
@@ -178,7 +180,7 @@ def router_node(state: AgentState) -> dict[str, Any]:
         messages_to_add = []
         if need_add_user_msg and user_message:
             messages_to_add.append({"role": "user", "content": user_message, "id": current_message_id})
-        messages_to_add.append({"role": "assistant", "content": response_content})
+        messages_to_add.append({"role": "assistant", "name": "router", "content": response_content})
         
         return {
             **base_update,
@@ -200,7 +202,7 @@ def router_node(state: AgentState) -> dict[str, Any]:
         messages_to_add = []
         if need_add_user_msg and user_message:
             messages_to_add.append({"role": "user", "content": user_message, "id": current_message_id})
-        messages_to_add.append({"role": "assistant", "content": response_content})
+        messages_to_add.append({"role": "assistant", "name": "router", "content": response_content})
         
         return {
             **base_update,

@@ -33,7 +33,7 @@ def test_delegate_to_status_e2e():
 @pytest.mark.api_test
 def test_inquiry_two_phase_e2e():
     """
-    真实 API: 信息不足场景，验证 load_skill(\"inquiry\") → ask_user 两阶段。
+    真实 API: 信息不足场景，验证 load_skill("inquiry") → ask_user 两阶段。
     """
     _ensure_server_up()
     session_id = f"inquiry_2phase_{int(time.time())}"
