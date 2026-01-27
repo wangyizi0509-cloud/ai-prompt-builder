@@ -39,6 +39,7 @@ from graph.tools.delegate_tools import (
     delegate_to_status,
     delegate_to_plan,
     delegate_to_guide,
+    end_turn,
 )
 from graph.tools.ask_tool import (
     get_ask_tool,
@@ -253,12 +254,21 @@ def route_after_skill_tools(state: AgentState) -> Literal["main_agent", "status_
       此时应该返回调用者 Agent 继续执行 Phase 2
     - Phase 2: ask(questions=[...]) → 生成 inquiry_card
       此时应该返回 "end" 等待用户输入
+    
+    [ADD] 2026-01-27: 添加 end_turn 支持
+    - main_agent 调用 end_turn 后，直接返回 "end" 结束本轮
+    - 不输出任何用户可见内容，但 post_turn_finalize 照常执行
     """
     iteration = int(state.get("_iteration_count", 0) or 0)
     if iteration >= MAX_NODE_STEPS_PER_TURN:
         # 兜底：工具已执行但本轮步数过多，直接回主 Agent 收口（由 main_agent end_turn）
         print("[WARN] Max node steps reached after skill_tools, returning to main_agent")
         return "main_agent"
+
+    # [ADD] 优先检测 end_turn：main_agent 请求直接结束本轮
+    if state.get("_end_turn"):
+        print("[DEBUG] route_after_skill_tools: end_turn detected, ending turn")
+        return "end"
 
     # [FIX] Phase 1 完成后：_pending_action="ask" 表示需要继续执行 Phase 2
     # 此时不应该结束，而应该返回调用者 Agent
@@ -357,6 +367,8 @@ def skill_tools_node(state: AgentState) -> dict:
         delegate_to_status,
         delegate_to_plan,
         delegate_to_guide,
+        # 结束本轮工具（仅 main_agent 使用）
+        end_turn,
         # 提问工具（状态驱动，根据 ask_mode 返回不同版本）
         ask_tool,
         # 解答工具（状态驱动，根据 consult_mode 返回不同版本）
@@ -491,6 +503,14 @@ def skill_tools_node(state: AgentState) -> dict:
                 elif tool_name == "return_to_main":
                     out["_return_to_main"] = True
                     out["_return_to_main_reason"] = tool_args.get("reason", "") or ""
+                elif tool_name == "end_turn":
+                    # main_agent 调用 end_turn：设置标记，路由时直接结束
+                    out["_end_turn"] = True
+                    reason = tool_args.get("reason", "") or ""
+                    if reason:
+                        print(f"[DEBUG] skill_tools_node: end_turn called with reason: {reason}")
+                    else:
+                        print(f"[DEBUG] skill_tools_node: end_turn called (no reason)")
             break
     
     # === Phase 1 处理：进入提问模式 ===

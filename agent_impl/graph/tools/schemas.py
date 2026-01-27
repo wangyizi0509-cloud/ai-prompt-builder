@@ -109,6 +109,33 @@ class ReturnToMainInput(BaseModel):
     reason: str = Field(default="", description="转接回主 Agent 的原因（可选）")
 
 
+class EndTurnInput(BaseModel):
+    """结束本轮对话，不输出任何内容"""
+    reason: str = Field(default="", description="结束本轮的原因（可选，仅用于日志/调试）")
+
+
+# =========================
+# 委派工具输入（Main -> 子 Agent）
+# =========================
+
+class DelegateInstructionInput(BaseModel):
+    instruction: str = Field(
+        description="默认只写\"目标\"，最多2行，不要罗列子agent应该分析和书写的内容，它们都有自己的prompt，它们知道该写啥"
+    )
+
+
+class DelegateToStatusInput(DelegateInstructionInput):
+    """委派给 status_agent 的输入"""
+
+
+class DelegateToPlanInput(DelegateInstructionInput):
+    """委派给 plan_agent 的输入"""
+
+
+class DelegateToGuideInput(DelegateInstructionInput):
+    """委派给 guide_agent 的输入"""
+
+
 def tool_response(success: bool, message: str, data: Optional[Any] = None) -> str:
     payload = {"success": success, "message": message}
     if data is not None:

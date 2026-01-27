@@ -31,6 +31,7 @@ from graph.tools.delegate_tools import (
     delegate_to_status,
     delegate_to_plan,
     delegate_to_guide,
+    end_turn,
 )
 from graph.tools.ask_tool import get_ask_tool
 from graph.tools.consult_answer_tool import get_consult_tool, consult_complete
@@ -124,6 +125,8 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
         delegate_to_status,
         delegate_to_plan,
         delegate_to_guide,
+        # 结束本轮工具（不输出内容直接结束）
+        end_turn,
         # 提问工具（状态驱动，根据 ask_mode 返回不同版本）
         ask_tool,
         # 解答工具（状态驱动，根据 consult_mode 返回不同版本）
@@ -617,9 +620,12 @@ def _get_default_prompt(from_sub_agent: bool = False, is_resuming: bool = False)
 
 ## 你的任务（再决策模式）
 子 Agent 已完成任务并返回，分析结果已经更新到看板中（前端会自动展示）。
-你需要：
-1. 给用户一个简短的过渡或引导
-2. **根据当前情况灵活决定下一步**（不要固定流程！）
+默认情况下你**不需要**给用户再解释报告/指南内容。
+你需要做的是：**判断本轮是否真的需要你说话或采取新动作**。
+
+### 默认策略（减压）
+- **如果你没有新增决策/提问/行动要补充**（子 Agent 已经把产出写入系统、并且也可能已对用户做了说明）→ 直接 `next_action="end_turn"`，并将 `response` 留空字符串 `""`。
+- **只有在确实需要时才说一句话**：例如需要用户下一步反馈、需要澄清一个关键点、或需要再次路由到另一个 Agent。
 
 ## 决策原则（灵活判断，非固定流程）
 - **用户之前是否表达过明确诉求**
