@@ -17,22 +17,22 @@ This skill provides tools to start, restart, and stop local services in two mode
 
 ### Start in Dev Mode (Recommended for rapid iteration)
 ```bash
-python3 scripts/start_services.py --mode dev
+python3 .trae/skills/service-manager/scripts/start_services.py --mode dev
 ```
 
 ### Start in Up Mode (Recommended for production-readiness validation)
 ```bash
-python3 scripts/start_services.py --mode up
+python3 .trae/skills/service-manager/scripts/start_services.py --mode up
 ```
 
 ### Stop All Services
 ```bash
-python3 scripts/stop_services.py
+python3 .trae/skills/service-manager/scripts/stop_services.py
 ```
 
 ### Restart Services
 ```bash
-python3 scripts/restart_services.py
+python3 .trae/skills/service-manager/scripts/restart_services.py
 ```
 
 ## Service Management
@@ -41,7 +41,7 @@ python3 scripts/restart_services.py
 
 **Usage:**
 ```bash
-python3 scripts/start_services.py [--mode {dev,up}]
+python3 .trae/skills/service-manager/scripts/start_services.py [--mode {dev,up}]
 ```
 
 **What it does:**
@@ -60,7 +60,7 @@ python3 scripts/start_services.py [--mode {dev,up}]
 
 **Usage:**
 ```bash
-python3 scripts/stop_services.py
+python3 .trae/skills/service-manager/scripts/stop_services.py
 ```
 
 **What it does:**
@@ -75,16 +75,16 @@ python3 scripts/stop_services.py
 
 ### Port Conflicts
 If you see "Address already in use":
-1. Run `python3 scripts/stop_services.py`
+1. Run `python3 .trae/skills/service-manager/scripts/stop_services.py`
 2. Manually check: `lsof -i :2024 -i :8123 -i :8000`
 
 ## Resources
 
-### scripts/start_services.py
+### .trae/skills/service-manager/scripts/start_services.py
 Main script to start all services with error handling and status reporting.
 
-### scripts/restart_services.py
+### .trae/skills/service-manager/scripts/restart_services.py
 Script to restart all services (stop then start).
 
-### scripts/stop_services.py
+### .trae/skills/service-manager/scripts/stop_services.py
 Script to stop all running services gracefully.

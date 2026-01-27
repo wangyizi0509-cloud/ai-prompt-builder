@@ -6,6 +6,7 @@ Stops LangGraph and FastAPI services running on ports 2024 and 8000
 
 import subprocess
 import sys
+import os
 
 
 def get_processes_on_port(port):
@@ -42,6 +43,15 @@ def stop_service(port, service_name):
     return True
 
 
+def get_project_root():
+    script_path = os.path.abspath(__file__)
+    parent_dir = os.path.dirname(script_path)
+    skill_dir = os.path.dirname(parent_dir)
+    skills_dir = os.path.dirname(skill_dir)
+    trae_dir = os.path.dirname(skills_dir)
+    return os.path.dirname(trae_dir)
+
+
 def main():
     print("🛑 Stopping Services")
     print("=" * 50)
@@ -49,9 +59,7 @@ def main():
     # 1. 尝试使用官方命令停止 Docker Stack
     print("\n🐳 Stopping LangGraph Docker Stack...")
     try:
-        # 获取项目根目录
-        script_path = os.path.abspath(__file__)
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(script_path))))
+        project_root = get_project_root()
         agent_dir = os.path.join(project_root, "agent_impl")
         
         # 执行 langgraph down

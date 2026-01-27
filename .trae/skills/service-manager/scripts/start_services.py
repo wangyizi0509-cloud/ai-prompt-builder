@@ -110,8 +110,8 @@ def main():
         else:
             print("\n💡 Services are running in the background (Local Dev).")
             
-        print("   Use 'scripts/stop_services.py' to stop them.")
-        print("   Use 'scripts/restart_services.py' to restart them.")
+        print("   Use '.trae/skills/service-manager/scripts/stop_services.py' to stop them.")
+        print("   Use '.trae/skills/service-manager/scripts/restart_services.py' to restart them.")
         
         return 0
     except Exception as e:
