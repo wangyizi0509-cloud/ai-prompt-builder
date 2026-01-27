@@ -81,9 +81,9 @@ LAYER2_ARCHIVE_CONFIG = {
 }
 
 LAYER3_ARCHIVE_CONFIG = {
-    "max_recent_turns": 2,          # 保留最近 N 轮完整对话
+    "max_recent_turns": 20,         # 保留最近 N 轮完整对话
     "compression_batch_size": 1,    # 每超出 batch_size 轮集中压缩一次
-    "compression_threshold": 4,     # 超过此轮次开始检查是否需要压缩
+    "compression_threshold": 25,    # 超过此轮次开始检查是否需要压缩
     "max_summaries": 10,            # 最多保留的对话摘要数
     "reasoning_limit": 10,          # 任务思考过程记录保留条数 (n)
     "reasoning_compression_batch": 2, # 思考过程压缩批量大小 (n-5 到 n 条一起摘要)
