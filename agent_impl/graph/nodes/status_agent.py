@@ -302,26 +302,18 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
                 }],
             }
     
-    # 未触发工具调用，视为失败（硬切）
-    err_msg = "系统异常：未调用 submit_status_report 工具提交现状分析报告。请重试。"
+    # 模型未调用工具，直接返回模型的回复内容
+    print(f"[DEBUG] StatusAgent: No tool call, returning model response directly")
+    if hasattr(response, "name"):
+        response.name = "status_agent"
     result = {
-        "status_report": None,
-        "inquiry_card": None,
-        "pending_questions": [],
-        "pending_responses": state.get("pending_responses", []) + [{
-            "from": "status_agent",
-            "content": err_msg,
-            "phase": "after_status",
-        }],
-        "messages": [{"role": "assistant", "name": "status_agent", "content": err_msg}],
+        "messages": [response],
         "current_agent": "status_agent",
-        "agent_resume_point": "continue_analysis",
-        "completion_status": None,
-        "result_summary": None,
         "_tool_caller": None,
-        "_submit_result": None,
-        "_last_tool_outputs": None,
-        "_last_tool_content": None,
+        "debug_log": [{
+            "node": "status_agent",
+            "step": "No Tool Call - Direct Response",
+        }],
     }
     if task_updates and "task_registry" not in result:
         result["task_registry"] = task_updates.get("task_registry", state.get("task_registry", {}))

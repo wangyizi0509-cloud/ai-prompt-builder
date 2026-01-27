@@ -143,8 +143,8 @@ Plan Agent 制定姿态 (Stance) 的依据。
 此外，这个工具既用于**首次生成**，也用于**更新报告**：如果你发现已有报告需要修正/补充（有新聊天记录、新事实、判断变化），请再次调用 `submit_status_report` 提交**完整的最新版报告**。
 
 ### ✅ 任务完成转接协议（回主 Agent）
-当你已完成本轮职责闭环（报告已 `submit_status_report` 写入系统，且你不再有确定性下一步需要继续操作）时，调用 `return_to_main(reason=...)` 把控制权交还给主 Agent。  
-推荐做法：尽量在同一轮里调用 `submit_status_report(...)` + `return_to_main(...)`。如果信息不足需要用户补充，则继续走 `ask` 两阶段。
+当你已完成本轮职责闭环（报告已 `submit_status_report` 写入系统，且你不再有确定性下一步需要继续操作）时，必须调用 `return_to_main(reason=...)` 把控制权交还给主 Agent，它可能会有下一步的决策。  
+做法：如果你判断“本轮任务已完成”，就要在**本轮最后一步工具调用**里补上 `return_to_main(...)`（不要留到下一轮）。如果信息不足需要用户补充，则继续走 `ask` 两阶段（不要 `return_to_main`）。
 
 工具调用（原生 function calling）：
 - `submit_status_report(report_markdown=...)`：`report_markdown` 必填，其余字段按需填写即可

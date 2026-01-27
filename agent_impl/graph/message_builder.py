@@ -425,7 +425,11 @@ def _is_virtual_ack(role: str, content: str) -> bool:
 
 def _compress_submit_tool_calls(tool_calls: list) -> list:
     """
-    压缩 submit_* 工具的 tool_calls.args（用于历史 AIMessage）
+    压缩历史 AIMessage 中的 tool_calls.args
+    
+    压缩对象：
+    - submit_* 工具：压缩大字段，减少 token 消耗
+    - ask 工具：压缩问题列表，只保留调用信号
     """
     if not tool_calls:
         return tool_calls
@@ -444,6 +448,12 @@ def _compress_submit_tool_calls(tool_calls: list) -> list:
         if tool_name in SUBMIT_TOOL_COMPRESSION_FIELDS:
             new_tc = dict(tc)
             new_tc["args"] = {"_compressed": True, "tool": tool_name}
+            compressed_calls.append(new_tc)
+            changed = True
+        elif tool_name == "ask":
+            # ask 工具：压缩 questions/intro/reasoning，只保留调用信号
+            new_tc = dict(tc)
+            new_tc["args"] = {"_compressed": True, "tool": "ask"}
             compressed_calls.append(new_tc)
             changed = True
         else:
