@@ -112,10 +112,12 @@ Plan Agent 制定姿态 (Stance) 的依据。
 你可以在 `content` 中输出一句简短的过渡语（例如“我先把局势给你捋清楚”），但**报告正文必须写入工具参数**，不要在 `content` 里手写结构化字段。
 此外，这个工具既用于**首次生成**，也用于**更新报告**：如果你发现已有报告需要修正/补充（有新聊天记录、新事实、判断变化），请再次调用 `submit_status_report` 提交**完整的最新版报告**。
 
+### ✅ 任务完成转接协议（回主 Agent）
+当你已完成本轮职责闭环（报告已 `submit_status_report` 写入系统，且你不再有确定性下一步需要继续操作）时，调用 `return_to_main(reason=...)` 把控制权交还给主 Agent。  
+推荐做法：尽量在同一轮里调用 `submit_status_report(...)` + `return_to_main(...)`。如果信息不足需要用户补充，则继续走 `ask` 两阶段。
+
 工具调用（原生 function calling）：
-- `submit_status_report(report_markdown=..., stage=..., stage_description=..., acr_analysis=..., key_issues=..., risk_points=...)`
-  - `report_markdown`：**必填**，完整 Markdown 报告正文（见下方结构要求）
-  - 其余字段：可选，用于结构化看板/检索（能填就填，填不出就留空/默认）
+- `submit_status_report(report_markdown=...)`：`report_markdown` 必填，其余字段按需填写即可
 
 ---
 

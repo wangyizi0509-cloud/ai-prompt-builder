@@ -26,6 +26,7 @@ from graph.tools.schemas import (
     SubmitActionGuideInput,
     UpdateGuideStatusInput,
     UpdateGuideContentInput,
+    ReturnToMainInput,
     tool_response,
     tool_error_response,
 )
@@ -114,6 +115,12 @@ def update_guide_content(
     if not guide_markdown.strip():
         return tool_error_response("guide_markdown 不能为空")
     return tool_response(True, "已更新行动指南内容")
+
+
+@tool(args_schema=ReturnToMainInput)
+def return_to_main(reason: str = "") -> str:
+    """完成当前任务，将控制权交还给主 Agent"""
+    return tool_response(True, "已完成任务，转接回主 Agent")
 
 
 # ============================================================

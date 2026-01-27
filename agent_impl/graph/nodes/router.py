@@ -103,6 +103,8 @@ def router_node(state: AgentState) -> dict[str, Any]:
         "_handoff_instruction": None,
         "_iteration_count": 0,  # [FIX] 重置单轮步数计数器，避免跨轮次累积导致流程被卡死（Studio 模式下不走 server.py）
         "_submit_result": None,  # [FIX] 2026-01-26: 重置 submit tool 结果，避免跨轮次残留
+        "_return_to_main": None,
+        "_return_to_main_reason": None,
     }
     if fallback_user_message:
         base_update["user_message"] = fallback_user_message

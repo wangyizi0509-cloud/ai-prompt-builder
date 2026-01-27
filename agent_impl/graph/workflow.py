@@ -71,6 +71,7 @@ from graph.tools.submit_tools import (
     submit_action_guide,
     update_guide_status,
     update_guide_content,
+    return_to_main,
     apply_submit_tool_state_update,
     is_submit_tool,
 )
@@ -289,13 +290,10 @@ def route_after_skill_tools(state: AgentState) -> Literal["main_agent", "status_
         print("[DEBUG] route_after_skill_tools: Reply skill completed (consult/emotion), ending turn")
         return "end"
 
-    # [FIX] submit tool 完成后，子 Agent 任务结束，回到 main_agent 再决策
-    submit_result = state.get("_submit_result")
-    if isinstance(submit_result, dict):
-        submit_type = submit_result.get("type", "")
-        if submit_type in ("status_report", "action_plan", "action_guide", "guide_status_update", "guide_content_update"):
-            print(f"[DEBUG] route_after_skill_tools: Submit tool completed ({submit_type}), routing to main_agent")
-            return "main_agent"
+    # 子 Agent 主动请求转接回 main_agent
+    if state.get("_return_to_main"):
+        print("[DEBUG] route_after_skill_tools: return_to_main requested, routing to main_agent")
+        return "main_agent"
 
     handoff_target = state.get("_handoff_target") or ""
     if handoff_target in ("status_agent", "plan_agent", "guide_agent"):
@@ -375,6 +373,7 @@ def skill_tools_node(state: AgentState) -> dict:
         submit_action_guide,
         update_guide_status,
         update_guide_content,
+        return_to_main,
     ])
     out = tool_node.invoke(state)
     
@@ -414,6 +413,8 @@ def skill_tools_node(state: AgentState) -> dict:
                     out["_submit_result"] = None
                     out["_pending_action"] = None
                     out["_reply_skill_complete"] = None
+                    out["_return_to_main"] = None
+                    out["_return_to_main_reason"] = None
                     out["inquiry_card"] = None
                     out["pending_questions"] = []
                     out["agent_resume_point"] = None
@@ -487,40 +488,9 @@ def skill_tools_node(state: AgentState) -> dict:
                         for key, value in submit_state_update.items():
                             out[key] = value
                         print(f"[DEBUG] skill_tools_node: Applied submit tool state update for {tool_name}")
-                        
-                        # [FIX] 2026-01-26: 设置完成信号，让 main_agent 知道子 agent 任务完成
-                        submit_result = submit_state_update.get("_submit_result", {})
-                        submit_type = submit_result.get("type", "")
-                        if submit_type == "status_report":
-                            out["completion_status"] = "COMPLETED"
-                            out["result_summary"] = f"现状分析完成：报告{submit_result.get('report_id', '')}"
-                            out["current_agent"] = None  # 清除，表示任务完成
-                            out["agent_resume_point"] = None
-                            out["_handoff_target"] = None  # 清除 handoff，避免路由误判
-                        elif submit_type == "action_plan":
-                            out["completion_status"] = "COMPLETED"
-                            out["result_summary"] = f"行动规划完成：计划{submit_result.get('plan_id', '')}"
-                            out["current_agent"] = None
-                            out["agent_resume_point"] = None
-                            out["_handoff_target"] = None
-                        elif submit_type == "action_guide":
-                            out["completion_status"] = "COMPLETED"
-                            out["result_summary"] = f"行动指南完成：指南{submit_result.get('guide_id', '')}"
-                            out["current_agent"] = None
-                            out["agent_resume_point"] = None
-                            out["_handoff_target"] = None
-                        elif submit_type == "guide_status_update":
-                            out["completion_status"] = "COMPLETED"
-                            out["result_summary"] = f"行动指南状态更新：{submit_result.get('new_status', '')}"
-                            out["current_agent"] = None
-                            out["agent_resume_point"] = None
-                            out["_handoff_target"] = None
-                        elif submit_type == "guide_content_update":
-                            out["completion_status"] = "COMPLETED"
-                            out["result_summary"] = f"行动指南内容更新：指南{submit_result.get('guide_id', '')}"
-                            out["current_agent"] = None
-                            out["agent_resume_point"] = None
-                            out["_handoff_target"] = None
+                elif tool_name == "return_to_main":
+                    out["_return_to_main"] = True
+                    out["_return_to_main_reason"] = tool_args.get("reason", "") or ""
             break
     
     # === Phase 1 处理：进入提问模式 ===
@@ -730,6 +700,31 @@ def skill_tools_node(state: AgentState) -> dict:
     if tool_outputs:
         out["_last_tool_outputs"] = tool_outputs
         out["_last_tool_content"] = tool_outputs[-1]["content"]
+
+    # === 任务完成转接 ===
+    if out.get("_return_to_main"):
+        submit_result = out.get("_submit_result") or state.get("_submit_result") or {}
+        submit_type = submit_result.get("type", "")
+        reason = out.get("_return_to_main_reason") or ""
+        if reason:
+            result_summary = reason
+        elif submit_type == "status_report":
+            result_summary = f"现状分析完成：报告{submit_result.get('report_id', '')}"
+        elif submit_type == "action_plan":
+            result_summary = f"行动规划完成：规划{submit_result.get('plan_id', '')}"
+        elif submit_type == "action_guide":
+            result_summary = f"行动指南完成：指南{submit_result.get('guide_id', '')}"
+        elif submit_type == "guide_status_update":
+            result_summary = f"行动指南状态更新：{submit_result.get('new_status', '')}"
+        elif submit_type == "guide_content_update":
+            result_summary = f"行动指南内容更新：指南{submit_result.get('guide_id', '')}"
+        else:
+            result_summary = "任务已完成"
+        out["completion_status"] = "COMPLETED"
+        out["result_summary"] = result_summary
+        out["current_agent"] = None
+        out["agent_resume_point"] = None
+        out["_handoff_target"] = None
 
     # === Phase 2 处理：执行提问 ===
     if ask_user_payload:

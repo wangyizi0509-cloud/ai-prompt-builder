@@ -22,7 +22,12 @@ from graph.message_builder import build_messages_for_model
 from graph.context_types import create_new_task
 from utils.message_utils import get_msg_role_and_content
 from graph.tools.ask_tool import get_ask_tool
-from graph.tools.submit_tools import submit_action_guide, update_guide_status, update_guide_content
+from graph.tools.submit_tools import (
+    submit_action_guide,
+    update_guide_status,
+    update_guide_content,
+    return_to_main,
+)
 from config import get_llm
 
 
@@ -139,54 +144,6 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
     if from_tool_call:
         print(f"[DEBUG] GuideAgent: Continuing after tool call (last_role={last_msg_role})")
     
-    submit_result = state.get("_submit_result")
-    if from_tool_call and isinstance(submit_result, dict):
-        submit_type = submit_result.get("type")
-        if submit_type in {"action_guide", "guide_status_update", "guide_content_update"}:
-            if submit_type == "action_guide":
-                guide_id = submit_result.get("guide_id", "")
-                message_text = f"（行动指南{guide_id}已生成）"
-                summary_text = f"行动指南完成：指南{guide_id}"
-            elif submit_type == "guide_content_update":
-                guide_id = submit_result.get("guide_id", "")
-                message_text = f"（行动指南{guide_id}内容已更新）"
-                summary_text = f"行动指南内容已更新：指南{guide_id}"
-            else:
-                message_text = "（行动指南状态已更新）"
-                summary_text = "行动指南状态已更新"
-
-            result = {
-                "completion_status": "COMPLETED",
-                "result_summary": summary_text,
-                "current_agent": None,
-                "agent_resume_point": None,
-                "question_streak_agent": None,
-                "question_streak_count": 0,
-                "question_count": 0,
-                "collected_info": {},
-                "inquiry_card": None,
-                "pending_questions": [],
-                "messages": [{
-                    "role": "assistant",
-                    "name": "guide_agent",
-                    "content": message_text,
-                }],
-                "pending_responses": state.get("pending_responses", []),
-                "_tool_caller": None,
-                "_submit_result": None,
-                "_last_tool_outputs": None,
-                "_last_tool_content": None,
-                "_handoff_target": None,
-                "_handoff_instruction": None,
-                "instruction": None,
-            }
-            task_complete_updates = _complete_current_task(state)
-            if "task_registry" in task_complete_updates:
-                result["task_registry"] = task_complete_updates.get("task_registry", {})
-            if task_updates and "task_registry" not in result:
-                result["task_registry"] = task_updates.get("task_registry", state.get("task_registry", {}))
-            return result
-
     # 准备 LLM（工具绑定在决策后进行）
     base_llm = get_llm(temperature=0.6)
     if from_tool_call:
@@ -264,7 +221,7 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
         # 允许在委派后继续发起 ask/submit/update 工具调用
         ask_tool = get_ask_tool(False)
         llm_with_tools = base_llm.bind_tools(
-            [ask_tool, submit_action_guide, update_guide_status, update_guide_content],
+            [ask_tool, submit_action_guide, update_guide_status, update_guide_content, return_to_main],
             parallel_tool_calls=True,
         )
         response = llm_with_tools.invoke(model_messages)
@@ -287,7 +244,7 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
         # 允许子 Agent 直接进入 ask 两阶段提问（Phase 1: ask(action="enable")）
         ask_tool = get_ask_tool(False)
         llm_with_tools = base_llm.bind_tools(
-            [ask_tool, submit_action_guide, update_guide_status, update_guide_content],
+            [ask_tool, submit_action_guide, update_guide_status, update_guide_content, return_to_main],
             parallel_tool_calls=True,
         )
         response = llm_with_tools.invoke(model_messages)
@@ -305,27 +262,6 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
                     "tool_calls": [tc["name"] for tc in response.tool_calls],
                 }],
             }
-    
-    # [FIX] 2026-01-26: 改进兜底逻辑
-    # 如果已经有 _submit_result（说明之前已经提交过），不应该报错
-    # 这种情况通常是路由错误导致的，应该直接返回 main_agent
-    existing_submit = state.get("_submit_result")
-    if isinstance(existing_submit, dict) and existing_submit.get("type") in ("action_guide", "guide_status_update", "guide_content_update"):
-        print("[DEBUG] GuideAgent: Already submitted, clearing state and returning to main_agent")
-        if existing_submit.get("type") == "action_guide":
-            result_summary = f"行动指南已完成（指南{existing_submit.get('guide_id', '')}）"
-        elif existing_submit.get("type") == "guide_content_update":
-            result_summary = f"行动指南内容已更新（指南{existing_submit.get('guide_id', '')}）"
-        else:
-            result_summary = "行动指南状态已更新"
-        return {
-            "completion_status": "COMPLETED",
-            "result_summary": result_summary,
-            "current_agent": None,
-            "agent_resume_point": None,
-            "_tool_caller": None,
-            "_submit_result": None,  # 清理，避免重复处理
-        }
     
     # 未触发工具调用，视为失败（硬切）
     err_msg = "系统异常：未调用 submit_action_guide 或 update_guide_status 工具提交行动指南结果。请重试。"

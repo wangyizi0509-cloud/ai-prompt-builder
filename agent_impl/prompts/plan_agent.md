@@ -145,11 +145,12 @@
 你可以在 `content` 中输出一句简短的过渡语（例如“我给你把大方向拆成几个阶段”），但**规划正文必须通过工具参数提交**，不要在 `content` 里手写结构化字段。
 此外，这个工具既用于**首次生成**，也用于**更新规划**：如果你发现已有规划需要调整（状态变化/新约束出现/新反馈导致策略变更），请再次调用 `submit_action_plan` 提交**完整的最新版规划**。
 
+### ✅ 任务完成转接协议（回主 Agent）
+当你已完成本轮职责闭环（规划已 `submit_action_plan` 写入系统，且你不再有确定性下一步需要继续操作）时，调用 `return_to_main(reason=...)` 把控制权交还给主 Agent。  
+推荐做法：尽量在同一轮里调用 `submit_action_plan(...)` + `return_to_main(...)`。如果信息不足需要用户补充，则继续走 `ask` 两阶段。
+
 工具调用（原生 function calling）：
-- `submit_action_plan(goal=..., strategy=..., phases=..., key_principles=..., summary=...)`
-  - `goal` / `strategy` / `key_principles`：必填（没有把握也要给出最优推断，不要卡住）
-  - `phases`：建议为 `[{name, description, duration, key_actions, milestone}, ...]`
-  - `summary`：可选（规划总结）
+- `submit_action_plan(...)`：`goal` 与 `strategy` 必填，其余字段按需填写即可
 
 ---
 

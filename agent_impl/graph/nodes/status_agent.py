@@ -21,7 +21,7 @@ from graph.message_builder import build_messages_for_model
 from graph.context_types import create_new_task
 from utils.message_utils import get_msg_role_and_content
 from graph.tools.ask_tool import get_ask_tool
-from graph.tools.submit_tools import submit_status_report
+from graph.tools.submit_tools import submit_status_report, return_to_main
 from config import get_llm
 
 
@@ -183,40 +183,6 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
     if from_tool_call:
         print(f"[DEBUG] StatusAgent: Continuing after tool call (last_role={last_msg_role})")
     
-    submit_result = state.get("_submit_result")
-    if from_tool_call and isinstance(submit_result, dict) and submit_result.get("type") == "status_report":
-        report_id = submit_result.get("report_id", "")
-        # === 设置完成信号 ===
-        result = {
-            "completion_status": "COMPLETED",
-            "result_summary": f"现状分析完成：报告{report_id}",
-            "current_agent": None,
-            "agent_resume_point": None,
-            "question_count": 0,
-            "collected_info": {},
-            "inquiry_card": None,
-            "pending_questions": [],
-            "messages": [{
-                "role": "assistant",
-                "name": "status_agent",
-                "content": f"（现状分析报告{report_id}已生成）",
-            }],
-            "pending_responses": state.get("pending_responses", []),
-            "_tool_caller": None,
-            "_submit_result": None,
-            "_last_tool_outputs": None,
-            "_last_tool_content": None,
-            "_handoff_target": None,
-            "_handoff_instruction": None,
-            "instruction": None,
-        }
-        task_complete_updates = _complete_current_task(state)
-        if "task_registry" in task_complete_updates:
-            result["task_registry"] = task_complete_updates.get("task_registry", {})
-        if task_updates and "task_registry" not in result:
-            result["task_registry"] = task_updates.get("task_registry", state.get("task_registry", {}))
-        return result
-
     # 准备 LLM（工具绑定在决策后进行）
     base_llm = get_llm(temperature=0.5)
     if from_tool_call:
@@ -293,7 +259,10 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
     elif from_tool_call:
         # 允许在委派后继续发起 ask/submit 工具调用
         ask_tool = get_ask_tool(False)
-        llm_with_tools = base_llm.bind_tools([ask_tool, submit_status_report])
+        llm_with_tools = base_llm.bind_tools(
+            [ask_tool, submit_status_report, return_to_main],
+            parallel_tool_calls=True,
+        )
         response = llm_with_tools.invoke(model_messages)
         if hasattr(response, "tool_calls") and response.tool_calls:
             print(f"[DEBUG] StatusAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
@@ -313,7 +282,10 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
         # 使用定制工具：status_agent 只允许使用 inquiry skill
         # 允许子 Agent 直接进入 ask 两阶段提问（Phase 1: ask(action="enable")）
         ask_tool = get_ask_tool(False)
-        llm_with_tools = base_llm.bind_tools([ask_tool, submit_status_report])
+        llm_with_tools = base_llm.bind_tools(
+            [ask_tool, submit_status_report, return_to_main],
+            parallel_tool_calls=True,
+        )
         response = llm_with_tools.invoke(model_messages)
         if hasattr(response, "tool_calls") and response.tool_calls:
             print(f"[DEBUG] StatusAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
@@ -329,21 +301,6 @@ def status_agent_node(state: AgentState) -> dict[str, Any]:
                     "tool_calls": [tc["name"] for tc in response.tool_calls],
                 }],
             }
-    
-    # [FIX] 2026-01-26: 改进兜底逻辑
-    # 如果已经有 _submit_result（说明之前已经提交过），不应该报错
-    # 这种情况通常是路由错误导致的，应该直接返回 main_agent
-    existing_submit = state.get("_submit_result")
-    if isinstance(existing_submit, dict) and existing_submit.get("type") == "status_report":
-        print("[DEBUG] StatusAgent: Already submitted, clearing state and returning to main_agent")
-        return {
-            "completion_status": "COMPLETED",
-            "result_summary": f"现状分析已完成（报告{existing_submit.get('report_id', '')}）",
-            "current_agent": None,
-            "agent_resume_point": None,
-            "_tool_caller": None,
-            "_submit_result": None,  # 清理，避免重复处理
-        }
     
     # 未触发工具调用，视为失败（硬切）
     err_msg = "系统异常：未调用 submit_status_report 工具提交现状分析报告。请重试。"

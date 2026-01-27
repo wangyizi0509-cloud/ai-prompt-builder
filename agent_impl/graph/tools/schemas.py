@@ -105,6 +105,10 @@ class UpdateGuideContentInput(BaseModel):
     update_reason: str = Field(default="", description="更新原因（用于历史追溯）")
 
 
+class ReturnToMainInput(BaseModel):
+    reason: str = Field(default="", description="转接回主 Agent 的原因（可选）")
+
+
 def tool_response(success: bool, message: str, data: Optional[Any] = None) -> str:
     payload = {"success": success, "message": message}
     if data is not None:

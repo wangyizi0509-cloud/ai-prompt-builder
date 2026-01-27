@@ -145,6 +145,8 @@
 当判断信息阻塞时，使用 `ask` 工具两阶段完成提问：先调用 `ask(action="enable")` 进入提问模式，再调用 `ask(questions=[...], intro=..., reasoning=...)` 输出提问卡片。
 
 ### 情况B：输出/更新行动指南
+推荐做法：尽量在同一轮把能确定的工具都调用完：`submit_action_guide(...)` / `update_guide_content(...)` +（如需）`update_guide_status(...)` + `return_to_main(...)`。如果信息阻塞需要用户补充，则继续走 `ask` 两阶段。
+
 你有两种提交方式，按“是否需要原地更新”来选：
 *   **新增一条指南**：调用 `submit_action_guide(...)`（会生成新的指南编号）。
 *   **原地更新某条已存在的指南**：调用 `update_guide_content(guide_id=...)`（会保留该指南 ID，并自动增加 version）。
@@ -152,21 +154,19 @@
 你可以在 `content` 中输出一句简短的过渡语（例如“我把下一步拆成一张任务卡，你照着做就行”），但**完整指南必须写入工具参数**，不要在 `content` 里手写结构化字段。
 
 工具调用（原生 function calling）：
-- `submit_action_guide(title=..., one_liner=..., guide_markdown=..., current_task=..., steps=..., talking_points=..., dos=..., donts=..., next_milestone=...)`
-  - `title` / `one_liner` / `guide_markdown`：关键字段（至少保证 `title` 与 `guide_markdown` 有内容）
-  - `guide_markdown`：必须为可直接给用户执行的完整 Markdown 指南（建议严格遵循下方“任务卡片模板”）
- - `update_guide_content(guide_id=..., guide_markdown=..., title=..., one_liner=..., current_task=..., steps=..., talking_points=..., dos=..., donts=..., next_milestone=..., update_reason=...)`
+- `submit_action_guide(...)`：至少提供 `title` 与 `guide_markdown`（其余字段按需填写）
+- `update_guide_content(...)`：必须提供 `guide_id` 与 `guide_markdown`  
   - `guide_id`：来自系统注入的“指南详情”里的 **ID** 字段（不要编造）
-  - `guide_markdown`：更新后的完整 Markdown 指南
-  - `update_reason`：一句话说明“这次为什么要改”（便于历史追溯，可选但建议填写）
+  - `update_reason`：建议用一句话说明“这次为什么要改”（便于历史追溯）
 
 ### 情况C：仅更新指南状态（不生成新指南）
 当你需要把某条既有指南标记为 `in_progress/completed/paused/cancelled/expired` 时，**必须调用**：
 - `update_guide_status(guide_id=..., new_status=..., reason=...)`
 
-如果你要用“新指南/更新后的指南”替换旧指南（旧指南需要收尾状态），请在**同一条回复**里一次性完成：
-* 先 `submit_action_guide(...)` **或** `update_guide_content(guide_id=...)`
-* 再对需要收尾的旧指南调用一个或多个 `update_guide_status(...)`
+如果本轮既需要生成新指南，又需要更新旧指南状态：可以在同一轮里调用 `submit_action_guide`，并按需再调用一个或多个 `update_guide_status`。
+
+### ✅ 任务完成转接协议（回主 Agent）
+当你完成了本轮所有必要工具操作后（例如：已 `submit_action_guide` / `update_guide_content` 写入新版指南，且需要收尾的旧指南状态也已 `update_guide_status` 处理完），调用 `return_to_main(reason=...)` 把控制权交还给主 Agent。  
 
 ---
 
