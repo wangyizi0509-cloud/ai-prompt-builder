@@ -50,6 +50,8 @@ SUBMIT_TOOL_COMPRESSION_FIELDS = {
     "submit_status_report": ["report_markdown"],
     "submit_action_plan": ["phases", "key_principles", "summary"],
     "submit_action_guide": ["guide_markdown", "steps", "talking_points", "dos", "donts"],
+    "update_guide_content": ["guide_markdown", "steps", "talking_points", "dos", "donts"],
+    "ask": ["questions", "intro", "reasoning"],
 }
 
 

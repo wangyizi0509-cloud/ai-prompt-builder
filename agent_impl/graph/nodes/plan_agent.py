@@ -261,6 +261,49 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
                 }],
             }
     
+    # #region agent log
+    # 检查是否有 invalid_tool_calls（模型调用了工具但 JSON 格式错误）
+    import json as _json
+    _log_path = "/Users/ant/Crushe/模型策略/.cursor/debug.log"
+    if hasattr(response, "invalid_tool_calls") and response.invalid_tool_calls:
+        for itc in response.invalid_tool_calls:
+            _log_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "location": "plan_agent.py:264",
+                "message": "INVALID_TOOL_CALL_DETECTED",
+                "hypothesisId": "A",
+                "sessionId": "debug-session",
+                "data": {
+                    "tool_name": itc.get("name") if isinstance(itc, dict) else getattr(itc, "name", None),
+                    "error": itc.get("error") if isinstance(itc, dict) else getattr(itc, "error", None),
+                    "args_preview": (itc.get("args") if isinstance(itc, dict) else getattr(itc, "args", ""))[:500] if (itc.get("args") if isinstance(itc, dict) else getattr(itc, "args", "")) else None,
+                    "full_args": itc.get("args") if isinstance(itc, dict) else getattr(itc, "args", ""),
+                }
+            }
+            with open(_log_path, "a") as _f:
+                _f.write(_json.dumps(_log_entry, ensure_ascii=False, default=str) + "\n")
+        print(f"[DEBUG] PlanAgent: Found {len(response.invalid_tool_calls)} invalid_tool_calls! Check {_log_path}")
+    
+    # 也记录 response 的其他属性
+    _response_log = {
+        "timestamp": datetime.now().isoformat(),
+        "location": "plan_agent.py:280",
+        "message": "RESPONSE_ATTRIBUTES",
+        "hypothesisId": "B",
+        "sessionId": "debug-session",
+        "data": {
+            "has_tool_calls": hasattr(response, "tool_calls") and bool(response.tool_calls),
+            "has_invalid_tool_calls": hasattr(response, "invalid_tool_calls") and bool(response.invalid_tool_calls),
+            "tool_calls_count": len(response.tool_calls) if hasattr(response, "tool_calls") and response.tool_calls else 0,
+            "invalid_tool_calls_count": len(response.invalid_tool_calls) if hasattr(response, "invalid_tool_calls") and response.invalid_tool_calls else 0,
+            "content_preview": (response.content[:200] if hasattr(response, "content") and response.content else ""),
+            "response_metadata": getattr(response, "response_metadata", {}),
+        }
+    }
+    with open(_log_path, "a") as _f:
+        _f.write(_json.dumps(_response_log, ensure_ascii=False, default=str) + "\n")
+    # #endregion
+    
     # 模型未调用工具，直接返回模型的回复内容
     print(f"[DEBUG] PlanAgent: No tool call, returning model response directly")
     if hasattr(response, "name"):
