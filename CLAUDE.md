@@ -134,6 +134,41 @@ PR 工作流: feature → develop → main
 
 详见 `CONTRIBUTING.md` 中的分支管理指南。
 
+## 生产部署
+
+### 部署架构
+
+| 服务 | 部署平台 | 配置文件 | 说明 |
+|------|----------|----------|------|
+| **FastAPI** | Zeabur | `Dockerfile` | API 服务器，处理 HTTP 请求 |
+| **LangGraph** | LangChain Cloud | `langgraph.json` | 智能体工作流引擎 |
+
+### 部署流程
+
+部署前必须完成以下验证步骤：
+
+```bash
+# 1. 同步远端 develop 分支最新代码
+git fetch origin develop
+git merge origin/develop
+
+# 2. 本地生产验证模式（up mode）
+python3 .trae/skills/service-manager/scripts/start_services.py --mode up
+
+# 3. 验证功能正常后，提交并推送
+git push origin feature/your-feature
+
+# 4. 创建 GitHub PR 到 develop 分支
+# PR 合并后自动触发部署
+```
+
+### 自动部署
+
+- **触发条件**: GitHub `develop` 分支有新的 push
+- **部署流程**:
+  1. Zeabur 监听 `develop` 分支，通过 `Dockerfile` 自动重建 FastAPI 服务
+  2. LangChain Cloud 监听 `develop` 分支，通过 `langgraph.json` 自动重新部署 LangGraph 应用
+
 ## 入口文件
 
 - `agent_impl/server.py`: FastAPI 服务器（生产）
