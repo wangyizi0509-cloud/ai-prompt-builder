@@ -500,9 +500,16 @@ def skill_tools_node(state: AgentState) -> dict:
                         for key, value in submit_state_update.items():
                             out[key] = value
                         print(f"[DEBUG] skill_tools_node: Applied submit tool state update for {tool_name}")
+                    # [FIX] 2026-01-28: submit 工具执行后，清除 agent_resume_point
+                    # 避免 route_after_skill_tools 误判为"等待用户输入"状态而直接返回 "end"
+                    # 这样可以确保路由回调用者 Agent，让模型看到 tool 结果并决定下一步
+                    out["agent_resume_point"] = None
                 elif tool_name == "return_to_main":
                     out["_return_to_main"] = True
                     out["_return_to_main_reason"] = tool_args.get("reason", "") or ""
+                    # [FIX] 2026-01-28: 清除 agent_resume_point，避免 route_after_skill_tools 误判
+                    # 检查顺序：agent_resume_point 检查在 _return_to_main 之前，必须先清除
+                    out["agent_resume_point"] = None
                 elif tool_name == "end_turn":
                     # main_agent 调用 end_turn：设置标记，路由时直接结束
                     out["_end_turn"] = True
