@@ -131,6 +131,21 @@ async def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
+    if not is_supabase_configured():
+        return None
+    
+    try:
+        response = supabase.table('users').select('id, email, username, created_at').eq('email', email).execute()
+        
+        if response.data:
+            return response.data[0]
+        return None
+    except Exception as e:
+        print(f"Error fetching user by email: {e}")
+        return None
+
+
 async def create_user_thread(user_id: str, thread_id: str) -> Dict[str, Any]:
     if not is_supabase_configured():
         return {
@@ -304,4 +319,3 @@ async def list_user_images_from_supabase(user_id: str, bucket_name: str = "image
     except Exception as e:
         print(f"Error listing user images from Supabase: {e}")
         return []
-

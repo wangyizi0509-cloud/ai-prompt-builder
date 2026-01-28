@@ -175,3 +175,24 @@ PR 工作流: feature → develop → main
 - FastAPI: 端口 8000
 
 检查命令: `lsof -i :PORT` 或 `ps aux | grep langgraph`
+
+## 测试账号生成（Supabase）
+
+目标：生成一批真实测试账号写入 Supabase，并把账号清单保存为 Markdown，同时可选更新 `TEST_USERS.md`。
+
+### 前置条件
+
+- 已配置 Supabase 环境变量（通常在 `.env` 中）：
+  - `SUPABASE_URL`
+  - `SUPABASE_SERVICE_ROLE_KEY`
+
+### 生成并写入 Supabase（同时导出 Markdown + 更新 TEST_USERS.md）
+
+```bash
+python scripts/generate_test_accounts_excel.py \
+  --mode supabase \
+  --count 20 \
+  --start 11 \
+  --md-output generated/test_accounts_real.md \
+  --update-test-users-md TEST_USERS.md
+```
