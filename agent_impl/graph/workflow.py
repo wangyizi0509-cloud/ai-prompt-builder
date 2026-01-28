@@ -76,6 +76,7 @@ from graph.tools.submit_tools import (
     apply_submit_tool_state_update,
     is_submit_tool,
 )
+from graph.message_builder import SUBMIT_TOOL_COMPRESSION_FIELDS
 
 MAX_NODE_STEPS_PER_TURN = 18  # 单次 /api/chat invoke 内允许的最大节点步数（防止死循环）
 
@@ -329,6 +330,78 @@ def route_after_skill_tools(state: AgentState) -> Literal["main_agent", "status_
         return "guide_agent"
     else:
         return "main_agent"
+
+
+def _get_tool_notice(tool_name: str) -> str:
+    notices = {
+        "submit_status_report": "已提交现状分析报告",
+        "submit_action_plan": "已提交行动规划",
+        "submit_action_guide": "已提交行动指南",
+        "update_guide_content": "已更新行动指南内容",
+        "ask": "已生成提问卡片",
+    }
+    return notices.get(tool_name, "已完成工具调用")
+
+
+def _compress_tool_call_ai_message(state: AgentState) -> Optional[dict]:
+    """
+    压缩调用了 submit_*/ask(Phase2)/update_guide_content 的 AIMessage。
+    - content 替换为简短通知
+    - tool_calls.args 大字段压缩为简短标记
+    """
+    messages = state.get("messages", []) or []
+    target_msg = None
+    for msg in reversed(messages):
+        md = convert_message_to_dict(msg) if not isinstance(msg, dict) else dict(msg)
+        role = md.get("role")
+        if role in ("assistant", "ai") and md.get("tool_calls"):
+            target_msg = md
+            break
+
+    if not target_msg:
+        return None
+
+    msg_id = target_msg.get("id") or ""
+    if not msg_id:
+        return None
+
+    tool_calls = target_msg.get("tool_calls") or []
+    compressed_calls = []
+    changed = False
+    content_notice = ""
+
+    for tc in tool_calls:
+        if not isinstance(tc, dict):
+            compressed_calls.append(tc)
+            continue
+        tool_name = str(tc.get("name") or "")
+        if not tool_name and isinstance(tc.get("function"), dict):
+            tool_name = str(tc["function"].get("name") or "")
+        tool_args = tc.get("args") or {}
+
+        if tool_name == "ask" and "questions" not in tool_args:
+            compressed_calls.append(tc)
+            continue
+
+        if tool_name in SUBMIT_TOOL_COMPRESSION_FIELDS:
+            new_tc = dict(tc)
+            new_tc["args"] = {"_compressed": True, "tool": tool_name}
+            compressed_calls.append(new_tc)
+            changed = True
+            if not content_notice:
+                content_notice = _get_tool_notice(tool_name)
+            continue
+
+        compressed_calls.append(tc)
+
+    if not changed and not content_notice:
+        return None
+
+    compressed_msg = dict(target_msg)
+    compressed_msg["id"] = msg_id
+    compressed_msg["content"] = content_notice or (target_msg.get("content") or "")
+    compressed_msg["tool_calls"] = compressed_calls
+    return compressed_msg
 
 
 def skill_tools_node(state: AgentState) -> dict:
@@ -818,6 +891,10 @@ def skill_tools_node(state: AgentState) -> dict:
         }]
         
         print(f"[DEBUG] skill_tools_node: Phase 2 - ask_mode reset to False, {len(questions)} questions generated")
+
+    compressed_ai_msg = _compress_tool_call_ai_message(state)
+    if compressed_ai_msg:
+        out["messages"] = [compressed_ai_msg] + (out.get("messages") or [])
 
     return out
 
