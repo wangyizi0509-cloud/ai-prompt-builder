@@ -3,6 +3,7 @@ cd "$(dirname "$0")"
 
 # 生产级验证模式端口
 PORT=${LANGGRAPH_PORT:-8123}
+export DEBUG_MODE=1
 
 echo "🚀 启动 LangGraph 服务 (Docker Stack)..."
 # 使用 langgraph up 启动生产级环境
