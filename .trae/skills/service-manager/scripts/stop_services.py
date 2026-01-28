@@ -9,6 +9,17 @@ import sys
 import os
 
 
+def run_command(args, cwd=None, env=None):
+    return subprocess.run(
+        args,
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 def get_processes_on_port(port):
     """Get PIDs of processes using the specified port"""
     try:
@@ -52,30 +63,36 @@ def get_project_root():
     return os.path.dirname(trae_dir)
 
 
+def stop_langgraph_docker_stack(agent_dir):
+    project_name = os.path.basename(os.path.abspath(agent_dir))
+    label_filters = [
+        f"label=com.docker.compose.project={project_name}",
+        f"label=com.docker.compose.project.working_dir={os.path.abspath(agent_dir)}",
+    ]
+
+    result = run_command(["docker", "ps", "-aq", *sum([["--filter", f] for f in label_filters], [])])
+    container_ids = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if not container_ids:
+        print("✅ No LangGraph Docker containers found")
+        return False
+
+    print(f"🔧 Stopping/removing Docker containers ({len(container_ids)}): {', '.join(container_ids)}")
+    run_command(["docker", "rm", "-f", *container_ids])
+    return True
+
+
 def main():
     print("🛑 Stopping Services")
     print("=" * 50)
     
-    # 1. 尝试使用官方命令停止 Docker Stack
+    # 1. 停止 LangGraph Up 模式（Docker Stack）
     print("\n🐳 Stopping LangGraph Docker Stack...")
     try:
         project_root = get_project_root()
         agent_dir = os.path.join(project_root, "agent_impl")
-        
-        # 执行 langgraph down
-        env = os.environ.copy()
-        # 尝试获取 Python 用户 bin 目录以确保能找到 langgraph cli
-        try:
-            import site
-            user_bin = os.path.join(site.getuserbase(), 'bin')
-            env["PATH"] = f"{user_bin}:{env.get('PATH', '')}"
-        except:
-            pass
-        
-        subprocess.run(['langgraph', 'down'], cwd=agent_dir, env=env, check=False)
-        print("✅ langgraph down command executed")
+        stop_langgraph_docker_stack(agent_dir)
     except Exception as e:
-        print(f"⚠️  Note: langgraph down failed (maybe not running): {e}")
+        print(f"⚠️  Note: stopping Docker Stack failed (maybe not running): {e}")
 
     # 2. 强力清理端口
     print("\n🔍 Cleaning up remaining processes on ports...")
