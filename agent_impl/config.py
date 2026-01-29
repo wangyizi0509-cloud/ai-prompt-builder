@@ -37,10 +37,11 @@ def get_llm(temperature: float = 0.7):
         )
     
     elif provider == "deepseek":
-        # 使用官方 ChatDeepSeek 集成，支持更稳定的 function calling
+        # 使用官方 ChatDeepSeek 集成；默认深度思考模型 deepseek-reasoner
         return ChatDeepSeek(
-            model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+            model=os.getenv("DEEPSEEK_MODEL", "deepseek-reasoner"),
             api_key=os.getenv("DEEPSEEK_API_KEY"),
+            base_url=os.getenv("DEEPSEEK_BASE_URL"),
             temperature=temperature,
         )
     
