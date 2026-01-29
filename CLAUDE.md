@@ -29,12 +29,17 @@ python3 .trae/skills/service-manager/scripts/stop_services.py
 
 ### 新增依赖（重要）
 
-项目存在两套依赖来源，新增 Python 依赖时需要**同步在两处添加**，否则很容易出现“本地可跑、Docker up 容器启动失败”的情况：
+本项目在不同运行/部署模式下，依赖的读取来源不同。新增 Python 依赖时需要**同步在三处添加**，否则很容易出现“本地可跑、部署/容器启动失败”的情况：
 
-- `agent_impl/requirements.txt`：本地开发/脚本安装常用入口
-- `agent_impl/pyproject.toml` → `[project].dependencies`：`langgraph up` 构建镜像时会基于该处安装项目依赖（镜像里用 `pip/uv install -e .`）
+- `agent_impl/requirements.txt`：本地开发（`langgraph dev` / `--mode dev`）常用安装入口（依赖由本机虚拟环境决定）
+- `agent_impl/pyproject.toml` → `[project].dependencies`：本地 `langgraph up` 构建镜像时安装依赖的来源（镜像内 `pip/uv install -e .`）
+- 仓库根目录 `pyproject.toml` → `[project].dependencies`：LangChain Cloud 部署构建时安装依赖的来源
 
-典型症状：`langgraph up` 的 `langgraph-api` 容器报 `ModuleNotFoundError` 然后退出（通常是 `pyproject.toml` 漏加导致）。
+典型症状速查：
+
+- **缺 `agent_impl/requirements.txt`**：本地 dev 模式运行时报 `ModuleNotFoundError`
+- **缺 `agent_impl/pyproject.toml`**：本地 `langgraph up` 的 `langgraph-api` 容器启动时报 `ModuleNotFoundError`
+- **缺根目录 `pyproject.toml`**：LangChain Cloud 启动时加载 graph 失败并报 `ModuleNotFoundError`（例如缺 `langchain-deepseek`）
 
 ### 测试
 
