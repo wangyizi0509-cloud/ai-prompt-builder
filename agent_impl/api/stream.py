@@ -5,16 +5,23 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from typing import Literal
+from typing import Literal, Optional
 
 router = APIRouter(prefix="/api")
 security = HTTPBearer(auto_error=False)
+
+
+class FeedbackModeInput(BaseModel):
+    guide_id: str
+    completion_status: Optional[Literal["success", "partial", "failed", "abandoned", "other"]] = None
+    completion_detail: Optional[str] = ""
 
 
 class StreamChatRequest(BaseModel):
     message: str
     session_id: str
     stream_mode: Literal["values", "updates", "messages", "debug"] = "updates"
+    feedback_mode: Optional[FeedbackModeInput] = None
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -280,6 +287,7 @@ async def chat_stream(
         print("[Stream SDK] Creating new session (checkpointer empty)")
         current_message_id = str(uuid.uuid4())
         state = create_initial_state(request.message, current_message_id=current_message_id)
+        state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
     else:
         print("[Stream SDK] Restoring existing session (checkpointer)")
         state = dict(base_state)
@@ -291,6 +299,7 @@ async def chat_stream(
         state["pending_questions"] = []
         state["pending_responses"] = []
         state["last_response_for_continuity"] = None
+        state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
     
     async def generate_stream():
         """生成流式响应"""

@@ -225,7 +225,11 @@ def create_test_layer2_memory() -> dict:
             "title": "首次破冰对话",
             "status": "completed",
             "summary": "用户发送破冰消息，Crush 回复积极。",
-            "user_feedback": "她回复了，说周末有空。",
+            "feedback_data": {
+                "completion_status": "success",
+                "completion_detail": "她回复了，说周末有空。",
+                "feedback_summary": "对方回应积极，愿意继续互动。",
+            },
             "completed_at": now.strftime("%Y-%m-%dT%H"),
             "created_at": now.strftime("%Y-%m-%dT%H"),
         },

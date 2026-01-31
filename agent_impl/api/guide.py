@@ -11,6 +11,9 @@ class UpdateGuideStatusRequest(BaseModel):
     new_status: Literal["in_progress", "completed", "paused", "cancelled", "expired"]
     feedback: Optional[str] = None
     execution_status: Optional[Literal["perfect", "good", "normal", "failed", "skipped"]] = None
+    completion_status: Optional[Literal["success", "partial", "failed", "abandoned", "other"]] = None
+    completion_detail: Optional[str] = None
+    feedback_summary: Optional[str] = None
     session_id: str
 
 
@@ -77,6 +80,17 @@ async def update_guide_status(request: UpdateGuideStatusRequest):
     else:
         updated_guide["completed_at"] = None
 
+    completion_status = request.completion_status
+    if not completion_status and request.execution_status:
+        status_map = {
+            "perfect": "success",
+            "good": "success",
+            "normal": "partial",
+            "failed": "failed",
+            "skipped": "abandoned",
+        }
+        completion_status = status_map.get(request.execution_status)
+
     if request.feedback:
         if not updated_guide.get("one_liner"):
             updated_guide["one_liner"] = request.feedback
@@ -84,8 +98,15 @@ async def update_guide_status(request: UpdateGuideStatusRequest):
             updated_guide["summary"] = request.feedback
         updated_guide["user_feedback"] = request.feedback
 
-    if request.execution_status:
-        updated_guide["execution_status"] = request.execution_status
+    if completion_status or request.completion_detail or request.feedback_summary:
+        feedback_data = dict(updated_guide.get("feedback_data") or {})
+        if completion_status:
+            feedback_data["completion_status"] = completion_status
+        if request.completion_detail:
+            feedback_data["completion_detail"] = request.completion_detail
+        if request.feedback_summary:
+            feedback_data["feedback_summary"] = request.feedback_summary
+        updated_guide["feedback_data"] = feedback_data
 
     updated_guides = list(all_guides)
     updated_guides[guide_index] = updated_guide
@@ -120,11 +141,20 @@ async def complete_guide(request: CompleteGuideRequest):
     [兼容] 旧接口：标记行动指南为已完成。
     建议迁移到 /api/update_guide_status。
     """
+    status_map = {
+        "perfect": "success",
+        "good": "success",
+        "normal": "partial",
+        "failed": "failed",
+        "skipped": "abandoned",
+    }
     wrapper = UpdateGuideStatusRequest(
         guide_id=request.guide_id,
         new_status="completed",
         feedback=request.feedback,
         execution_status=request.execution_status,
+        completion_status=status_map.get(request.execution_status),
+        completion_detail=request.feedback,
         session_id=request.session_id,
     )
     return await update_guide_status(wrapper)

@@ -10,7 +10,13 @@
 import json
 from langchain_core.tools import tool
 
-from graph.tools.schemas import DelegateToStatusInput, DelegateToPlanInput, DelegateToGuideInput, EndTurnInput
+from graph.tools.schemas import (
+    DelegateToStatusInput,
+    DelegateToPlanInput,
+    DelegateToGuideInput,
+    DelegateForFeedbackInput,
+    EndTurnInput,
+)
 
 
 @tool(args_schema=DelegateToStatusInput)
@@ -47,6 +53,24 @@ def delegate_to_guide(instruction: str) -> str:
         {
             "action": "handoff",
             "target": "guide_agent",
+        },
+        ensure_ascii=False,
+    )
+
+
+@tool(args_schema=DelegateForFeedbackInput)
+def delegate_for_feedback(
+    guide_id: str,
+    prefilled_status: str | None = None,
+    prefilled_detail: str = "",
+) -> str:
+    """发起行动反馈模式（用于打开反馈弹窗）。"""
+    return json.dumps(
+        {
+            "action": "feedback_handoff",
+            "guide_id": guide_id,
+            "prefilled_status": prefilled_status,
+            "prefilled_detail": prefilled_detail,
         },
         ensure_ascii=False,
     )

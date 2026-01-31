@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Literal
 
 router = APIRouter(prefix="/api")
 security = HTTPBearer(auto_error=False)
@@ -19,9 +19,16 @@ from utils.logger import get_logger
 logger = get_logger("chat")
 import time
 
+class FeedbackModeInput(BaseModel):
+    guide_id: str
+    completion_status: Optional[Literal["success", "partial", "failed", "abandoned", "other"]] = None
+    completion_detail: Optional[str] = ""
+
+
 class ChatRequest(BaseModel):
     message: str
     session_id: str
+    feedback_mode: Optional[FeedbackModeInput] = None
 
 
 async def get_optional_user_dep(
@@ -270,6 +277,7 @@ async def chat(
         ensure_thread_exists,
         get_thread_state,
         run_assistant,
+        update_thread_state,
     )
     from graph.state import create_initial_state
     
@@ -282,6 +290,7 @@ async def chat(
         logger.info(f"Creating new session for thread {thread_id} (checkpointer empty)")
         current_message_id = str(uuid.uuid4())
         state = create_initial_state(request.message, current_message_id=current_message_id)
+        state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
     else:
         state = dict(base_state)
         current_message_id = str(uuid.uuid4())
@@ -293,6 +302,7 @@ async def chat(
         state["pending_questions"] = []
         state["pending_responses"] = []
         state["last_response_for_continuity"] = None
+        state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
 
     try:
         logger.debug(f"Invoking workflow via SDK for thread {thread_id}...")
@@ -319,6 +329,9 @@ async def chat(
         background_tasks.add_task(_run_maintenance_tasks_sdk, request.session_id, thread_id)
         
         pending_responses = final_state.get("pending_responses", [])
+        feedback_prefill = final_state.get("feedback_prefill")
+        feedback_status = final_state.get("feedback_status")
+        feedback_question = final_state.get("feedback_question")
         
         # 兼容旧逻辑：如果 pending_responses 为空，但有 response 字段（虽然这种情况在 SDK 模式下较少见）
         # 或者为了前端兼容性，我们仍然构建一个 response 字符串
@@ -341,47 +354,28 @@ async def chat(
                 "next_action": final_state.get("next_action"),
             },
         )
+        # 注意：不要在这里手动把 messages 写回线程状态。
+        # LangGraph 的 AgentState.messages 使用 add_messages reducer，会“追加合并”。
+        # 如果我们每轮把“全量 messages”再写回一次，会导致消息数量近似翻倍增长，
+        # 进而引发 response 体积膨胀、性能劣化，甚至 /threads/{id}/state 400。
+        # 对话历史的持久化由 LangGraph + post_turn_finalize_node 负责（layer3_memory.all_messages）。
         
-        try:
-            normalized = []
-            fs_msgs = final_state.get("messages")
-            if isinstance(fs_msgs, list) and fs_msgs:
-                for m in fs_msgs:
-                    if isinstance(m, dict):
-                        role = m.get("role") or (m.get("type") if m.get("type") in ["human", "ai"] else "")
-                        content = m.get("content")
-                    else:
-                        role = "user" if getattr(m, "type", "") == "human" else ("assistant" if getattr(m, "type", "") == "ai" else "")
-                        content = getattr(m, "content", "")
-                    if content and role in ["user", "assistant", "human", "ai"]:
-                        normalized.append({"role": "user" if role in ["user", "human"] else "assistant", "content": content})
-            if not normalized and isinstance(final_state.get("layer3_memory"), dict):
-                alt = final_state["layer3_memory"].get("all_messages")
-                if isinstance(alt, list):
-                    for m in alt:
-                        if isinstance(m, dict):
-                            role = m.get("role")
-                            content = m.get("content")
-                            if content and role in ["user", "assistant"]:
-                                normalized.append({"role": role, "content": content})
-            if not normalized and pending_responses:
-                normalized.append({"role": "user", "content": request.message})
-                first = next((r for r in pending_responses if r.get("content")), None)
-                if first:
-                    normalized.append({"role": "assistant", "content": first["content"]})
-            if normalized:
-                update_thread_state(thread_id, {"messages": normalized})
-                logger.info(f"Persisted {len(normalized)} messages to thread {thread_id}")
-        except Exception as e:
-            logger.error(f"Persist messages failed for thread {thread_id}: {e}", exc_info=True)
-        
+        if feedback_prefill:
+            try:
+                update_thread_state(thread_id, {"feedback_prefill": None})
+            except Exception:
+                pass
+
         # 构造标准响应
         # 优先使用 pending_responses (结构化消息)
         # 同时也填充 response 字段作为 fallback
         return {
             "response": combined_response,  # Fallback for legacy clients
             "pending_responses": pending_responses, # Structured messages
-            "state": final_state
+            "state": final_state,
+            "feedback_prefill": feedback_prefill,
+            "feedback_status": feedback_status,
+            "feedback_question": feedback_question,
         }
     except Exception as e:
         import traceback

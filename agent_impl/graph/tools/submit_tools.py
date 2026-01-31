@@ -13,6 +13,7 @@ from typing import Optional, Any
 
 from langchain_core.tools import tool
 
+from utils.message_utils import get_msg_role_and_content
 from graph.context_types import (
     create_empty_layer2_memory,
     create_status_report_item,
@@ -31,6 +32,7 @@ from graph.tools.schemas import (
     tool_error_response,
 )
 
+FEEDBACK_SUMMARY_TAG = "[反馈完成]"
 
 # ============================================================
 # 工具实现（纯输出，不直接写 state）
@@ -88,6 +90,9 @@ def update_guide_status(
     guide_id: str,
     new_status: str,
     reason: str = "",
+    feedback_completion_status: str | None = None,
+    feedback_completion_detail: str = "",
+    feedback_summary: str = "",
 ) -> str:
     """更新行动指南状态（写入真源由 workflow 统一处理）"""
     if not guide_id.strip() or not new_status.strip():
@@ -121,6 +126,47 @@ def update_guide_content(
 def return_to_main(reason: str = "") -> str:
     """完成当前任务，将控制权交还给主 Agent"""
     return tool_response(True, "已完成任务，转接回主 Agent")
+
+
+# ============================================================
+# 反馈辅助函数
+# ============================================================
+
+def _find_message_index_by_id(messages: list, message_id: str) -> int:
+    if not message_id:
+        return -1
+    for i, msg in enumerate(messages or []):
+        # 支持 dict 类型
+        if isinstance(msg, dict):
+            if str(msg.get("id") or "") == message_id:
+                return i
+        else:
+            # 支持 LangChain Message 对象
+            msg_id = getattr(msg, "id", None)
+            if msg_id and str(msg_id) == message_id:
+                return i
+    return -1
+
+
+def _build_feedback_qa_history(messages: list, start_message_id: str, keep_tag: str) -> list[dict]:
+    """从消息中提取反馈追问历史（保留 user/assistant，忽略工具与总结）"""
+    if not messages or not start_message_id:
+        return []
+    start_idx = _find_message_index_by_id(messages, start_message_id)
+    if start_idx < 0:
+        return []
+    qa_history: list[dict] = []
+    for msg in messages[start_idx:]:
+        role, content = get_msg_role_and_content(msg)
+        if not content:
+            continue
+        if keep_tag and keep_tag in content:
+            continue
+        if role in ("assistant", "ai"):
+            qa_history.append({"role": "ai", "content": content})
+        elif role == "user":
+            qa_history.append({"role": "user", "content": content})
+    return qa_history
 
 
 # ============================================================
@@ -280,7 +326,6 @@ def apply_submit_tool_state_update(state: dict, tool_name: str, tool_args: dict)
         new_guide_item = create_action_guide_item(
             guide=guide_payload,
             guide_id=new_guide_id,
-            status="pending",
             title=title,
             one_liner=one_liner,
         )
@@ -310,6 +355,9 @@ def apply_submit_tool_state_update(state: dict, tool_name: str, tool_args: dict)
         guide_id = (tool_args.get("guide_id") or "").strip()
         new_status = (tool_args.get("new_status") or "").strip()
         reason = (tool_args.get("reason") or "").strip()
+        feedback_completion_status = tool_args.get("feedback_completion_status")
+        feedback_completion_detail = (tool_args.get("feedback_completion_detail") or "").strip()
+        feedback_summary = (tool_args.get("feedback_summary") or "").strip()
         if not guide_id or not new_status:
             return {}
 
@@ -337,6 +385,29 @@ def apply_submit_tool_state_update(state: dict, tool_name: str, tool_args: dict)
                 if new_status in ("cancelled", "expired") and not updated.get("summary"):
                     updated["summary"] = reason
 
+            if feedback_completion_status or feedback_completion_detail or feedback_summary:
+                feedback_data = dict(updated.get("feedback_data") or {})
+                if feedback_completion_status:
+                    feedback_data["completion_status"] = feedback_completion_status
+                if feedback_completion_detail:
+                    feedback_data["completion_detail"] = feedback_completion_detail
+                if feedback_summary:
+                    feedback_data["feedback_summary"] = feedback_summary
+
+                feedback_mode = state.get("feedback_mode") or {}
+                start_message_id = feedback_mode.get("start_message_id")
+                qa_history = _build_feedback_qa_history(
+                    state.get("messages", []),
+                    start_message_id,
+                    FEEDBACK_SUMMARY_TAG,
+                )
+                if qa_history:
+                    feedback_data["qa_history"] = qa_history
+
+                updated["feedback_data"] = feedback_data
+                if feedback_completion_detail and not updated.get("user_feedback"):
+                    updated["user_feedback"] = feedback_completion_detail
+
             all_guides[i] = updated
             did_update = True
             break
@@ -349,7 +420,7 @@ def apply_submit_tool_state_update(state: dict, tool_name: str, tool_args: dict)
         updated_layer2["last_updated"] = datetime.now().isoformat()
         updated_layer2["version"] = updated_layer2.get("version", 1) + 1
 
-        return {
+        updates = {
             "layer2_memory": updated_layer2,
             "action_guides": updated_layer2["action_guides"],
             "_submit_result": {
@@ -358,6 +429,23 @@ def apply_submit_tool_state_update(state: dict, tool_name: str, tool_args: dict)
                 "new_status": new_status,
             },
         }
+
+        if feedback_summary or feedback_completion_status or feedback_completion_detail:
+            compressions = list(state.get("feedback_compressions") or [])
+            feedback_mode = state.get("feedback_mode") or {}
+            start_message_id = feedback_mode.get("start_message_id")
+            if start_message_id:
+                compressions.append({
+                    "guide_id": guide_id,
+                    "start_message_id": start_message_id,
+                    "keep_tag": FEEDBACK_SUMMARY_TAG,
+                })
+            updates["feedback_compressions"] = compressions
+            updates["feedback_mode"] = None
+            updates["feedback_status"] = "completed"
+            updates["feedback_question"] = None
+
+        return updates
 
     if tool_name == "update_guide_content":
         guide_id = (tool_args.get("guide_id") or "").strip()

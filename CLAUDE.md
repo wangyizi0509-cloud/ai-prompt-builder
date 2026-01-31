@@ -27,6 +27,21 @@ python3 .trae/skills/service-manager/scripts/start_services.py --mode up
 python3 .trae/skills/service-manager/scripts/stop_services.py
 ```
 
+### 运行模式说明（重要）
+
+为了避免把“本地调试”和“LangGraph 本地服务”混在一起，这里把运行方式明确分成 3 种：
+
+1. **推荐 Dev/Up 模式（日常开发/生产验证）**：通过 `start_services.py` 启动  
+   - Dev：`langgraph dev` + `agent_impl/server.py`  
+   - Up：`langgraph up` + `agent_impl/server.py`  
+   - 特点：**对话状态（thread）与持久化由 LangGraph CLI/平台管理**（见下方“状态持久化”）
+
+2. **LangGraph Cloud（线上/云端）**：`agent_impl/server.py` 连接云端 LangGraph  
+   - 特点：持久化同样由 LangGraph 平台管理
+
+3. **单进程 Local Mode（仅用于快速本机调试）**：`agent_impl/server_local.py`  
+   - 特点：使用 `MemorySaver()`，**进程退出即丢失**，不建议当作“持久化开发模式”
+
 ### 新增依赖（重要）
 
 项目存在两套依赖来源，新增 Python 依赖时需要**同步在两处添加**，否则很容易出现“本地可跑、Docker up 容器启动失败”的情况：
@@ -74,14 +89,13 @@ pytest tests/test_specific_file.py
 
 ### 人机协作系统
 
-系统使用 LangGraph 的 `interrupt()` 机制暂停执行并等待用户输入。但为了 HTTP API 兼容性，实现了**基于状态恢复的模式**：
+系统**不使用** LangGraph 原生的 `interrupt()`。为了更好地兼容 HTTP API，采用**基于状态恢复的模式（Router Resume）**：
 
-1. 需要中断时，节点将意图保存到状态并返回特殊状态码
-2. 路由节点检测到此状态并保存检查点
-3. 下次用户消息时，路由节点检查待处理的中断
-4. 如果发现中断，使用用户输入恢复被中断的节点
+1. 需要暂停时，节点把“要继续的 Agent + 继续点（resume point）”写入状态（如 `current_agent` / `agent_resume_point`）
+2. 本轮直接结束，等待用户下一条输入
+3. 下一轮路由节点检测到上述标记，直接回到对应 Agent 继续执行
 
-这使得系统在保持 HTTP 兼容性的同时，通过 Checkpointer 实现跨会话持久化。
+这样既保持 HTTP 的无状态特性，又能通过 Checkpointer 实现跨会话持久化。
 
 ### 技能系统
 
@@ -103,9 +117,9 @@ pytest tests/test_specific_file.py
 
 ### 状态持久化
 
-- **开发环境**: 内存检查点（临时）
-- **生产环境**: 通过 `langgraph-checkpoint-postgres` 使用 PostgreSQL
-- **存储策略**: `graph/storage_strategy.py` 和 `graph/crush_chat_storage.py`
+- **Dev/Up/Cloud（推荐路径）**：当通过 `langgraph dev` / `langgraph up` / LangGraph Cloud 运行时，**对话状态与持久化由 LangGraph CLI/平台负责**。因此 `agent_impl/agent.py` 中不会显式传入 checkpointer（否则可能报错）。
+- **Local Mode（仅调试）**：`agent_impl/server_local.py` 显式使用 `MemorySaver()`，只在内存中保存状态，进程退出即丢失。
+- **存储策略相关代码**：`agent_impl/graph/storage_strategy.py` 与 `agent_impl/graph/crush_chat_storage.py`
 
 生产模式下状态可在服务器重启后保留，实现真正的跨会话对话。
 
@@ -114,11 +128,13 @@ pytest tests/test_specific_file.py
 ### 环境变量
 
 `.env` 中的关键变量：
-- `LLM_PROVIDER`: deepseek, openai, claude 或 doubao
-- `DEBUG_MODE`: 启用自动重载和详细日志
-- `LANGCHAIN_API_KEY`: LangSmith 用于追踪/调试
-- `POSTGRES_*`: 检查点数据库连接
-- `SUPABASE_URL`: 后端数据库和认证
+- `LLM_PROVIDER`: deepseek, openai, claude, doubao（以及 mock 用于纯逻辑测试）
+- `DEBUG_MODE`: `1` 使用本地 LangGraph（由 `LANGGRAPH_LOCAL_URL` 指定），`0` 使用 LangGraph Cloud
+- `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` / `LANGSMITH_TRACING`: LangSmith 追踪/调试
+- `LANGGRAPH_LOCAL_URL`: 本地 LangGraph 地址（dev/up 模式由启动脚本注入）
+- `LANGGRAPH_CLOUD_URL` / `LANGGRAPH_CLOUD_API_KEY` / `LANGGRAPH_CLOUD_ASSISTANT_ID`: 云端 LangGraph 配置
+- `DATABASE_URL`: Checkpointer 数据库连接（通常由 langgraph up / 云端环境消费）
+- `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`: Supabase 配置（认证与用户线程绑定）
 
 ### LLM 提供商切换
 
@@ -186,10 +202,10 @@ git push origin feature/your-feature
 
 - `README.md`: 项目概述和快速入门
 - `STARTUP_GUIDE.md`: 详细服务启动说明
-- `docs/architecture.md`: v2.1 架构设计细节
-- `docs/skill_demo.md`: 技能系统演示
-- `docs/debug_guide.md`: 调试流程
-- `docs/multi_ai_collaboration_sop.md`: AI 协作指南
+- `agent_impl/docs/architecture.md`: v2.1 架构设计细节
+- `agent_impl/docs/skill_demo.md`: 技能系统演示
+- `agent_impl/docs/debug_guide.md`: 调试流程
+- `agent_impl/docs/multi_ai_collaboration_sop.md`: AI 协作指南
 
 ## 技能框架
 
