@@ -88,6 +88,11 @@ class UpdateGuideStatusInput(BaseModel):
         "expired",
     ] = Field(description="目标状态")
     reason: str = Field(default="", description="更新原因（可选）")
+    feedback_completion_status: Optional[
+        Literal["success", "partial", "failed", "abandoned", "other"]
+    ] = Field(default=None, description="反馈完成状态（可选）")
+    feedback_completion_detail: str = Field(default="", description="反馈完成详情（可选）")
+    feedback_summary: str = Field(default="", description="反馈总结（可选）")
 
 
 class UpdateGuideContentInput(BaseModel):
@@ -134,6 +139,16 @@ class DelegateToPlanInput(DelegateInstructionInput):
 
 class DelegateToGuideInput(DelegateInstructionInput):
     """委派给 guide_agent 的输入"""
+
+
+class DelegateForFeedbackInput(BaseModel):
+    """发起行动反馈模式（用于打开反馈弹窗）"""
+    guide_id: str = Field(description="指南唯一 ID（ActionGuideItem.id）")
+    prefilled_status: Literal["success", "partial", "failed", "abandoned", "other"] | None = Field(
+        default=None,
+        description="预填完成状态（可选）",
+    )
+    prefilled_detail: str = Field(default="", description="预填完成详情（可选）")
 
 
 def tool_response(success: bool, message: str, data: Optional[Any] = None) -> str:

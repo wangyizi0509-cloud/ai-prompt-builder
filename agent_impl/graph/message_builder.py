@@ -288,11 +288,17 @@ def build_conversation_history(
             last_tool_name = _get_tool_name(messages[i])
             break
 
+    feedback_compressions = state.get("feedback_compressions") or []
+    compression_ranges = _build_feedback_compression_ranges(messages, feedback_compressions)
+
     # 过滤并转换消息
     filtered_messages: list[BaseMessage] = []
     
     for i, msg in enumerate(messages):
         role, content = get_msg_role_and_content(msg)
+
+        if _should_skip_feedback_message(i, content or "", compression_ranges):
+            continue
         
         # 跳过无效消息
         if not role:
@@ -487,15 +493,27 @@ def _convert_to_base_message(
         # 检查是否有 tool_calls
         tool_calls = None
         name = None
+        reasoning_content = None
         if isinstance(msg, dict):
             tool_calls = msg.get("tool_calls")
             name = msg.get("name")
+            reasoning_content = msg.get("reasoning_content")
+            if reasoning_content is None:
+                reasoning_content = (msg.get("additional_kwargs") or {}).get("reasoning_content")
         else:
             tool_calls = getattr(msg, "tool_calls", None)
             name = getattr(msg, "name", None)
+            reasoning_content = getattr(msg, "reasoning_content", None)
+            if reasoning_content is None:
+                reasoning_content = (getattr(msg, "additional_kwargs", {}) or {}).get("reasoning_content")
         
+        additional_kwargs = {"reasoning_content": reasoning_content} if reasoning_content else None
         if tool_calls:
+            if additional_kwargs:
+                return AIMessage(content=content, tool_calls=tool_calls, name=name, additional_kwargs=additional_kwargs)
             return AIMessage(content=content, tool_calls=tool_calls, name=name)
+        if additional_kwargs:
+            return AIMessage(content=content, name=name, additional_kwargs=additional_kwargs)
         return AIMessage(content=content, name=name)
     
     elif role == "tool":
@@ -556,6 +574,55 @@ def _apply_sliding_window(
                 break
     
     return messages[start_idx:]
+
+
+def _build_feedback_compression_ranges(messages: list, compressions: list) -> list[dict]:
+    ranges: list[dict] = []
+    if not messages or not compressions:
+        return ranges
+    for comp in compressions:
+        if not isinstance(comp, dict):
+            continue
+        start_id = str(comp.get("start_message_id") or "")
+        keep_tag = str(comp.get("keep_tag") or "")
+        if not start_id:
+            continue
+        start_idx = -1
+        for i, msg in enumerate(messages):
+            if _get_message_id(msg) == start_id:
+                start_idx = i
+                break
+        if start_idx < 0:
+            continue
+        keep_idx = None
+        for i in range(start_idx, len(messages)):
+            _, content = get_msg_role_and_content(messages[i])
+            if keep_tag and content and keep_tag in content:
+                keep_idx = i
+        if keep_idx is None:
+            for i in range(len(messages) - 1, start_idx - 1, -1):
+                role, content = get_msg_role_and_content(messages[i])
+                if role in ("assistant", "ai") and content:
+                    keep_idx = i
+                    break
+        if keep_idx is None:
+            keep_idx = start_idx
+        ranges.append({"start_idx": start_idx, "keep_idx": keep_idx, "keep_tag": keep_tag})
+    return ranges
+
+
+def _should_skip_feedback_message(index: int, content: str, ranges: list[dict]) -> bool:
+    for r in ranges:
+        start_idx = r.get("start_idx", -1)
+        keep_idx = r.get("keep_idx", -1)
+        keep_tag = r.get("keep_tag") or ""
+        if start_idx <= index < keep_idx:
+            if keep_tag and content and keep_tag in content:
+                return False
+            return True
+        if index == keep_idx:
+            return False
+    return False
 
 
 def _get_tool_name(msg: dict | object) -> str:

@@ -7,7 +7,7 @@
 我们提供了封装好的 Skill 脚本，可以一键管理所有服务。
 
 ### 1. 开发模式 (Dev Mode) - **推荐日常开发使用**
-特点：启动快，轻量级，不需要 Docker。状态持久化到本地目录。
+特点：启动快，轻量级，不需要 Docker。LangGraph 服务由 `langgraph dev` 启动，状态/持久化由 LangGraph 本地服务管理（FastAPI 通过 SDK 连接本地 LangGraph）。
 ```bash
 python3 .trae/skills/service-manager/scripts/start_services.py --mode dev
 ```
@@ -48,7 +48,7 @@ python3 .trae/skills/service-manager/scripts/restart_services.py
 | :--- | :--- | :--- |
 | **启动速度** | 极快 (< 5s) | 较慢 (15s+, 需冷启动 Docker) |
 | **依赖** | 仅 Python | Docker Desktop |
-| **持久化** | 本地文件 (.langgraph) | **PostgreSQL (Docker 卷)** |
+| **持久化** | 由 LangGraph Dev 本地服务管理 | **PostgreSQL (Docker 卷)** |
 | **端口 (LangGraph)** | 2024 | 8123 |
 | **适用场景** | 逻辑开发、Prompt 调试 | 持久化测试、多用户并发模拟 |
 
@@ -56,8 +56,8 @@ python3 .trae/skills/service-manager/scripts/restart_services.py
 
 ## 🔍 日志查看
 
-- **后端日志**: [agent_impl/logs/backend.log](file:///Users/wuyu/Documents/trae_projects/agent_impl_1/agent_impl/agent_impl/logs/backend.log)
-- **实时监控**: `tail -f agent_impl/logs/backend.log`
+- **后端日志**: 默认会输出到你启动服务的终端；如果启用了文件日志，通常在 `agent_impl/logs/backend.log`
+- **实时监控**: `tail -f agent_impl/logs/backend.log`（若该文件存在）
 
 ## 🛠️ 故障排查
 

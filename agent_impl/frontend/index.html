@@ -951,12 +951,14 @@
                         @keyup.enter="sendMessage"
                         type="text" 
                         placeholder="请输入您的情感问题..." 
+                        data-testid="chat-input"
                         class="flex-1 bg-gray-100 border-0 rounded-full px-4 py-2.5 text-sm focus:ring-2 focus:ring-violet-500 focus:outline-none"
                         :disabled="isLoading"
                     >
                     <button 
                         @click="sendMessage"
                         :disabled="!inputMessage.trim() || isLoading"
+                        data-testid="chat-send-btn"
                         class="bg-violet-600 text-white w-10 h-10 rounded-full flex items-center justify-center hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -968,7 +970,7 @@
 
             <!-- Overlay Backdrop (Shared) -->
             <div 
-                v-if="showStatusDrawer || showPlanDrawer || showInquiryModal || showCompleteGuideModal" 
+                v-if="showStatusDrawer || showPlanDrawer || showInquiryModal || showFeedbackModal" 
                 class="drawer-overlay"
                 @click="closeAllOverlays"
             ></div>
@@ -1045,6 +1047,8 @@
                     <!-- 新版：支持多个指南 -->
                     <div v-if="state.action_guides && state.action_guides.length > 0" class="space-y-4">
                         <div v-for="(guide, idx) in state.action_guides" :key="guide.id || idx" 
+                             data-testid="guide-card"
+                             :data-guide-id="guide.id || idx"
                              class="bg-white p-4 rounded-xl shadow-sm">
                             <div class="flex justify-between items-start mb-3">
                                 <h4 class="font-bold text-gray-800 text-sm">
@@ -1058,14 +1062,27 @@
                                         {{ guide.status === 'pending' ? '待执行' : guide.status === 'in_progress' ? '执行中' : '已完成' }}
                                     </span>
                                 </h4>
-                                <button v-if="guide.status !== 'completed'" 
-                                        @click="openCompleteGuideModal(guide)"
+                                <button v-if="canGiveFeedback(guide)" 
+                                        @click="openFeedbackModal(guide)"
+                                        data-testid="guide-feedback-btn"
                                         class="px-3 py-1 bg-pink-500 text-white text-xs rounded hover:bg-pink-600 transition">
-                                    完成任务
+                                    反馈
                                 </button>
                             </div>
                             <div class="markdown-body text-sm text-gray-600" 
                                  v-html="renderMarkdown(guide.guide?.guide_content || guide.guide_content || '')"></div>
+                            
+                            <!-- 反馈总结模块 -->
+                            <div v-if="guide.feedback_data && guide.feedback_data.feedback_summary" 
+                                 class="mt-4 pt-4 border-t border-gray-100">
+                                <div class="flex items-start gap-2">
+                                    <span class="text-pink-500">💭</span>
+                                    <div>
+                                        <h5 class="text-xs font-semibold text-gray-500 mb-1">反馈总结</h5>
+                                        <p class="text-sm text-gray-700">{{ guide.feedback_data.feedback_summary }}</p>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <!-- 旧版兼容：单个指南 -->
@@ -1239,35 +1256,49 @@
                 </div>
             </div>
 
-            <!-- COMPLETE GUIDE MODAL (Bottom Up) -->
-            <div class="bottom-modal" :class="{ 'open': showCompleteGuideModal }">
+            <!-- FEEDBACK MODAL (Bottom Up) -->
+            <div class="bottom-modal" :class="{ 'open': showFeedbackModal }" data-testid="feedback-modal">
                 <div class="p-4 border-b flex justify-between items-center flex-shrink-0 bg-white">
-                    <h3 class="font-bold text-gray-800">✅ 完成任务反馈</h3>
-                    <button @click="closeCompleteGuideModal" class="text-gray-400 hover:text-gray-600">✕</button>
+                    <h3 class="font-bold text-gray-800">📝 行动反馈</h3>
+                    <button @click="closeFeedbackModal" data-testid="feedback-modal-close" class="text-gray-400 hover:text-gray-600">✕</button>
                 </div>
-                <div class="flex-1 overflow-y-auto p-4 bg-gray-50 min-h-0" v-if="currentCompletingGuide">
+                <div class="flex-1 overflow-y-auto p-4 bg-gray-50 min-h-0" v-if="currentFeedbackGuide">
                     <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
-                        <h4 class="font-bold text-gray-800 mb-2 text-sm">任务：{{ currentCompletingGuide.guide?.current_task || '行动指南' }}</h4>
+                        <h4 class="font-bold text-gray-800 mb-2 text-sm">任务：{{ currentFeedbackGuide.guide?.current_task || currentFeedbackGuide.title || '行动指南' }}</h4>
                     </div>
                     
                     <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">执行情况</label>
-                        <select v-model="completeGuideForm.execution_status" 
+                        <label class="block text-sm font-medium text-gray-700 mb-2">完成状态</label>
+                        <select v-model="feedbackForm.completion_status" 
+                                :disabled="isFeedbackFollowup"
+                                data-testid="feedback-status-select"
                                 class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500">
                             <option value="">请选择</option>
-                            <option value="perfect">完美执行</option>
-                            <option value="good">执行良好</option>
-                            <option value="normal">一般</option>
-                            <option value="failed">执行失败</option>
-                            <option value="skipped">无法执行</option>
+                            <option value="success">成功</option>
+                            <option value="partial">部分完成</option>
+                            <option value="failed">失败</option>
+                            <option value="abandoned">放弃</option>
+                            <option value="other">其他</option>
                         </select>
                     </div>
                     
                     <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">结果反馈</label>
-                        <textarea v-model="completeGuideForm.feedback" 
+                        <label class="block text-sm font-medium text-gray-700 mb-2">完成详情</label>
+                        <textarea v-model="feedbackForm.completion_detail" 
+                                  :disabled="isFeedbackFollowup"
                                   placeholder="请描述执行结果、对方的反应、遇到的问题等..."
                                   rows="4"
+                                  data-testid="feedback-detail-textarea"
+                                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500"></textarea>
+                    </div>
+
+                    <div v-if="feedbackQuestion" class="bg-white rounded-xl p-4 shadow-sm mb-4" data-testid="feedback-followup-block">
+                        <div class="text-sm font-medium text-gray-700 mb-2">追问</div>
+                        <div class="text-sm text-gray-600 mb-3" data-testid="feedback-followup-question">{{ feedbackQuestion }}</div>
+                        <textarea v-model="feedbackForm.followup_answer" 
+                                  placeholder="请在这里补充..."
+                                  rows="3"
+                                  data-testid="feedback-followup-textarea"
                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500"></textarea>
                     </div>
                 </div>
@@ -1275,11 +1306,12 @@
                 <!-- Fixed Submit Footer -->
                 <div class="p-4 border-t bg-white flex-shrink-0">
                     <button 
-                        @click="submitCompleteGuide"
-                        :disabled="!canSubmitCompleteGuide"
+                        @click="submitFeedback"
+                        :disabled="!canSubmitFeedback"
+                        data-testid="feedback-submit-btn"
                         class="w-full bg-pink-600 text-white py-3 rounded-full font-bold hover:bg-pink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-lg"
                     >
-                        提交完成
+                        {{ isFeedbackFollowup ? '提交回答' : '提交反馈' }}
                     </button>
                 </div>
             </div>
@@ -1415,7 +1447,7 @@
                 const showStatusDrawer = ref(false);
                 const showPlanDrawer = ref(false);
                 const showInquiryModal = ref(false);
-                const showCompleteGuideModal = ref(false);
+                const showFeedbackModal = ref(false);
                 const showDebug = ref(false);
                 const showContext = ref(false);
 
@@ -1475,12 +1507,16 @@
                 const inquiryAnswers = ref({});
                 const fileInputRefs = ref({});  // 文件输入框引用
                 
-                // Complete Guide Form State
-                const currentCompletingGuide = ref(null);
-                const completeGuideForm = ref({
-                    execution_status: '',
-                    feedback: ''
+                // Feedback Form State
+                const currentFeedbackGuide = ref(null);
+                const feedbackForm = ref({
+                    completion_status: '',
+                    completion_detail: '',
+                    followup_answer: ''
                 });
+                const feedbackQuestion = ref('');
+                const feedbackStatus = ref(null);
+                const isFeedbackSubmitting = ref(false);
 
                 const sessionId = ref('session_' + Math.random().toString(36).substr(2, 9));
                 // Studio thread_id（需要符合 UUID，否则会报 400）
@@ -1818,8 +1854,7 @@
                                         completed_at: guide.completed_at,
                                         summary: guide.summary,
                                         one_liner: guide.one_liner,
-                                        user_feedback: guide.user_feedback,
-                                        execution_status: guide.execution_status,
+                                        feedback_data: guide.feedback_data,
                                     };
                                 } else {
                                     throw new Error(`Guide with id ${id} not found`);
@@ -1888,8 +1923,7 @@
                                 completed_at: data.completed_at,
                                 summary: data.summary,
                                 one_liner: data.one_liner,
-                                user_feedback: data.user_feedback,
-                                execution_status: data.execution_status,
+                                feedback_data: data.feedback_data,
                             };
                         } else if (type === 'compressed_messages') {
                             content = data.summary || '（无摘要内容）';
@@ -2036,7 +2070,7 @@
                     showStatusDrawer.value = false;
                     showPlanDrawer.value = false;
                     showInquiryModal.value = false;
-                    showCompleteGuideModal.value = false;
+                    showFeedbackModal.value = false;
                 };
 
                 // Openers
@@ -2185,6 +2219,16 @@
                         // 更新 state
                         state.value.action_guides = newGuides;
                     }
+
+                    // 反馈弹窗预填（来自主流程触发）
+                    if (newState.feedback_prefill && newState.feedback_prefill.guide_id) {
+                        const guideId = newState.feedback_prefill.guide_id;
+                        const guideList = state.value.action_guides || [];
+                        const targetGuide = guideList.find(g => String(g?.id) === String(guideId));
+                        openFeedbackModal(targetGuide || { id: guideId, title: newState.feedback_prefill.guide_title || '行动指南' }, newState.feedback_prefill);
+                        newState.feedback_prefill = null;
+                        hasUpdates = true;
+                    }
                     
                     // 兼容旧版：单个 action_guide
                     if (newState.action_guide && newState.action_guide !== oldState.action_guide) {
@@ -2231,6 +2275,17 @@
                         hasUpdates = true;
                     } else {
                         inquiryCard.value = null;
+                    }
+
+                    // Feedback flow updates
+                    if (newState.feedback_status === 'asking') {
+                        feedbackStatus.value = 'asking';
+                        feedbackQuestion.value = newState.feedback_question || '';
+                        // 注意：弹窗已在提交时关闭，追问会在主聊天界面显示
+                    } else if (newState.feedback_status === 'completed') {
+                        feedbackStatus.value = 'completed';
+                        feedbackQuestion.value = '';
+                        // 注意：弹窗已在提交时关闭，无需再次关闭
                     }
 
                     // Update local state
@@ -2538,46 +2593,100 @@
                     }
                 };
 
-                // ============ 完成指南相关 ============
-                
-                const openCompleteGuideModal = (guide) => {
-                    currentCompletingGuide.value = guide;
-                    completeGuideForm.value = {
-                        execution_status: '',
-                        feedback: ''
+                // ============ 行动反馈相关 ============
+
+                const canGiveFeedback = (guide) => {
+                    if (!guide) return false;
+                    const terminalStatuses = ['cancelled', 'expired'];
+                    if (terminalStatuses.includes(guide.status)) return false;
+                    const feedbackData = guide.feedback_data || {};
+                    if (feedbackData && feedbackData.feedback_summary) return false;
+                    return true;
+                };
+
+                const openFeedbackModal = (guide, prefill = null) => {
+                    currentFeedbackGuide.value = guide;
+                    feedbackForm.value = {
+                        completion_status: prefill?.prefilled_status || '',
+                        completion_detail: prefill?.prefilled_detail || '',
+                        followup_answer: ''
                     };
-                    showCompleteGuideModal.value = true;
+                    feedbackQuestion.value = '';
+                    feedbackStatus.value = null;
+                    showFeedbackModal.value = true;
                 };
                 
-                const closeCompleteGuideModal = () => {
-                    showCompleteGuideModal.value = false;
-                    currentCompletingGuide.value = null;
-                    completeGuideForm.value = {
-                        execution_status: '',
-                        feedback: ''
+                const closeFeedbackModal = () => {
+                    showFeedbackModal.value = false;
+                    currentFeedbackGuide.value = null;
+                    feedbackForm.value = {
+                        completion_status: '',
+                        completion_detail: '',
+                        followup_answer: ''
                     };
+                    feedbackQuestion.value = '';
+                    feedbackStatus.value = null;
                 };
-                
-                const canSubmitCompleteGuide = computed(() => {
-                    return currentCompletingGuide.value && 
-                           completeGuideForm.value.execution_status !== '';
+
+                const isFeedbackFollowup = computed(() => {
+                    return Boolean(feedbackQuestion.value);
                 });
                 
-                const submitCompleteGuide = async () => {
-                    if (!canSubmitCompleteGuide.value || !currentCompletingGuide.value) return;
+                const canSubmitFeedback = computed(() => {
+                    if (!currentFeedbackGuide.value) return false;
+                    if (isFeedbackFollowup.value) {
+                        return (feedbackForm.value.followup_answer || '').trim().length > 0;
+                    }
+                    return (feedbackForm.value.completion_status || '').trim() !== '' &&
+                           (feedbackForm.value.completion_detail || '').trim() !== '';
+                });
+                
+                const submitFeedback = async () => {
+                    if (!canSubmitFeedback.value || !currentFeedbackGuide.value) return;
+                    
+                    const statusLabelMap = {
+                        success: '成功',
+                        partial: '部分完成',
+                        failed: '失败',
+                        abandoned: '放弃',
+                        other: '其他'
+                    };
+
+                    const guideTitle = currentFeedbackGuide.value.title || currentFeedbackGuide.value.guide?.current_task || '行动指南';
+                    const guideId = currentFeedbackGuide.value.id;
+                    let message = '';
+                    let feedbackPayload = { guide_id: guideId };
+
+                    if (isFeedbackFollowup.value) {
+                        message = (feedbackForm.value.followup_answer || '').trim();
+                    } else {
+                        const status = feedbackForm.value.completion_status;
+                        const detail = feedbackForm.value.completion_detail;
+                        message = `[行动反馈] ${guideTitle}\n完成状态：${statusLabelMap[status] || status}\n完成详情：${detail}`;
+                        feedbackPayload = {
+                            guide_id: guideId,
+                            completion_status: status,
+                            completion_detail: detail
+                        };
+                    }
+
+                    messages.value.push({ role: 'user', content: message });
+                    
+                    // 立即关闭弹窗，回到主聊天界面
+                    closeFeedbackModal();
                     
                     try {
-                        const response = await fetch('/api/complete_guide', {
+                        isFeedbackSubmitting.value = true;
+                        const response = await fetch('/api/chat', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
                                 'Authorization': `Bearer ${getToken()}`
                             },
                             body: JSON.stringify({
-                                guide_id: currentCompletingGuide.value.id,
-                                execution_status: completeGuideForm.value.execution_status,
-                                feedback: completeGuideForm.value.feedback,
-                                session_id: sessionId.value
+                                message,
+                                session_id: sessionId.value,
+                                feedback_mode: feedbackPayload
                             })
                         });
                         
@@ -2585,35 +2694,33 @@
                         
                         const data = await response.json();
                         
-                        // 更新状态
-                        if (data.state) {
-                            processStateUpdate(data.state);
-                            // 更新本地 state
-                            if (data.state.action_guides) {
-                                state.value.action_guides = data.state.action_guides;
-                            }
+                        if (data.pending_responses && Array.isArray(data.pending_responses) && data.pending_responses.length > 0) {
+                            data.pending_responses.forEach(resp => {
+                                if (resp && resp.content) {
+                                    messages.value.push({ role: 'assistant', content: resp.content });
+                                }
+                            });
+                        } else if (data.response) {
+                            messages.value.push({ role: 'assistant', content: data.response });
                         }
                         
-                        // 关闭模态框
-                        closeCompleteGuideModal();
+                        if (data.state) {
+                            processStateUpdate(data.state);
+                        }
                         
-                        // 显示成功消息
-                        messages.value.push({
-                            role: 'assistant',
-                            content: '✅ 任务完成反馈已提交！我会根据你的反馈为你制定下一步行动。'
-                        });
-                        
-                        // 刷新上下文（如果打开）
                         if (showContext.value) {
                             await refreshContext();
                         }
                         
                     } catch (error) {
-                        console.error('Submit complete guide error:', error);
+                        console.error('Submit feedback error:', error);
                         messages.value.push({
                             role: 'assistant',
                             content: '抱歉，提交反馈时遇到问题，请稍后再试。'
                         });
+                    } finally {
+                        isFeedbackSubmitting.value = false;
+                        await scrollToBottom();
                     }
                 };
 
@@ -2638,7 +2745,7 @@
                     showStatusDrawer,
                     showPlanDrawer,
                     showInquiryModal,
-                    showCompleteGuideModal,
+                    showFeedbackModal,
                     showDebug,
                     showContext,
                     toggleDebug: () => showDebug.value = !showDebug.value,
@@ -2691,13 +2798,18 @@
                     normalizeOption,
                     normalizeOptions,
                     
-                    // Complete Guide
-                    currentCompletingGuide,
-                    completeGuideForm,
-                    openCompleteGuideModal,
-                    closeCompleteGuideModal,
-                    canSubmitCompleteGuide,
-                    submitCompleteGuide
+                    // Feedback
+                    currentFeedbackGuide,
+                    feedbackForm,
+                    feedbackQuestion,
+                    feedbackStatus,
+                    isFeedbackSubmitting,
+                    isFeedbackFollowup,
+                    canGiveFeedback,
+                    openFeedbackModal,
+                    closeFeedbackModal,
+                    canSubmitFeedback,
+                    submitFeedback
                 };
             }
         }).mount('#app');

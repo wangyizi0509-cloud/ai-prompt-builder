@@ -147,6 +147,20 @@ class ActionGuideContent(TypedDict, total=False):
     guide_content: str          # Markdown 格式的完整指南
 
 
+class FeedbackQA(TypedDict):
+    """反馈追问记录"""
+    role: Literal["ai", "user"]
+    content: str
+
+
+class FeedbackData(TypedDict, total=False):
+    """行动反馈数据"""
+    completion_status: Literal["success", "partial", "failed", "abandoned", "other"]
+    completion_detail: str
+    qa_history: list[FeedbackQA]
+    feedback_summary: str  # AI 生成的反馈总结
+
+
 class ActionGuideContentSnapshot(TypedDict, total=False):
     """
     行动指南内容历史快照
@@ -196,8 +210,9 @@ class ActionGuideItem(TypedDict, total=False):
     expire_at: Optional[str]             # 过期时间（Agent 生成）
     completed_at: Optional[str]          # 完成时间（用户操作时记录）
     
-    # 用户反馈（completed 时记录）
-    user_feedback: Optional[str]         # 用户的完成反馈
+    # 用户反馈（完成反馈时记录）
+    feedback_data: Optional[FeedbackData]   # 结构化反馈
+    user_feedback: Optional[str]            # @deprecated: 旧版兼容
     
     # 摘要字段（Organize Agent 生成）
     summary: Optional[str]               # 中等摘要（100-200字）
@@ -662,6 +677,7 @@ def create_action_guide_item(
         expected_start_at=None,
         expire_at=None,
         completed_at=None,
+        feedback_data=None,
         user_feedback=None,
         summary=None,
         one_liner=one_liner,

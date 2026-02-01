@@ -3,7 +3,7 @@
 基于 LangGraph 的 AI 恋爱军师 Agent 架构实现。
 
 > **v2.1 更新 (Architecture Upgrade)**：
-> - **Human-in-the-Loop**：升级为 LangGraph 原生 `interrupt()` 机制
+> - **Human-in-the-Loop**：采用 Router 状态恢复模式（非 `interrupt()`）
 > - **Persistence**：集成 Checkpointer，支持跨会话记忆
 > - **State**：优化状态结构，增加统一循环控制
 
@@ -81,30 +81,30 @@ graph TD
     end
     
     Main -->|Tool Call| Tools[Skill Tools]
-    Main -->|Interrupt| End([END])
+    Main -->|Ask User| End([END])
     Main -->|Call Sub-Agent| Status
     Main -->|Call Sub-Agent| Plan
     Main -->|Call Sub-Agent| Guide
     
     Status -->|Complete| Main
-    Status -->|Interrupt| End
+    Status -->|Ask User| End
     
     Plan -->|Complete| Main
-    Plan -->|Interrupt| End
+    Plan -->|Ask User| End
     
     Guide -->|Complete| Main
-    Guide -->|Interrupt| End
+    Guide -->|Ask User| End
     
     Tools -->|Return| Agents
 ```
 
-### Human-in-the-Loop (Interrupt)
+### Human-in-the-Loop（状态恢复）
 
-系统使用 LangGraph 的 `interrupt` 机制处理人机交互：
+系统使用 **Router 状态恢复** 机制处理人机交互（不使用 `interrupt()`）：
 
-1.  **暂停**：当 Agent 需要提问时，调用 `interrupt()`，工作流暂停并在 Checkpointer 中保存状态。
+1.  **暂停**：当 Agent 需要提问时，设置 `current_agent` 和 `agent_resume_point`，并结束本轮。
 2.  **等待**：系统将控制权交还给用户。
-3.  **恢复**：用户回复后，工作流从暂停点恢复执行。
+3.  **恢复**：用户回复后，Router 根据状态把流程导回对应 Agent 继续执行。
 
 ### Skill 加载 (Tool-Use)
 

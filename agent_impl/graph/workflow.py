@@ -39,6 +39,7 @@ from graph.tools.delegate_tools import (
     delegate_to_status,
     delegate_to_plan,
     delegate_to_guide,
+    delegate_for_feedback,
     end_turn,
 )
 from graph.tools.ask_tool import (
@@ -131,6 +132,8 @@ def route_after_router(state: AgentState) -> Literal["onboarding", "main_agent",
         return "end"
     if route_to == "onboarding":
         return "onboarding"
+    if route_to in ("main_agent", "status_agent", "plan_agent", "guide_agent"):
+        return route_to
     
     # 检查是否需要恢复之前的 Agent（包括主 Agent）
     current_agent = state.get("current_agent")
@@ -220,7 +223,7 @@ def route_after_sub_agent(state: AgentState) -> Literal["skill_tools", "main_age
     if _has_tool_calls(state):
         return "skill_tools"
     
-    # 如果有待回答的问题，使用 interrupt 机制，这里直接结束
+    # 如果有待回答的问题，进入状态恢复流程，本轮直接结束
     if state.get("current_agent") and state.get("agent_resume_point"):
         return "end"
     
@@ -440,6 +443,7 @@ def skill_tools_node(state: AgentState) -> dict:
         delegate_to_status,
         delegate_to_plan,
         delegate_to_guide,
+        delegate_for_feedback,
         # 结束本轮工具（仅 main_agent 使用）
         end_turn,
         # 提问工具（状态驱动，根据 ask_mode 返回不同版本）
@@ -461,6 +465,10 @@ def skill_tools_node(state: AgentState) -> dict:
         return_to_main,
     ])
     out = tool_node.invoke(state)
+    
+    # 工具调用链中保持 reasoning_content
+    if state.get("_reasoning_content_cache"):
+        out["_reasoning_content_cache"] = state.get("_reasoning_content_cache")
     
     # 检查是否调用了任务工具或行动指南绑定工具，如果是则应用状态更新
     messages = state.get("messages", [])
@@ -504,6 +512,37 @@ def skill_tools_node(state: AgentState) -> dict:
                     out["pending_questions"] = []
                     out["agent_resume_point"] = None
                     # 注意：current_agent 在 handoff 后会被目标 Agent 节点重新设置，这里不清除
+                elif tool_name == "delegate_for_feedback":
+                    guide_id = str(tool_args.get("guide_id") or "").strip()
+                    if guide_id:
+                        guide_title = ""
+                        layer2_memory = state.get("layer2_memory") or {}
+                        guide_candidates = list(layer2_memory.get("action_guides", []) or [])
+                        if not guide_candidates:
+                            legacy_guides = state.get("action_guides", []) or []
+                            if isinstance(legacy_guides, list):
+                                guide_candidates = list(legacy_guides)
+                        for g in guide_candidates:
+                            if isinstance(g, dict) and str(g.get("id") or "") == guide_id:
+                                guide_title = g.get("title") or (g.get("guide") or {}).get("current_task") or ""
+                                break
+                        prefilled_status = tool_args.get("prefilled_status")
+                        prefilled_detail = str(tool_args.get("prefilled_detail") or "")
+                        out["feedback_mode"] = {
+                            "guide_id": guide_id,
+                            "phase": "initial",
+                            "prefilled_status": prefilled_status,
+                            "prefilled_detail": prefilled_detail,
+                            "start_message_id": None,
+                        }
+                        out["feedback_status"] = None
+                        out["feedback_question"] = None
+                        out["feedback_prefill"] = {
+                            "guide_id": guide_id,
+                            "guide_title": guide_title,
+                            "prefilled_status": prefilled_status,
+                            "prefilled_detail": prefilled_detail,
+                        }
                 # === Ask 工具两阶段处理 ===
                 elif tool_name == "ask":
                     if tool_args.get("action") == "enable":

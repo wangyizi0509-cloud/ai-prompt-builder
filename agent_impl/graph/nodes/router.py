@@ -99,6 +99,7 @@ def router_node(state: AgentState) -> dict[str, Any]:
         "_tool_caller": None,  # [FIX] 重置工具调用标记，防止 Skill 指令一直挂着
         "_pending_action": None,  # 重置两阶段工具标记
         "_reply_skill_complete": None,  # 重置回复技能完成标记
+        "_reasoning_content_cache": None,  # 新轮次清理思考内容
         "_handoff_target": None,
         "_handoff_instruction": None,
         "_iteration_count": 0,  # [FIX] 重置单轮步数计数器，避免跨轮次累积导致流程被卡死（Studio 模式下不走 server.py）
@@ -174,6 +175,43 @@ def router_node(state: AgentState) -> dict[str, Any]:
     merged_messages = list(existing_messages)
     if base_update.get("messages"):
         merged_messages = merged_messages + base_update["messages"]
+
+    # === 行动反馈入口处理 ===
+    feedback_mode_input = state.get("feedback_mode_input")
+    if isinstance(feedback_mode_input, dict):
+        guide_id = str(feedback_mode_input.get("guide_id") or "").strip()
+        if guide_id:
+            feedback_mode = dict(state.get("feedback_mode") or {})
+            feedback_mode["guide_id"] = guide_id
+            if feedback_mode_input.get("completion_status"):
+                feedback_mode["prefilled_status"] = feedback_mode_input.get("completion_status")
+            if feedback_mode_input.get("completion_detail"):
+                feedback_mode["prefilled_detail"] = feedback_mode_input.get("completion_detail")
+            if not feedback_mode.get("phase"):
+                feedback_mode["phase"] = "initial"
+            if not feedback_mode.get("start_message_id"):
+                feedback_mode["start_message_id"] = current_message_id
+            base_update["feedback_mode"] = feedback_mode
+            base_update["feedback_mode_input"] = None
+            base_update["feedback_status"] = None
+            base_update["feedback_question"] = None
+    else:
+        base_update["feedback_mode_input"] = None
+
+    # 若用户未从反馈入口进入，检查是否处于追问阶段
+    if not isinstance(feedback_mode_input, dict) and state.get("feedback_mode"):
+        existing_feedback_mode = state.get("feedback_mode") or {}
+        existing_feedback_status = state.get("feedback_status")
+        
+        # 如果处于追问阶段，保留 feedback_mode，不清除
+        if existing_feedback_status == "asking" or existing_feedback_mode.get("phase") == "followup":
+            # 保留现有 feedback_mode，不做任何清除
+            pass
+        else:
+            # 不在追问阶段，正常清除
+            base_update["feedback_mode"] = None
+            base_update["feedback_status"] = None
+            base_update["feedback_question"] = None
     
     # 1. 风控过滤
     if _check_blocked(user_message):
@@ -216,6 +254,32 @@ def router_node(state: AgentState) -> dict[str, Any]:
                 "node": "router",
                 "step": "Small Talk",
                 "response": response_content,
+            }],
+        }
+
+    # 反馈模式：强制路由给 guide_agent
+    feedback_mode = base_update.get("feedback_mode") or state.get("feedback_mode")
+    if feedback_mode:
+        return {
+            **base_update,
+            "route_to": "guide_agent",
+            "debug_log": [{
+                "node": "router",
+                "step": "Feedback Mode",
+                "response": f"guide_id={feedback_mode.get('guide_id', '')}",
+            }],
+        }
+    
+    # 恢复执行：优先回到上一个 Agent（避免被默认 main_agent 覆盖）
+    if is_resuming:
+        current_agent = state.get("current_agent") or "main_agent"
+        return {
+            **base_update,
+            "route_to": current_agent,
+            "debug_log": [{
+                "node": "router",
+                "step": "Resume Agent",
+                "response": f"route_to={current_agent}",
             }],
         }
     
