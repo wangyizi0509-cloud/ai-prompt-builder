@@ -19,6 +19,7 @@
 """
 
 import json
+import os
 import re
 import uuid
 from typing import Any
@@ -40,6 +41,7 @@ from graph.tools.emotion_support_tool import get_emotion_tool, emotion_complete
 from skills.registry import get_skill_registry
 from utils.message_utils import get_msg_role_and_content
 from config import get_llm, get_thinking_llm, is_thinking_with_tools_enabled
+from graph.thinking_tool_loop import run_thinking_tool_loop
 from langchain_core.messages import AIMessage
 
 
@@ -112,8 +114,15 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
     from_tool_call = (state.get("_tool_caller") == "main_agent" or last_msg_role == "tool")
 
     # 准备 LLM（工具绑定在决策后进行）
-    # 如果启用了思考模式+工具调用，使用 get_thinking_llm
-    if is_thinking_with_tools_enabled():
+    # 检查当前使用的模型
+    current_model = os.getenv("DEEPSEEK_MODEL", "deepseek-reasoner")
+    thinking_with_tools = is_thinking_with_tools_enabled()
+    
+    # V3.2 更新：deepseek-reasoner 支持工具调用，但需要处理 reasoning_content 回传
+    # 如果使用 reasoner 且需要工具调用，使用 thinking_tool_loop 处理（支持 reasoning_content 回传）
+    use_thinking_loop = (current_model == "deepseek-reasoner" and not from_tool_call)
+    
+    if thinking_with_tools:
         base_llm = get_thinking_llm(temperature=0.7)
     else:
         base_llm = get_llm(temperature=0.7, use_tools=True)

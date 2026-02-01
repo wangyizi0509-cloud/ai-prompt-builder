@@ -1,0 +1,174 @@
+# Claude Code 安装配置指南
+
+本文档为 Cursor AI 助手提供 Claude Code（命令行工具）的安装和配置指导，以便在用户需要时提供帮助。
+
+## Claude Code 简介
+
+Claude Code 是 Anthropic 提供的命令行 AI 编程助手工具，可以通过 npm 全局安装使用。
+
+## 安装步骤
+
+### 1. 安装 Node.js 环境
+
+Claude Code 需要 Node.js 环境才能运行。
+
+#### macOS 安装方法：
+
+**方法一：官网下载（推荐）**
+- 打开浏览器访问 https://nodejs.org/
+- 点击 "LTS" 版本进行下载（推荐长期支持版本）
+- 下载完成后双击安装包
+- 按照安装向导完成安装，保持默认设置即可
+
+**方法二：使用 Homebrew**
+```bash
+brew install nodejs
+```
+
+**验证安装是否成功：**
+```bash
+node --version
+npm --version
+```
+如果显示版本号，说明安装成功了！
+
+### 2. 安装 Claude Code
+
+打开终端，运行以下命令：
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+这个命令会从 npm 官方仓库下载并安装最新版本的 Claude Code。
+
+**验证 Claude Code 安装：**
+```bash
+claude --version
+```
+如果显示版本号，恭喜你！Claude Code 已经成功安装了。
+
+### 3. 设置环境变量
+
+为了让 Claude Code 连接到中转服务，需要设置两个环境变量：
+
+#### 方法一：临时设置（当前会话）
+
+在终端中运行以下命令：
+
+```bash
+export ANTHROPIC_BASE_URL="your-base-url"
+export ANTHROPIC_AUTH_TOKEN="你的API密钥"
+```
+
+💡 记得将 "你的API密钥" 替换为实际密钥。
+
+#### 方法二：永久设置（用户级）
+
+在 `~/.zshrc` 或 `~/.bash_profile` 文件中添加：
+
+```bash
+export ANTHROPIC_BASE_URL="your-base-url"
+export ANTHROPIC_AUTH_TOKEN="你的API密钥"
+```
+
+然后运行：
+```bash
+source ~/.zshrc  # 或 source ~/.bash_profile
+```
+
+**验证环境变量设置：**
+```bash
+echo $ANTHROPIC_BASE_URL
+echo $ANTHROPIC_AUTH_TOKEN
+```
+
+预期输出示例：
+```
+your-base-url
+cr_xxxxxxxxxxxxxxxxxx
+```
+
+💡 如果输出为空或显示变量名本身，说明环境变量设置失败，请重新设置。
+
+### 4. 开始使用 Claude Code
+
+**启动 Claude Code：**
+```bash
+claude
+```
+
+**在特定项目中使用：**
+```bash
+# 进入你的项目目录
+cd /path/to/your/project
+# 启动 Claude Code
+claude
+```
+
+## 常见问题排查
+
+### 🔑 API Key 无效但余额正常？
+
+如果出现 api key 无效但是可以在余额查询页面查询到，说明之前登录过 Claude 账号。
+
+**解决方法：** 在 Claude code 里输入 `/logout`，之后重启终端。
+
+### 🐢 Claude Code 回复缓慢？
+
+- 关闭代理/梯子（直连通常更快）
+- 确保网络稳定
+- 重启 Claude Code
+
+### 📦 npm 安装太慢？
+
+使用国内镜像源加速：
+```bash
+npm config set registry https://registry.npmmirror.com
+```
+
+### 🚫 遇到权限错误？
+
+macOS/Linux: 使用 `sudo` 或配置 npm 全局目录：
+```bash
+sudo npm install -g @anthropic-ai/claude-code
+```
+
+或者配置 npm 全局目录（推荐）：
+```bash
+mkdir ~/.npm-global
+npm config set prefix '~/.npm-global'
+export PATH=~/.npm-global/bin:$PATH
+# 将 export 行添加到 ~/.zshrc 或 ~/.bash_profile
+```
+
+### Claude code 启动显示连接不上
+
+如果启动时显示 `Unable to connect` 或 `ERR_BAD_REQUEST`：
+
+请在用户目录下找到或创建 `.claude.json` 文件，并添加以下内容：
+
+```json
+{
+  "hasCompletedOnboarding": true
+}
+```
+
+**文件位置：**
+- macOS/Linux: `~/.claude.json`
+
+## AI 助手使用指南
+
+当用户询问关于 Claude Code 的安装、配置或使用问题时，请：
+
+1. **提供清晰的步骤说明**：按照上述步骤逐步指导用户
+2. **检查环境**：帮助用户验证 Node.js、npm 和 Claude Code 是否正确安装
+3. **排查问题**：根据常见问题部分提供解决方案
+4. **提供命令**：直接给出可执行的命令，方便用户复制粘贴
+
+## 注意事项
+
+- macOS 用户建议使用 zsh（macOS 10.15+ 默认）
+- 如果遇到权限问题，优先使用 npm 全局目录配置而非 sudo
+- 环境变量设置后需要重新打开终端窗口才能生效
+- 确保网络连接正常，某些地区可能需要配置代理

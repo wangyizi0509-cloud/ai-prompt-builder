@@ -38,11 +38,25 @@ def get_llm(temperature: float = 0.7, model: Optional[str] = None, use_tools: bo
         )
     
     elif provider == "deepseek":
-        # 使用官方 ChatDeepSeek 集成；临时切换为 deepseek-chat 模式
+        # 使用官方 ChatDeepSeek 集成；默认 deepseek-chat
         resolved_model = model or os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
         thinking_with_tools = os.getenv("DEEPSEEK_THINKING_WITH_TOOLS", "false").lower() == "true"
-        if use_tools and resolved_model == "deepseek-reasoner" and not thinking_with_tools:
-            resolved_model = os.getenv("DEEPSEEK_TOOL_MODEL", "deepseek-chat")
+        
+        # V3.2 更新：deepseek-reasoner 现在支持工具调用
+        # 如果需要工具调用：
+        # - 如果当前模型是 reasoner：直接使用 reasoner（V3.2 已支持工具调用）
+        # - 如果启用了思考+工具模式且模型是 chat：使用 get_thinking_llm（deepseek-chat + thinking，支持 reasoning_content 回传）
+        # - 否则：使用当前配置的模型
+        if use_tools:
+            if resolved_model == "deepseek-reasoner":
+                # reasoner 支持工具调用，直接使用（V3.2 特性）
+                # 注意：reasoner 的工具调用也需要处理 reasoning_content 回传
+                # 如果需要完整的 reasoning_content 回传支持，可以使用 thinking_with_tools=true（会切换到 chat+thinking）
+                pass  # 继续使用 reasoner
+            elif thinking_with_tools and resolved_model == "deepseek-chat":
+                # 使用思考模式 + 工具调用（deepseek-chat + thinking，支持多轮 reasoning_content 回传）
+                return get_thinking_llm(temperature=temperature)
+        
         return ChatDeepSeek(
             model=resolved_model,
             api_key=os.getenv("DEEPSEEK_API_KEY"),

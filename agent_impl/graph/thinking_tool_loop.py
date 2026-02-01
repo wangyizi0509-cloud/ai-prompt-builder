@@ -195,6 +195,7 @@ def run_thinking_tool_loop(
     max_rounds: Optional[int] = None,
     on_tool_call: Optional[Callable[[dict], None]] = None,
     on_tool_result: Optional[Callable[[str, str], None]] = None,
+    model: str = "deepseek-chat",
 ) -> ThinkingToolLoopResult:
     """
     运行思考模式 + 工具调用循环
@@ -213,6 +214,9 @@ def run_thinking_tool_loop(
         max_rounds: 最大轮次，默认从环境变量获取
         on_tool_call: 工具调用回调（用于日志/监控）
         on_tool_result: 工具结果回调（用于日志/监控）
+        model: 使用的模型，"deepseek-chat" 或 "deepseek-reasoner"
+            - deepseek-chat: 需要 extra_body={"thinking": {"type": "enabled"}}
+            - deepseek-reasoner: 本身就是思考模式，不需要 extra_body
     
     Returns:
         ThinkingToolLoopResult 包含最终响应和执行统计
@@ -244,13 +248,20 @@ def run_thinking_tool_loop(
         logger.info(f"Thinking tool loop: round {round_count}/{max_rounds}")
         
         # 调用 OpenAI API
-        response = client.chat.completions.create(
-            model="deepseek-chat",
-            messages=working_messages,
-            tools=openai_tools if openai_tools else None,
-            temperature=temperature,
-            extra_body={"thinking": {"type": "enabled"}},
-        )
+        # 根据模型类型决定是否需要 extra_body
+        api_kwargs = {
+            "model": model,
+            "messages": working_messages,
+            "tools": openai_tools if openai_tools else None,
+            "temperature": temperature,
+        }
+        
+        # deepseek-chat 需要 extra_body 启用思考模式
+        # deepseek-reasoner 本身就是思考模式，不需要 extra_body
+        if model == "deepseek-chat":
+            api_kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+        
+        response = client.chat.completions.create(**api_kwargs)
         
         # 转换为 LangChain AIMessage
         ai_response = _convert_openai_to_langchain_message(response)
