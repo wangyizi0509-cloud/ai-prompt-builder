@@ -60,6 +60,22 @@ class Message(TypedDict):
     id: Optional[str]
 
 
+class FeedbackMode(TypedDict, total=False):
+    """行动反馈模式（用于 guide_agent 接管反馈流程）"""
+    guide_id: str
+    phase: Literal["initial", "followup"]
+    prefilled_status: Optional[str]
+    prefilled_detail: Optional[str]
+    start_message_id: Optional[str]
+
+
+class FeedbackCompression(TypedDict, total=False):
+    """反馈消息压缩策略（历史注入时隐藏反馈对话，仅保留总结）"""
+    guide_id: str
+    start_message_id: str
+    keep_tag: str  # 识别“反馈完成总结”消息的标记
+
+
 # ============================================================
 # 保留原有类型（向后兼容）
 # ============================================================
@@ -205,6 +221,14 @@ class AgentState(TypedDict, total=False):
     
     # === 对话连贯性 ===
     last_response_for_continuity: Optional[str]
+
+    # === 行动反馈模式 ===
+    feedback_mode: Optional[FeedbackMode]
+    feedback_mode_input: Optional[dict]  # 前端请求携带的反馈标记（临时）
+    feedback_prefill: Optional[dict]     # 触发反馈弹窗的预填信息（临时）
+    feedback_status: Optional[Literal["asking", "completed"]]
+    feedback_question: Optional[str]
+    feedback_compressions: list[FeedbackCompression]
     
     # === 路由控制 ===
     should_continue: bool
@@ -226,6 +250,8 @@ class AgentState(TypedDict, total=False):
     _pending_action: Optional[str]
     # 回复技能（consult_answer/emotion_support）完成标记，用于路由直接结束
     _reply_skill_complete: Optional[bool]
+    # 思考模式：当前轮次的 reasoning_content 缓存（工具调用链中回传用）
+    _reasoning_content_cache: Optional[str]
     collected_info: dict
     # 指令（Main Agent 给专家的 Brief）
     instruction: Optional[str]
@@ -345,6 +371,7 @@ def create_initial_state(user_message: str, **overrides) -> AgentState:
         _submit_result=None,
         _pending_action=None,
         _reply_skill_complete=None,
+        _reasoning_content_cache=None,
         collected_info={},
         instruction=None,  # Main Agent 给专家的 Brief（v3.0）
         onboarding_completed=False,  # 默认未完成，正常进入 Onboarding
@@ -381,6 +408,14 @@ def create_initial_state(user_message: str, **overrides) -> AgentState:
         
         # 对话连贯性
         last_response_for_continuity=None,
+        
+        # 行动反馈模式
+        feedback_mode=None,
+        feedback_mode_input=None,
+        feedback_prefill=None,
+        feedback_status=None,
+        feedback_question=None,
+        feedback_compressions=[],
         debug_log=[],
 
         # === 维护任务（异步提纯/归档队列）===

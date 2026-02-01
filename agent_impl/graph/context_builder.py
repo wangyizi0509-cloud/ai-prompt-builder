@@ -470,7 +470,7 @@ def _build_layer2_history_summaries(layer2_memory: Layer2Memory, config: dict) -
     # 历史行动指南摘要（已完成的）
     completed_guides = get_completed_action_guides(layer2_memory)
     if completed_guides:
-        guide_section = _format_completed_guides(completed_guides[:5])
+        guide_section = _format_completed_guides(completed_guides[:5], recent_count)
         if guide_section:
             sections.append(guide_section)
     
@@ -509,29 +509,46 @@ def _format_layer2_history_items(
     return "\n".join(parts) if len(parts) > 1 else ""
 
 
-def _format_completed_guides(guides: list[ActionGuideItem]) -> str:
+def _format_completed_guides(guides: list[ActionGuideItem], recent_count: int = 2) -> str:
     """格式化已完成指南"""
     if not guides:
         return ""
     
     parts = ["### 已完成"]
     
-    for guide in guides:
+    status_map = {
+        "success": "成功",
+        "partial": "部分完成",
+        "failed": "失败",
+        "abandoned": "放弃",
+        "other": "其他",
+    }
+
+    for i, guide in enumerate(guides):
         guide_id = guide.get("id", "")
         title = guide.get("title", "未命名指南")
         completed_at = guide.get("completed_at", "")
         date_str = _format_display_time(completed_at)[:5] if completed_at else ""
         
-        summary = guide.get("summary", "")
-        user_feedback = guide.get("user_feedback", "")
+        # 上下文策略：前 recent_count 条用 summary（优先）或 one_liner（fallback），后面的只用 one_liner
+        if i < recent_count:
+            summary = guide.get("summary") or guide.get("one_liner") or ""
+        else:
+            summary = guide.get("one_liner") or ""
+        
+        feedback_data = guide.get("feedback_data") or {}
+        feedback_status = feedback_data.get("completion_status") or ""
+        feedback_summary = feedback_data.get("feedback_summary") or guide.get("user_feedback", "")
         
         parts.append(f"#### 【{guide_id}】{title}")
         parts.append(f"> 完成于: {date_str}")
         
         if summary:
-            parts.append(f"**执行摘要**: {summary}")
-        if user_feedback:
-            parts.append(f"**用户反馈**: {user_feedback}")
+            parts.append(f"**原计划**: {summary}")
+        if feedback_status:
+            parts.append(f"**反馈状态**: {status_map.get(feedback_status, feedback_status)}")
+        if feedback_summary:
+            parts.append(f"**反馈总结**: {feedback_summary}")
         parts.append("")
     
     return "\n".join(parts)
@@ -1019,6 +1036,11 @@ def _format_action_guide_items(items: list[ActionGuideItem], config: dict | None
             title = guide_item.get("title") or "未命名指南"
             status = guide_item.get("status", "")
             summary = guide_item.get("summary") or guide_item.get("one_liner") or "暂无"
+            if status == "completed":
+                feedback_data = guide_item.get("feedback_data") or {}
+                feedback_summary = feedback_data.get("feedback_summary") or guide_item.get("user_feedback") or ""
+                if feedback_summary:
+                    summary = f"{summary} → 反馈: {feedback_summary}"
             sections.append(
                 f"| {guide_id} | {_escape_cell(title)} | {status} | {_escape_cell(summary)} |"
             )

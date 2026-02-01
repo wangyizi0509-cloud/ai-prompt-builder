@@ -256,8 +256,7 @@ async def get_action_guide_detail(session_id: str, guide_id: str):
                 "current_task": guide_content.get("current_task"),
                 "summary": g.get("summary"),
                 "one_liner": g.get("one_liner"),
-                "user_feedback": g.get("user_feedback"),
-                "execution_status": g.get("execution_status"),
+                "feedback_data": g.get("feedback_data"),
                 "guide_content": guide_content.get("guide_content"),
                 "full_guide": g,
             }

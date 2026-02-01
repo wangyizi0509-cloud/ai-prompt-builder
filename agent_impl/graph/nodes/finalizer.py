@@ -353,18 +353,8 @@ def post_turn_finalize_node(state: dict) -> dict:
         updates["maintenance_queue"] = queue
 
     # 2.7 Studio 同步消费维护队列（可触发 LLM 归档）
-    # [FIX] 检测 LangGraph Studio 环境：检查多个特征
-    is_studio = False
-    try:
-        import sys
-        # Studio dev 模式会加载这些模块
-        is_studio = (
-            "langgraph_runtime_inmem" in sys.modules or 
-            "langgraph_api" in sys.modules or
-            os.environ.get("STUDIO_SYNC_MAINTENANCE") == "1"
-        )
-    except:
-        pass
+    # [FIX] 仅在显式开启时同步消费维护队列（避免阻塞主请求）
+    is_studio = os.environ.get("STUDIO_SYNC_MAINTENANCE") == "1"
     
     # [DEBUG] 记录 Studio 模式检测结果到 debug_log
     if "debug_log" not in updates:
