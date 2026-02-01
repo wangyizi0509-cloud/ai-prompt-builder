@@ -20,6 +20,6 @@
 
 ## 主要特性
 
-- **Human-in-the-Loop**: 使用 LangGraph 的 `interrupt()` 机制。
+- **Human-in-the-Loop**: 采用 Router 状态恢复模式（不使用 `interrupt()`）。
 - **持久化**: 集成 Checkpointer 支持跨会话记忆。
 - **分层上下文**: 优化状态结构，支持复杂的上下文组装。

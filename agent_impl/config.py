@@ -5,6 +5,7 @@ LLM 配置模块
 
 import json
 import os
+from typing import Optional
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_deepseek import ChatDeepSeek
@@ -14,7 +15,7 @@ from langchain_core.messages import AIMessage
 load_dotenv()
 
 
-def get_llm(temperature: float = 0.7):
+def get_llm(temperature: float = 0.7, model: Optional[str] = None, use_tools: bool = False):
     """
     根据环境变量配置获取 LLM 实例
     
@@ -37,9 +38,27 @@ def get_llm(temperature: float = 0.7):
         )
     
     elif provider == "deepseek":
-        # 使用官方 ChatDeepSeek 集成；默认深度思考模型 deepseek-reasoner
+        # 使用官方 ChatDeepSeek 集成；默认 deepseek-chat
+        resolved_model = model or os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+        thinking_with_tools = os.getenv("DEEPSEEK_THINKING_WITH_TOOLS", "false").lower() == "true"
+        
+        # V3.2 更新：deepseek-reasoner 现在支持工具调用
+        # 如果需要工具调用：
+        # - 如果当前模型是 reasoner：直接使用 reasoner（V3.2 已支持工具调用）
+        # - 如果启用了思考+工具模式且模型是 chat：使用 get_thinking_llm（deepseek-chat + thinking，支持 reasoning_content 回传）
+        # - 否则：使用当前配置的模型
+        if use_tools:
+            if resolved_model == "deepseek-reasoner":
+                # reasoner 支持工具调用，直接使用（V3.2 特性）
+                # 注意：reasoner 的工具调用也需要处理 reasoning_content 回传
+                # 如果需要完整的 reasoning_content 回传支持，可以使用 thinking_with_tools=true（会切换到 chat+thinking）
+                pass  # 继续使用 reasoner
+            elif thinking_with_tools and resolved_model == "deepseek-chat":
+                # 使用思考模式 + 工具调用（deepseek-chat + thinking，支持多轮 reasoning_content 回传）
+                return get_thinking_llm(temperature=temperature)
+        
         return ChatDeepSeek(
-            model=os.getenv("DEEPSEEK_MODEL", "deepseek-reasoner"),
+            model=resolved_model,
             api_key=os.getenv("DEEPSEEK_API_KEY"),
             base_url=os.getenv("DEEPSEEK_BASE_URL"),
             temperature=temperature,
@@ -47,7 +66,7 @@ def get_llm(temperature: float = 0.7):
     
     elif provider == "openai":
         return ChatOpenAI(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o"),
+            model=model or os.getenv("OPENAI_MODEL", "gpt-4o"),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             temperature=temperature,
         )
@@ -98,4 +117,37 @@ class MockLLM:
 def get_default_llm():
     """获取默认 LLM 实例"""
     return get_llm(temperature=0.7)
+
+
+def get_thinking_llm(temperature: float = 0.7):
+    """
+    获取支持思考模式 + 工具调用的 LLM 实例
+    
+    DeepSeek V3.2 支持 thinking mode 下的 tool calling，但需要：
+    1. 使用 deepseek-chat 模型（不是 deepseek-reasoner）
+    2. 通过 extra_body 启用 thinking mode
+    3. 在多轮工具调用中回传 reasoning_content
+    
+    注意：使用 ChatOpenAI 而非 ChatDeepSeek，因为需要传 extra_body 参数
+    
+    Returns:
+        LangChain ChatModel 实例，已启用思考模式
+    """
+    return ChatOpenAI(
+        model="deepseek-chat",  # 必须用 deepseek-chat，不是 deepseek-reasoner
+        openai_api_key=os.getenv("DEEPSEEK_API_KEY"),
+        openai_api_base=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        temperature=temperature,
+        extra_body={"thinking": {"type": "enabled"}},
+    )
+
+
+def is_thinking_with_tools_enabled() -> bool:
+    """检查是否启用思考模式 + 工具调用"""
+    return os.getenv("DEEPSEEK_THINKING_WITH_TOOLS", "false").lower() == "true"
+
+
+def get_thinking_max_rounds() -> int:
+    """获取思考模式下工具调用的最大轮次"""
+    return int(os.getenv("DEEPSEEK_THINKING_MAX_ROUNDS", "15"))
 

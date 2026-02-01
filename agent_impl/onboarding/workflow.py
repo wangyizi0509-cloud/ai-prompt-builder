@@ -1,7 +1,7 @@
 """
 Onboarding 子图：用于首次信息收集。
 
-采用 LangGraph 官方推荐的 Subgraph + interrupt 模式：
+采用 Subgraph + 状态恢复模式：
 - 独立 StateGraph，作为主图的一个节点
 - 单节点循环，通过 Command(goto="onboarding_agent") 自己回到自己
 """

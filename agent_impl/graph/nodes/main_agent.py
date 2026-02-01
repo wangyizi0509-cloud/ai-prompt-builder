@@ -19,6 +19,7 @@
 """
 
 import json
+import os
 import re
 import uuid
 from typing import Any
@@ -31,6 +32,7 @@ from graph.tools.delegate_tools import (
     delegate_to_status,
     delegate_to_plan,
     delegate_to_guide,
+    delegate_for_feedback,
     end_turn,
 )
 from graph.tools.ask_tool import get_ask_tool
@@ -38,7 +40,8 @@ from graph.tools.consult_answer_tool import get_consult_tool, consult_complete
 from graph.tools.emotion_support_tool import get_emotion_tool, emotion_complete
 from skills.registry import get_skill_registry
 from utils.message_utils import get_msg_role_and_content
-from config import get_llm
+from config import get_llm, get_thinking_llm, is_thinking_with_tools_enabled
+from graph.thinking_tool_loop import run_thinking_tool_loop
 from langchain_core.messages import AIMessage
 
 
@@ -65,6 +68,14 @@ def _format_onboarding_handoff_summary(onboarding_handoff: dict) -> str:
         parts.append(f"理由: {reason}")
     return " | ".join(parts) if parts else "Onboarding 已完成"
 
+
+def _extract_reasoning_content(response) -> str | None:
+    if response is None:
+        return None
+    additional_kwargs = getattr(response, "additional_kwargs", None)
+    if isinstance(additional_kwargs, dict) and additional_kwargs.get("reasoning_content"):
+        return additional_kwargs.get("reasoning_content")
+    return getattr(response, "reasoning_content", None)
 
 
 
@@ -103,7 +114,18 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
     from_tool_call = (state.get("_tool_caller") == "main_agent" or last_msg_role == "tool")
 
     # 准备 LLM（工具绑定在决策后进行）
-    base_llm = get_llm(temperature=0.7)
+    # 检查当前使用的模型
+    current_model = os.getenv("DEEPSEEK_MODEL", "deepseek-reasoner")
+    thinking_with_tools = is_thinking_with_tools_enabled()
+    
+    # V3.2 更新：deepseek-reasoner 支持工具调用，但需要处理 reasoning_content 回传
+    # 如果使用 reasoner 且需要工具调用，使用 thinking_tool_loop 处理（支持 reasoning_content 回传）
+    use_thinking_loop = (current_model == "deepseek-reasoner" and not from_tool_call)
+    
+    if thinking_with_tools:
+        base_llm = get_thinking_llm(temperature=0.7)
+    else:
+        base_llm = get_llm(temperature=0.7, use_tools=True)
     
     # 创建任务管理工具（需要 state_getter 来获取当前状态）
     task_tools = create_task_tools(lambda: state, agent_name="main_agent")
@@ -125,6 +147,7 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
         delegate_to_status,
         delegate_to_plan,
         delegate_to_guide,
+        delegate_for_feedback,
         # 结束本轮工具（不输出内容直接结束）
         end_turn,
         # 提问工具（状态驱动，根据 ask_mode 返回不同版本）
@@ -180,10 +203,12 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
             print("[DEBUG] MainAgent: Forced ask tool call (Phase 2: generate inquiry_card)")
             if hasattr(response, "name"):
                 response.name = "main_agent"
+            reasoning_content = _extract_reasoning_content(response)
             return {
                 "messages": [response],
                 "current_agent": "main_agent",
                 "_tool_caller": "main_agent",
+                "_reasoning_content_cache": reasoning_content,
                 "debug_log": [{
                     "node": "main_agent",
                     "step": "Tool Call Requested (ask forced, Phase 2)",
@@ -209,6 +234,7 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
             print(f"[DEBUG] MainAgent: Model returned tool call in {mode_name}_mode Phase 2: {[tc['name'] for tc in response.tool_calls]}")
             if hasattr(response, "name"):
                 response.name = "main_agent"
+            reasoning_content = _extract_reasoning_content(response)
             existing_responses = state.get("pending_responses", [])
             response_content = response.content or ""
             if response_content:
@@ -225,6 +251,7 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
                 "last_response_for_continuity": response_content or None,
                 "current_agent": "main_agent",
                 "_tool_caller": "main_agent",
+                "_reasoning_content_cache": reasoning_content,
                 "debug_log": [{
                     "node": "main_agent",
                     "step": f"Tool Call Requested ({mode_name}_mode Phase 2)",
@@ -240,10 +267,12 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
             print(f"[DEBUG] MainAgent: Model requested tool call (chain): {[tc['name'] for tc in response.tool_calls]}")
             if hasattr(response, "name"):
                 response.name = "main_agent"
+            reasoning_content = _extract_reasoning_content(response)
             return {
                 "messages": [response],
                 "current_agent": "main_agent",
                 "_tool_caller": "main_agent",
+                "_reasoning_content_cache": reasoning_content,
                 "debug_log": [{
                     "node": "main_agent",
                     "step": "Tool Call Requested (chain)",
@@ -276,6 +305,7 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
                     "messages": [response],
                     "current_agent": "main_agent",
                     "_tool_caller": "main_agent",
+                    "_reasoning_content_cache": None,
                     "debug_log": [{
                         "node": "main_agent",
                         "step": "Tool Call Requested (forced)",
@@ -304,10 +334,12 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
             print(f"[DEBUG] MainAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
             if hasattr(response, "name"):
                 response.name = "main_agent"
+            reasoning_content = _extract_reasoning_content(response)
             return {
                 "messages": [response],
                 "current_agent": "main_agent",  # 标记调用来源
                 "_tool_caller": "main_agent",   # 显式标记工具调用来源
+                "_reasoning_content_cache": reasoning_content,
                 "debug_log": [{
                     "node": "main_agent",
                     "step": "Tool Call Requested",
@@ -339,16 +371,20 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
         
         # 合并：原始 content + 重试的 tool_calls
         if hasattr(retry_response, "tool_calls") and retry_response.tool_calls:
+            reasoning_content = _extract_reasoning_content(retry_response)
+            additional_kwargs = {"reasoning_content": reasoning_content} if reasoning_content else None
             merged_response = AIMessage(
                 content=original_content,
                 tool_calls=retry_response.tool_calls,
                 name="main_agent",
+                additional_kwargs=additional_kwargs,
             )
             print(f"[DEBUG] MainAgent: consult_mode retry successful, merged response")
             return {
                 "messages": [merged_response],
                 "current_agent": "main_agent",
                 "_tool_caller": "main_agent",
+                "_reasoning_content_cache": reasoning_content,
                 "debug_log": [{
                     "node": "main_agent",
                     "step": "Tool Call Requested (consult_answer complete forced, retry)",
@@ -370,16 +406,20 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
         
         # 合并：原始 content + 重试的 tool_calls
         if hasattr(retry_response, "tool_calls") and retry_response.tool_calls:
+            reasoning_content = _extract_reasoning_content(retry_response)
+            additional_kwargs = {"reasoning_content": reasoning_content} if reasoning_content else None
             merged_response = AIMessage(
                 content=original_content,
                 tool_calls=retry_response.tool_calls,
                 name="main_agent",
+                additional_kwargs=additional_kwargs,
             )
             print(f"[DEBUG] MainAgent: emotion_mode retry successful, merged response")
             return {
                 "messages": [merged_response],
                 "current_agent": "main_agent",
                 "_tool_caller": "main_agent",
+                "_reasoning_content_cache": reasoning_content,
                 "debug_log": [{
                     "node": "main_agent",
                     "step": "Tool Call Requested (emotion_support complete forced, retry)",
@@ -431,9 +471,11 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
             "content": response_content,
             "phase": phase
         }]
+        reasoning_content = _extract_reasoning_content(response)
+        additional_kwargs = {"reasoning_content": reasoning_content} if reasoning_content else None
         # [FIX] 使用 response.content (原始 JSON) 而不是 response_content (解析后的文本)
         # 这样 context_builder 才能从历史记录中提取 inquiry_card 等元数据
-        result["messages"] = [{
+        message_payload = {
             "role": "assistant",
             "name": "main_agent",
             "content": response.content,
@@ -441,7 +483,11 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
                 "task_id": result.get("task_id", ""),
                 "thought": result.get("thought", ""),
             }
-        }]
+        }
+        if additional_kwargs:
+            message_payload["additional_kwargs"] = additional_kwargs
+        result["messages"] = [message_payload]
+        result["_reasoning_content_cache"] = reasoning_content
         
         # 记录本轮回复用于连贯性
         result["last_response_for_continuity"] = response_content
@@ -452,7 +498,12 @@ def main_agent_node(state: AgentState) -> dict[str, Any]:
         # [FIX] 即使 content 为空，也保留原始 response 以便记录思考过程或 tool calls
         # 但通常如果 content 为空且无 tool calls，可能是异常情况
         if response.content:
-             result["messages"] = [{"role": "assistant", "name": "main_agent", "content": response.content}]
+             reasoning_content = _extract_reasoning_content(response)
+             message_payload = {"role": "assistant", "name": "main_agent", "content": response.content}
+             if reasoning_content:
+                 message_payload["additional_kwargs"] = {"reasoning_content": reasoning_content}
+             result["messages"] = [message_payload]
+             result["_reasoning_content_cache"] = reasoning_content
         else:
              result["messages"] = []
         

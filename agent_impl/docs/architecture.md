@@ -5,7 +5,7 @@
 > **技术栈**：LangGraph (0.2+)
 > 
 > **v2.1 更新 (LangGraph Best Practices)**：
-> - **Human-in-the-Loop 升级**：使用官方 `interrupt()` 函数替代手动的 `wait_user_input` 节点，状态管理更原生
+> - **Human-in-the-Loop 升级**：采用 Router 状态恢复模式（不使用 `interrupt()`），更适配 HTTP
 > - **持久化 (Persistence)**：引入 Checkpointer (MemorySaver/PostgresSaver)，支持跨会话记忆
 > - **循环控制**：工作流层面统一的 `_iteration_count` 循环限制，防止无限递归
 > - **ToolNode 优化**：简化工具节点实现，保持 pure function 风格
@@ -109,14 +109,15 @@ def main_agent_node(state):
     # 4. 解析结果
     result = parse_response(response.content)
     
-    # 5. 处理提问 (Interrupt)
+    # 5. 处理提问（状态恢复）
     if result["next_action"] == "ask_user":
-        # 暂停执行，等待用户输入
-        user_answer = interrupt({
-            "type": "inquiry",
-            "inquiry_card": result["inquiry_card"]
-        })
-        # 恢复后继续...
+        # 写入“恢复标记”，本轮结束，等待用户输入
+        return {
+            **result,
+            "current_agent": "main_agent",
+            "agent_resume_point": "after_user_reply",
+            "route_to": "end"
+        }
     
     return result
 ```
@@ -249,4 +250,4 @@ workflow.compile(checkpointer=checkpointer)
 
 - [ ] **异步 Tool 优化**：支持并发执行多个工具
 - [ ] **Structured Output**：使用 `.with_structured_output()` 替代 JSON 字符串解析
-- [ ] **测试覆盖率**：增加针对 interrupt 恢复场景的集成测试
+- [ ] **测试覆盖率**：增加针对状态恢复场景的集成测试

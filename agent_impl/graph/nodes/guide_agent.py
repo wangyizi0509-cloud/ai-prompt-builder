@@ -28,12 +28,22 @@ from graph.tools.submit_tools import (
     update_guide_content,
     return_to_main,
 )
-from config import get_llm
+from config import get_llm, get_thinking_llm, is_thinking_with_tools_enabled
 
 
 # ============================================================
 # 任务管理辅助函数
 # ============================================================
+
+def _extract_reasoning_content(response) -> str | None:
+    if response is None:
+        return None
+    additional_kwargs = getattr(response, "additional_kwargs", None)
+    if isinstance(additional_kwargs, dict) and additional_kwargs.get("reasoning_content"):
+        return additional_kwargs.get("reasoning_content")
+    return getattr(response, "reasoning_content", None)
+
+FEEDBACK_SUMMARY_TAG = "[反馈完成]"
 
 def _get_next_task_id(task_list: list) -> str:
     """生成下一个任务 ID（格式：task_001, task_002, ...）"""
@@ -94,6 +104,262 @@ def _complete_current_task(state: AgentState) -> dict:
         }
     }
 
+
+def _find_guide_by_id(state: AgentState, guide_id: str) -> dict:
+    layer2_memory = state.get("layer2_memory") or {}
+    guides = list(layer2_memory.get("action_guides", []) or [])
+    if not guides:
+        legacy = state.get("action_guides", []) or []
+        if isinstance(legacy, list):
+            guides = list(legacy)
+    for g in guides:
+        if isinstance(g, dict) and str(g.get("id") or "") == guide_id:
+            return g
+    return {}
+
+
+def _build_feedback_instruction(state: AgentState, guide: dict, feedback_mode: dict) -> str:
+    guide_id = str(feedback_mode.get("guide_id") or "")
+    title = guide.get("title") or (guide.get("guide") or {}).get("current_task") or ""
+    status = guide.get("status") or ""
+    prefilled_status = feedback_mode.get("prefilled_status") or ""
+    prefilled_detail = feedback_mode.get("prefilled_detail") or ""
+    lines = [
+        "当前进入【行动反馈流程】。",
+        f"目标指南ID: {guide_id}",
+    ]
+    if title:
+        lines.append(f"指南标题: {title}")
+    if status:
+        lines.append(f"当前状态: {status}")
+    if prefilled_status or prefilled_detail:
+        lines.append("已收到用户初始反馈（可能来自主流程预判）：")
+        if prefilled_status:
+            lines.append(f"- 完成状态: {prefilled_status}")
+        if prefilled_detail:
+            lines.append(f"- 完成详情: {prefilled_detail}")
+    lines.extend([
+        "",
+        "你的任务：把这条指南的【完成反馈】补齐并写入系统。",
+        "",
+        "1) 先判断信息是否足够：",
+        "- 最低需要：completion_status（success/partial/failed/abandoned/other）+ completion_detail（让人能看懂做了什么/结果如何/卡点是什么）。",
+        "",
+        "2) 信息不足时（优先少打字）：",
+        "- 优先使用 ask 工具提问（两阶段）：先 ask(action=\"enable\")，下一步会生成 inquiry_card。",
+        "- 问题数量 1-2 个为佳；尽量用选择题/多选题，让用户点选即可。",
+        "- 如果只问一句就够，也可以直接自然语言追问。",
+        "",
+        "3) 信息足够时（必须写入）：",
+        "- 必须调用 update_guide_status(...) 写入反馈字段：feedback_completion_status / feedback_completion_detail / feedback_summary（1-2句）。",
+        "- 同时你需要决定 new_status：一次性行动通常可结束（success->completed；failed/abandoned->cancelled；partial 视情况 completed 或 in_progress）；持续性行动通常保持 in_progress。",
+        "",
+        "4) 收口回主流程：",
+        "- 必须先 update_guide_status(...)，再 return_to_main(reason=...)（顺序不能反）。",
+        f"- 最终在 content 里只输出一句短总结，以「{FEEDBACK_SUMMARY_TAG}」开头（避免长篇复述）。",
+        "允许的完成状态枚举：success / partial / failed / abandoned / other。",
+    ])
+    return "\n".join(lines).strip()
+
+
+def _handle_feedback_mode(state: AgentState, feedback_mode: dict) -> dict[str, Any]:
+    guide_id = str(feedback_mode.get("guide_id") or "").strip()
+    guide = _find_guide_by_id(state, guide_id) if guide_id else {}
+
+    # 工具调用返回检查（对齐 guide_agent_node 的行为，避免重复注入用户输入）
+    messages = state.get("messages", []) or []
+    last_msg_role = ""
+    last_tool_content = None
+    if messages:
+        last_msg_role, last_tool_content = get_msg_role_and_content(messages[-1])
+    from_tool_call = (state.get("_tool_caller") == "guide_agent" or last_msg_role == "tool")
+    pending_action = state.get("_pending_action") or ""
+    ask_mode = bool(state.get("ask_mode", False))
+
+    # 如果启用了思考模式+工具调用，使用 get_thinking_llm
+    if is_thinking_with_tools_enabled():
+        base_llm = get_thinking_llm(temperature=0.6)
+    else:
+        base_llm = get_llm(temperature=0.6, use_tools=True)
+    temp_state = dict(state)
+    instruction = _build_feedback_instruction(state, guide, feedback_mode)
+    temp_state["instruction"] = instruction
+    
+    # Debug: 打印 instruction 确认 prefilled 信息是否正确传入
+    print(f"[DEBUG] guide_agent feedback instruction:\n{instruction}")
+
+    # [FIX] 当从工具调用返回时，不应该再次添加用户的上一条输入
+    current_input = "" if from_tool_call else (state.get("user_message", "") or "")
+    model_messages = build_messages_for_model(
+        state=temp_state,
+        agent_name="guide_agent",
+        current_input=current_input,
+    )
+
+    # Phase 2: ask_mode=True 后强制调用 ask 工具生成 inquiry_card（反馈模式也要支持）
+    if from_tool_call and pending_action == "ask":
+        ask_full_tool = get_ask_tool(True)  # 确保使用完整版
+        llm_with_tools = base_llm.bind_tools(
+            [ask_full_tool],
+            tool_choice={"type": "function", "function": {"name": "ask"}},
+        )
+        response = llm_with_tools.invoke(model_messages)
+        if hasattr(response, "tool_calls") and response.tool_calls:
+            if hasattr(response, "name"):
+                response.name = "guide_agent"
+            reasoning_content = _extract_reasoning_content(response)
+            return {
+                "messages": [response],
+                "current_agent": "guide_agent",
+                "_tool_caller": "guide_agent",
+                # 关键：标记为追问阶段，防止 Router 清除 feedback_mode
+                "feedback_status": "asking",
+                "feedback_mode": {
+                    **feedback_mode,
+                    "phase": "followup",
+                },
+                "_reasoning_content_cache": reasoning_content,
+                "debug_log": [{
+                    "node": "guide_agent",
+                    "step": "Feedback Tool Call Requested (ask forced, Phase 2)",
+                    "tool_calls": [tc["name"] for tc in response.tool_calls],
+                }],
+            }
+    else:
+        ask_tool = get_ask_tool(ask_mode)
+        llm_with_tools = base_llm.bind_tools(
+            [ask_tool, update_guide_status, return_to_main],
+            parallel_tool_calls=True,
+        )
+        response = llm_with_tools.invoke(model_messages)
+
+    if hasattr(response, "tool_calls") and response.tool_calls:
+        if hasattr(response, "name"):
+            response.name = "guide_agent"
+        reasoning_content = _extract_reasoning_content(response)
+        
+        # 检查是否调用了 update_guide_status（完成反馈）
+        tool_names = [tc["name"] for tc in response.tool_calls]
+        is_completing = "update_guide_status" in tool_names
+        
+        # 未完成反馈：允许 ask；但禁止仅 return_to_main（会导致链路中断）。
+        if not is_completing:
+            # 允许 ask 工具正常执行（优先 ask 卡，少打字）
+            if "ask" in tool_names:
+                # 防御：若模型误把 return_to_main 和 ask 一起叫了，忽略 return_to_main
+                if "return_to_main" in tool_names:
+                    filtered_calls = [tc for tc in (response.tool_calls or []) if tc.get("name") != "return_to_main"]
+                    try:
+                        response.tool_calls = filtered_calls
+                    except Exception:
+                        pass
+                    additional_kwargs = getattr(response, "additional_kwargs", None)
+                    if isinstance(additional_kwargs, dict) and "tool_calls" in additional_kwargs:
+                        additional_kwargs["tool_calls"] = filtered_calls
+
+                return {
+                    "messages": [response],
+                    "current_agent": "guide_agent",
+                    "_tool_caller": "guide_agent",
+                    # 关键：标记为追问阶段，防止 Router 清除 feedback_mode
+                    "feedback_status": "asking",
+                    "feedback_mode": {
+                        **feedback_mode,
+                        "phase": "followup",
+                    },
+                    "_reasoning_content_cache": reasoning_content,
+                    "debug_log": [{
+                        "node": "guide_agent",
+                        "step": "Feedback Tool Call Requested (ask)",
+                        "tool_calls": [tc["name"] for tc in getattr(response, "tool_calls", []) or []],
+                    }],
+                }
+
+            # 若未完成反馈但调用了 return_to_main（且没有 ask），说明模型误用工具。
+            # 这里强制降级为“追问阶段”，忽略工具调用，避免路由回 main_agent。
+            try:
+                response.tool_calls = []
+            except Exception:
+                pass
+            additional_kwargs = getattr(response, "additional_kwargs", None)
+            if isinstance(additional_kwargs, dict) and "tool_calls" in additional_kwargs:
+                additional_kwargs["tool_calls"] = []
+
+            content = getattr(response, "content", "") if response else ""
+            return {
+                "messages": [response],
+                "current_agent": "guide_agent",
+                "feedback_status": "asking",
+                "feedback_question": content.strip() or "可以补充一下执行过程中的具体细节吗？",
+                "feedback_mode": {
+                    **feedback_mode,
+                    "phase": "followup",
+                },
+                "agent_resume_point": "continue_guide",
+                "pending_responses": (state.get("pending_responses") or []) + [{
+                    "from": "guide_agent",
+                    "content": content.strip() or "可以补充一下执行过程中的具体细节吗？",
+                    "phase": "feedback",
+                }],
+                "_reasoning_content_cache": reasoning_content,
+                "debug_log": [{
+                    "node": "guide_agent",
+                    "step": "Feedback Follow-up (tool_calls ignored)",
+                    "tool_calls": tool_names,
+                }],
+            }
+
+        result = {
+            "messages": [response],
+            "current_agent": "guide_agent",
+            "_tool_caller": "guide_agent",
+            "_reasoning_content_cache": reasoning_content,
+            "debug_log": [{
+                "node": "guide_agent",
+                "step": "Feedback Tool Call Requested",
+                "tool_calls": tool_names,
+            }],
+        }
+        
+        # 如果没有完成反馈，说明还在追问阶段，设置 asking 状态
+        if not is_completing:
+            result["feedback_status"] = "asking"
+            result["feedback_mode"] = {
+                **feedback_mode,
+                "phase": "followup",
+            }
+            # 标记需要等待用户补充，避免路由回 main_agent 导致追问链路错乱
+            result["agent_resume_point"] = "continue_guide"
+        
+        return result
+
+    content = getattr(response, "content", "") if response else ""
+    if hasattr(response, "name"):
+        response.name = "guide_agent"
+    reasoning_content = _extract_reasoning_content(response)
+    return {
+        "messages": [response],
+        "current_agent": "guide_agent",
+        "feedback_status": "asking",
+        "feedback_question": content.strip() or "可以补充一下执行过程中的具体细节吗？",
+        "feedback_mode": {
+            **feedback_mode,
+            "phase": "followup",
+        },
+        # 标记等待用户补充，防止子 Agent 被路由回 main_agent
+        "agent_resume_point": "continue_guide",
+        "pending_responses": (state.get("pending_responses") or []) + [{
+            "from": "guide_agent",
+            "content": content.strip() or "可以补充一下执行过程中的具体细节吗？",
+            "phase": "feedback",
+        }],
+        "_reasoning_content_cache": reasoning_content,
+        "debug_log": [{
+            "node": "guide_agent",
+            "step": "Feedback Follow-up",
+        }],
+    }
+
 def guide_agent_node(state: AgentState) -> dict[str, Any]:
     """
     行动指南 Agent 节点
@@ -118,6 +384,11 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
     # 提问节流（同一 agent 连续提问 <= max_question_streak；中间发生非提问动作则清零）
     streak_agent = state.get("question_streak_agent")
     streak_count = int(state.get("question_streak_count", 0) or 0)
+
+    # 行动反馈模式：优先接管反馈流程
+    feedback_mode = state.get("feedback_mode")
+    if isinstance(feedback_mode, dict) and feedback_mode.get("guide_id"):
+        return _handle_feedback_mode(state, feedback_mode)
     max_streak = int(state.get("max_question_streak", 3) or 3)
 
     # 向后兼容：旧字段仍可能被外部依赖（日志/测试）
@@ -145,7 +416,11 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
         print(f"[DEBUG] GuideAgent: Continuing after tool call (last_role={last_msg_role})")
     
     # 准备 LLM（工具绑定在决策后进行）
-    base_llm = get_llm(temperature=0.6)
+    # 如果启用了思考模式+工具调用，使用 get_thinking_llm
+    if is_thinking_with_tools_enabled():
+        base_llm = get_thinking_llm(temperature=0.6)
+    else:
+        base_llm = get_llm(temperature=0.6, use_tools=True)
     if from_tool_call:
         print("[DEBUG] GuideAgent: Second stage (from_tool_call), tools disabled to prevent loop")
     
@@ -206,10 +481,12 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
             print("[DEBUG] GuideAgent: Forced ask tool call (Phase 2: generate inquiry_card)")
             if hasattr(response, "name"):
                 response.name = "guide_agent"
+            reasoning_content = _extract_reasoning_content(response)
             return {
                 "messages": [response],
                 "current_agent": "guide_agent",
                 "_tool_caller": "guide_agent",
+                "_reasoning_content_cache": reasoning_content,
                 "debug_log": [{
                     "node": "guide_agent",
                     "step": "Tool Call Requested (ask forced, Phase 2)",
@@ -229,10 +506,12 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
             print(f"[DEBUG] GuideAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
             if hasattr(response, "name"):
                 response.name = "guide_agent"
+            reasoning_content = _extract_reasoning_content(response)
             return {
                 "messages": [response],
                 "current_agent": "guide_agent",
                 "_tool_caller": "guide_agent",
+                "_reasoning_content_cache": reasoning_content,
                 "debug_log": [{
                     "node": "guide_agent",
                     "step": "Tool Call Requested",
@@ -252,10 +531,12 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
             print(f"[DEBUG] GuideAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
             if hasattr(response, "name"):
                 response.name = "guide_agent"
+            reasoning_content = _extract_reasoning_content(response)
             return {
                 "messages": [response],
                 "current_agent": "guide_agent",
                 "_tool_caller": "guide_agent",
+                "_reasoning_content_cache": reasoning_content,
                 "debug_log": [{
                     "node": "guide_agent",
                     "step": "Tool Call Requested",
@@ -267,10 +548,12 @@ def guide_agent_node(state: AgentState) -> dict[str, Any]:
     print(f"[DEBUG] GuideAgent: No tool call, returning model response directly")
     if hasattr(response, "name"):
         response.name = "guide_agent"
+    reasoning_content = _extract_reasoning_content(response)
     result = {
         "messages": [response],
         "current_agent": "guide_agent",
         "_tool_caller": None,
+        "_reasoning_content_cache": reasoning_content,
         "debug_log": [{
             "node": "guide_agent",
             "step": "No Tool Call - Direct Response",

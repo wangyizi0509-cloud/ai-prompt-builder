@@ -22,12 +22,20 @@ from graph.context_types import create_new_task
 from utils.message_utils import get_msg_role_and_content
 from graph.tools.ask_tool import get_ask_tool
 from graph.tools.submit_tools import submit_action_plan, return_to_main
-from config import get_llm
+from config import get_llm, get_thinking_llm, is_thinking_with_tools_enabled
 
 
 # ============================================================
 # 任务管理辅助函数
 # ============================================================
+
+def _extract_reasoning_content(response) -> str | None:
+    if response is None:
+        return None
+    additional_kwargs = getattr(response, "additional_kwargs", None)
+    if isinstance(additional_kwargs, dict) and additional_kwargs.get("reasoning_content"):
+        return additional_kwargs.get("reasoning_content")
+    return getattr(response, "reasoning_content", None)
 
 def _get_next_task_id(task_list: list) -> str:
     """生成下一个任务 ID"""
@@ -139,7 +147,11 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
         print(f"[DEBUG] PlanAgent: Continuing after tool call (last_role={last_msg_role})")
     
     # 准备 LLM（工具绑定在决策后进行）
-    base_llm = get_llm(temperature=0.6)
+    # 如果启用了思考模式+工具调用，使用 get_thinking_llm
+    if is_thinking_with_tools_enabled():
+        base_llm = get_thinking_llm(temperature=0.6)
+    else:
+        base_llm = get_llm(temperature=0.6, use_tools=True)
     if from_tool_call:
         print("[DEBUG] PlanAgent: Second stage (from_tool_call), tools disabled to prevent loop")
     
@@ -204,10 +216,12 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
             print("[DEBUG] PlanAgent: Forced ask tool call (Phase 2: generate inquiry_card)")
             if hasattr(response, "name"):
                 response.name = "plan_agent"
+            reasoning_content = _extract_reasoning_content(response)
             return {
                 "messages": [response],
                 "current_agent": "plan_agent",
                 "_tool_caller": "plan_agent",
+                "_reasoning_content_cache": reasoning_content,
                 "debug_log": [{
                     "node": "plan_agent",
                     "step": "Tool Call Requested (ask forced, Phase 2)",
@@ -227,10 +241,12 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
             print(f"[DEBUG] PlanAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
             if hasattr(response, "name"):
                 response.name = "plan_agent"
+            reasoning_content = _extract_reasoning_content(response)
             return {
                 "messages": [response],
                 "current_agent": "plan_agent",
                 "_tool_caller": "plan_agent",
+                "_reasoning_content_cache": reasoning_content,
                 "debug_log": [{
                     "node": "plan_agent",
                     "step": "Tool Call Requested",
@@ -250,10 +266,12 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
             print(f"[DEBUG] PlanAgent: Model requested tool call: {[tc['name'] for tc in response.tool_calls]}")
             if hasattr(response, "name"):
                 response.name = "plan_agent"
+            reasoning_content = _extract_reasoning_content(response)
             return {
                 "messages": [response],
                 "current_agent": "plan_agent",
                 "_tool_caller": "plan_agent",
+                "_reasoning_content_cache": reasoning_content,
                 "debug_log": [{
                     "node": "plan_agent",
                     "step": "Tool Call Requested",
@@ -265,10 +283,12 @@ def plan_agent_node(state: AgentState) -> dict[str, Any]:
     print(f"[DEBUG] PlanAgent: No tool call, returning model response directly")
     if hasattr(response, "name"):
         response.name = "plan_agent"
+    reasoning_content = _extract_reasoning_content(response)
     result = {
         "messages": [response],
         "current_agent": "plan_agent",
         "_tool_caller": None,
+        "_reasoning_content_cache": reasoning_content,
         "debug_log": [{
             "node": "plan_agent",
             "step": "No Tool Call - Direct Response",
