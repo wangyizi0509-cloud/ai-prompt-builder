@@ -361,6 +361,27 @@ def run_thinking_tool_loop(
     )
 
 
+def invoke_thinking_llm(
+    messages: list,
+    tools: list[BaseTool],
+    temperature: float = 0.7,
+    initial_reasoning_content: Optional[str] = None,
+    **kwargs: Any,
+) -> AIMessage:
+    """
+    思考模式 + 工具调用的一轮封装，返回最终 AIMessage。
+    供 main_agent / status_agent / plan_agent / guide_agent 等节点调用。
+    initial_reasoning_content 保留以兼容调用方，当前未注入到循环中。
+    """
+    result = run_thinking_tool_loop(
+        messages=messages,
+        tools=tools,
+        temperature=temperature,
+        **{k: v for k, v in kwargs.items() if k != "initial_reasoning_content"},
+    )
+    return result.final_response
+
+
 def _normalize_messages(messages: list) -> list:
     """
     标准化消息列表，确保都是 LangChain 消息对象

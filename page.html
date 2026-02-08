@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>情感攻略 App (Gemini AI版)</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 React 和 ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- 引入 Babel 用于解析 JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        /* 自定义动画样式 */
+        @keyframes slide-up {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-slide-up { animation: slide-up 0.4s ease-out forwards; }
+        .animate-slide-up-slow { animation: slide-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        
+        @keyframes fade-in {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        .animate-fade-in { animation: fade-in 0.5s ease-out forwards; }
+        
+        .animate-fade-in-up { animation: slide-up 0.3s ease-out forwards; }
+        
+        @keyframes spin-slow {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .animate-spin-slow { animation: spin-slow 3s linear infinite; }
+        
+        @keyframes bounce-small {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-3px); }
+        }
+        .animate-bounce-small { animation: bounce-small 2s ease-in-out infinite; }
+        
+        /* 隐藏滚动条但保留功能 */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- Gemini API 配置 ---
+        const apiKey = ""; // 在此处填入您的 API Key (如果在本地运行)
+        
+        // 通用 Gemini 调用函数
+        const callGemini = async (messages, systemInstruction, jsonMode = false) => {
+            if (!apiKey) {
+                console.warn("API Key 未设置，使用模拟数据");
+                // 模拟延迟返回
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                if (jsonMode) {
+                    return JSON.stringify({
+                        insight: "用户表现出对改变的渴望，但受限于完美的开始时机。",
+                        suggestion: "建议采用“微习惯”策略，从每天5分钟开始，降低心理门槛。"
+                    });
+                }
+                return "（模拟回复）听起来您确实遇到了不小的阻力。能具体说说，这种“依赖外部契机”的感觉，通常是在什么场景下最强烈吗？";
+            }
+
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            
+            // 构建 prompt
+            let promptText = "";
+            messages.forEach(msg => {
+                promptText += `${msg.role === 'user' ? '用户' : '咨询师'}: ${msg.text}\n`;
+            });
+
+            const payload = {
+                contents: [{ parts: [{ text: promptText }] }],
+                systemInstruction: { parts: [{ text: systemInstruction }] }
+            };
+
+            if (jsonMode) {
+                payload.generationConfig = {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            insight: { type: "STRING" },
+                            suggestion: { type: "STRING" }
+                        }
+                    }
+                };
+            }
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                return data.candidates[0].content.parts[0].text;
+            } catch (error) {
+                console.error("Gemini API Error:", error);
+                return jsonMode ? JSON.stringify({ insight: "生成失败", suggestion: "请稍后重试" }) : "抱歉，我稍微走了个神，能再说一遍吗？";
+            }
+        };
+
+
+        // --- 图标组件 (内联 SVG 以确保离线可用) ---
+        const Icon = ({ children, className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                {children}
+            </svg>
+        );
+
+        const ChevronLeft = ({ className }) => <Icon className={className}><path d="m15 18-6-6 6-6"/></Icon>;
+        const Send = ({ className }) => <Icon className={className}><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></Icon>;
+        const RefreshCw = ({ className }) => <Icon className={className}><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></Icon>;
+        const HelpCircle = ({ className }) => <Icon className={className}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></Icon>;
+        const CheckCircle2 = ({ className }) => <Icon className={className}><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></Icon>;
+        const Sparkles = ({ className }) => <Icon className={className}><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275Z"/></Icon>;
+        const MessageSquare = ({ className }) => <Icon className={className}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></Icon>;
+        const ArrowRight = ({ className }) => <Icon className={className}><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></Icon>;
+        const FileText = ({ className }) => <Icon className={className}><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><line x1="10" x2="8" y1="9" y2="9"/></Icon>;
+
+
+        // --- 主 App 组件 ---
+        function App() {
+            // 状态管理
+            const [phase, setPhase] = useState('initial');
+            const [activeTab, setActiveTab] = useState('plan'); // 'chat' (小话) | 'plan' (规划)
+            const [inputValue, setInputValue] = useState('');
+            const [messages, setMessages] = useState([]);
+            const [roundCount, setRoundCount] = useState(0);
+            const [isTyping, setIsTyping] = useState(false);
+            const [generatedSummary, setGeneratedSummary] = useState(null);
+            const scrollRef = useRef(null);
+
+            // 模拟长文本
+            const dummyText = "这里是计划说明这里是计划说明这里是计划说明这里是计划说明这里是计划说明这里是计划这 查看全部";
+            const dummyDetail = "这里是计划详情这里是计划详情这里是计划详情这里是计划详情这里是计划详情这里是计划详情这里是计划详情这里是计划详情这里是计划详情这里是计划详情...";
+
+            // 自动滚动到底部
+            useEffect(() => {
+                if (scrollRef.current && (phase === 'chatting' || phase === 'main_chat')) {
+                scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+                }
+            }, [messages, isTyping, phase]);
+
+            // 开始行动反馈
+            const startFeedback = () => {
+                setPhase('chatting');
+                setMessages([
+                    {
+                        id: 'system-plan',
+                        type: 'plan-card',
+                        content: { title: "行动力冻结", goal: "想推进，却过度依赖外部契机", desc: dummyDetail }
+                    },
+                    {
+                        id: 'ai-intro',
+                        type: 'ai',
+                        text: "在这个阶段，您觉得最困难的点是什么？我们可以聊聊具体的阻碍。",
+                        role: 'model'
+                    }
+                ]);
+            };
+
+            // 进入主聊天流程
+            const handleContinueToChat = () => {
+                setActiveTab('chat');
+                setPhase('main_chat');
+                
+                // 1. 预置历史消息
+                const historyMessages = [
+                    { id: 'hist-1', type: 'user', text: "我完成了行动一", role: 'user' },
+                    { 
+                        id: 'hist-2', 
+                        type: 'ai-card-request', 
+                        text: "非常棒哦，需要您反馈行动细节，便于我们为您生成专属下一步计划！",
+                        role: 'model'
+                    }
+                ];
+                setMessages(historyMessages);
+                
+                // 2. 模拟用户自动发送“已完成” + “总结卡片”
+                setTimeout(async () => {
+                    const userSummaryMsg = { 
+                        id: Date.now(), 
+                        type: 'user-with-summary',
+                        text: "我已完成行动反馈",
+                        summary: generatedSummary || {
+                            title: "行动反馈总结",
+                            insight: "AI 生成中...",
+                            suggestion: "AI 生成中..."
+                        },
+                        role: 'user'
+                    };
+                    
+                    setMessages(prev => [...prev, userSummaryMsg]);
+                    setIsTyping(true);
+
+                    // 3. AI 继续回复 (调用 Gemini)
+                    const contextMessages = [
+                        ...historyMessages,
+                        { role: 'user', text: `我已完成行动反馈。我的情况总结如下：核心洞察：${generatedSummary?.insight}。建议：${generatedSummary?.suggestion}` }
+                    ];
+                    
+                    const systemPrompt = "你是一个情感咨询师“小话”。用户刚刚完成了一个阶段的行动计划反馈，并展示了总结卡片。请简短地鼓励用户，并询问他们对新的建议（即“下一步建议”）有什么想法或顾虑。语气要亲切、支持性。不要长篇大论。";
+                    
+                    const aiReply = await callGemini(contextMessages, systemPrompt);
+
+                    setIsTyping(false);
+                    setMessages(prev => [
+                        ...prev, 
+                        { 
+                            id: Date.now() + 1, 
+                            type: 'ai', 
+                            text: aiReply,
+                            role: 'model'
+                        }
+                    ]);
+
+                }, 800);
+            };
+
+            // 发送消息处理
+            const handleSend = async () => {
+                if (!inputValue.trim()) return;
+
+                const newUserMsg = { id: Date.now(), type: 'user', text: inputValue, role: 'user' };
+                const updatedMessages = [...messages, newUserMsg];
+                
+                setMessages(updatedMessages);
+                setInputValue('');
+                setIsTyping(true);
+
+                // 仅在反馈阶段调用 Gemini
+                if (phase === 'chatting') {
+                    // 准备发送给 API 的消息历史 (过滤掉 UI 专用类型)
+                    const apiHistory = updatedMessages
+                        .filter(m => m.type === 'user' || m.type === 'ai')
+                        .map(m => ({ role: m.role || 'user', text: m.text }));
+
+                    const systemPrompt = "你是一个专业的情感咨询师“小话”。用户正在进行“行动力冻结”的计划反馈。目标是“想推进，却过度依赖外部契机”。请以温和、启发式的语气与用户对话，引导他们说出执行中的困难。每次回复控制在 50 字以内。只进行 2 轮深入对话即可。";
+
+                    const aiResponseText = await callGemini(apiHistory, systemPrompt);
+
+                    setIsTyping(false);
+                    setMessages(prev => [...prev, { id: Date.now() + 1, type: 'ai', text: aiResponseText, role: 'model' }]);
+                    
+                    const newRound = roundCount + 1;
+                    setRoundCount(newRound);
+
+                    // 2轮对话后，生成总结
+                    if (newRound >= 2) {
+                        setTimeout(async () => {
+                            setPhase('generating');
+                            
+                            // 调用 Gemini 生成总结 JSON
+                            const summarySystemPrompt = "你是一个数据分析师。根据用户的对话历史，总结生成一个 JSON 对象，包含两个字段：'insight' (核心洞察，分析用户的心理阻碍) 和 'suggestion' (下一步建议，给出具体的微小行动)。请用中文回答。";
+                            const summaryJsonStr = await callGemini(apiHistory, summarySystemPrompt, true);
+                            
+                            try {
+                                const summaryData = JSON.parse(summaryJsonStr);
+                                setGeneratedSummary(summaryData);
+                            } catch (e) {
+                                setGeneratedSummary({
+                                    insight: "用户对主动出击存在心理阻抗。",
+                                    suggestion: "尝试低压接触策略。"
+                                });
+                            }
+
+                            setTimeout(() => {
+                               setPhase('completed');
+                            }, 500); // 稍微缩短等待时间，因为 API 调用已经花了时间
+                        }, 1000); 
+                    }
+                } else {
+                   // 主聊天窗口的简单回显 (也可以接 Gemini，为了演示简洁这里保留简单逻辑)
+                   setTimeout(() => {
+                     setIsTyping(false);
+                     setMessages(prev => [...prev, { id: Date.now() + 1, type: 'ai', text: "我们会持续跟进这个计划。", role: 'model' }]);
+                   }, 1000);
+                }
+            };
+
+            return (
+                <div className="w-full h-screen bg-gray-50 flex justify-center overflow-hidden font-sans text-gray-800">
+                <div className="w-full max-w-md h-full bg-white flex flex-col relative shadow-xl overflow-hidden">
+                    
+                    {/* --- 顶部 Header --- */}
+                    <div className="bg-gradient-to-b from-pink-50 to-white pb-2 z-10 shrink-0">
+                    <div className="flex justify-between items-center p-4 pt-12">
+                        <button className="p-2 bg-white/50 rounded-full"><ChevronLeft className="w-5 h-5 text-gray-600" /></button>
+                        <div className="flex gap-4 text-sm font-medium transition-all">
+                        <span className={`cursor-pointer ${activeTab === 'chat' ? 'text-gray-800 border-b-2 border-black pb-0.5' : 'text-gray-400'}`} onClick={() => setActiveTab('chat')}>小话</span>
+                        <span className={`cursor-pointer ${activeTab === 'plan' ? 'text-gray-800 border-b-2 border-black pb-0.5' : 'text-gray-400'}`} onClick={() => setActiveTab('plan')}>规划</span>
+                        </div>
+                        <div className="flex items-center gap-2 bg-white/80 pr-3 pl-1 py-1 rounded-full shadow-sm border border-pink-100">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-400 to-pink-400 overflow-hidden border-2 border-white">
+                            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="avatar" />
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-[10px] text-gray-500 leading-none">咨询对象</span>
+                            <span className="text-xs font-bold text-gray-800 leading-none mt-0.5">小红...</span>
+                        </div>
+                        </div>
+                    </div>
+
+                    {activeTab === 'plan' && (
+                        <>
+                        <div className="px-6 mt-2 flex justify-between items-end animate-fade-in">
+                            <div>
+                            <h1 className="text-2xl font-bold flex items-center gap-1">
+                                情感攻略 <span className="text-pink-500">Crush</span>
+                            </h1>
+                            <div className="mt-2 bg-purple-50 text-purple-600 text-xs px-3 py-1 rounded-full inline-flex items-center">
+                                补充约会信息，分析更加精准 <ChevronLeft className="w-3 h-3 rotate-180 ml-1" />
+                            </div>
+                            </div>
+                        </div>
+
+                        <div className="flex mt-6 px-4 relative animate-fade-in">
+                            <div className="absolute bottom-0 w-full h-[1px] bg-gray-100 left-0"></div>
+                            <div className="flex-1 text-center pb-3 text-gray-400 text-sm">
+                            <span className="text-pink-300 font-bold mr-1">01</span> 当前现状
+                            <div className="text-[10px] mt-1 text-gray-300">左侧查看专属情感计划</div>
+                            </div>
+                            <div className="flex-1 text-center pb-3 relative">
+                            <span className="text-pink-500 font-bold text-base mr-1">02</span> <span className="font-bold text-gray-800">情感计划</span>
+                            <div className="text-[10px] mt-1 text-gray-500">全方位Crush攻略</div>
+                            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-1 bg-pink-500 rounded-t-full shadow-[0_-2px_6px_rgba(236,72,153,0.4)]"></div>
+                            </div>
+                        </div>
+                        </>
+                    )}
+                    </div>
+
+                    {/* --- 主滚动区域 --- */}
+                    <div 
+                    className="flex-1 overflow-y-auto bg-gray-50/50 relative scroll-smooth no-scrollbar" 
+                    ref={scrollRef}
+                    >
+                    <div className="absolute top-0 left-0 w-full h-40 bg-gradient-to-b from-white to-transparent pointer-events-none"></div>
+
+                    <div className="p-4 pb-24 relative min-h-[400px]">
+                        
+                        {/* 顶部状态栏 (仅在规划 Tab 显示) */}
+                        {activeTab === 'plan' && (phase === 'initial' || phase === 'completed') && (
+                        <div className="flex justify-between items-center mb-4 px-1 animate-fade-in">
+                            <div className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                            当前计划： <span className="text-pink-500">兴趣锚点切入</span>
+                            </div>
+                            <div className="text-xs text-gray-400 flex items-center">
+                            全部计划 <ChevronLeft className="w-3 h-3 rotate-180" />
+                            </div>
+                        </div>
+                        )}
+
+                        {/* Content Switcher based on Active Tab & Phase */}
+                        {activeTab === 'plan' ? (
+                        <>
+                            {/* Phase 1: 初始计划卡片 */}
+                            {phase === 'initial' && (
+                            <div className="space-y-4 animate-slide-up">
+                                <div className="flex gap-3">
+                                <button className="px-4 py-1.5 bg-pink-100 text-pink-600 rounded-full text-xs font-bold shadow-sm">行动一</button>
+                                <button className="px-4 py-1.5 bg-white text-gray-400 rounded-full text-xs font-medium">进行中</button>
+                                <button className="px-4 py-1.5 bg-white text-gray-400 rounded-full text-xs font-medium">行动三</button>
+                                </div>
+
+                                <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 relative overflow-hidden">
+                                <div className="flex justify-between items-start mb-4">
+                                    <div>
+                                    <h3 className="text-lg font-bold text-gray-900">行动力冻结</h3>
+                                    <p className="text-xs text-gray-500 mt-1">核心目标</p>
+                                    <p className="text-sm text-gray-700 mt-0.5">想推进，却过度依赖外部契机</p>
+                                    </div>
+                                </div>
+                                <div className="space-y-4">
+                                    <div>
+                                    <h4 className="text-xs font-bold text-gray-900 mb-1">计划说明：</h4>
+                                    <p className="text-xs text-gray-500 leading-relaxed line-clamp-2">{dummyText}</p>
+                                    </div>
+                                    <div>
+                                    <h4 className="text-xs font-bold text-gray-900 mb-1">计划详情</h4>
+                                    <div className="relative">
+                                        <p className="text-xs text-gray-500 leading-relaxed text-justify">{dummyDetail} {dummyDetail}</p>
+                                        <div className="absolute bottom-0 w-full h-12 bg-gradient-to-t from-white to-transparent"></div>
+                                    </div>
+                                    </div>
+                                </div>
+                                <div className="mt-6">
+                                    <button 
+                                    onClick={startFeedback}
+                                    className="w-full py-3 bg-white border border-pink-100 text-pink-500 rounded-xl text-sm font-bold shadow-sm active:scale-95 transition-transform hover:bg-pink-50 flex items-center justify-center gap-2"
+                                    >
+                                    <MessageSquare className="w-4 h-4" />
+                                    行动反馈
+                                    </button>
+                                    <p className="text-[10px] text-gray-300 text-center mt-3 px-4 leading-tight">
+                                    当计划有结果后，输入反馈，点击计划结束，小话将为你分析本次计划并继续策划下一步
+                                    </p>
+                                </div>
+                                </div>
+                            </div>
+                            )}
+
+                            {/* Phase 2: 对话流 (包括 Generating 时的淡出) */}
+                            {(phase === 'chatting' || phase === 'generating') && (
+                            <div className={`space-y-6 transition-all duration-700 transform ${phase === 'generating' ? 'opacity-0 translate-y-8 blur-sm' : 'opacity-100'}`}>
+                                {messages.map((msg) => {
+                                if (msg.type === 'plan-card') {
+                                    return (
+                                    <div key={msg.id} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+                                        <div className="flex items-center gap-2 mb-2 text-pink-500 font-bold text-xs">
+                                        <CheckCircle2 className="w-4 h-4" /> 当前参考计划
+                                        </div>
+                                        <h3 className="text-lg font-bold text-gray-900">{msg.content.title}</h3>
+                                        <p className="text-xs text-gray-500 mt-1">{msg.content.goal}</p>
+                                        <div className="mt-2 text-xs text-gray-400 line-clamp-2 border-t border-gray-100 pt-2">
+                                        {msg.content.desc}
+                                        </div>
+                                    </div>
+                                    );
+                                }
+                                return (
+                                    <div key={msg.id} className={`flex gap-3 ${msg.type === 'user' ? 'flex-row-reverse' : ''} animate-fade-in-up`}>
+                                    {msg.type === 'ai' && (
+                                        <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-400 to-pink-400 flex-shrink-0 border-2 border-white shadow-sm overflow-hidden">
+                                        <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="ai" />
+                                        </div>
+                                    )}
+                                    <div className={`
+                                        max-w-[80%] p-3.5 rounded-2xl text-sm leading-relaxed shadow-sm
+                                        ${msg.type === 'user' ? 'bg-pink-500 text-white rounded-tr-sm' : 'bg-white text-gray-700 rounded-tl-sm border border-gray-100'}
+                                    `}>
+                                        {msg.text}
+                                    </div>
+                                    </div>
+                                );
+                                })}
+                                {isTyping && (
+                                <div className="flex gap-3 animate-pulse">
+                                    <div className="w-8 h-8 rounded-full bg-gray-200"></div>
+                                    <div className="bg-white p-3 rounded-2xl rounded-tl-sm border border-gray-100 flex items-center gap-1 h-10">
+                                    <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></div>
+                                    <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-100"></div>
+                                    <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-200"></div>
+                                    </div>
+                                </div>
+                                )}
+                                <div className="h-12"></div>
+                            </div>
+                            )}
+
+                            {/* Phase: Loading 动画 */}
+                            {phase === 'generating' && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center animate-fade-in z-20">
+                                <div className="bg-white/90 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-pink-100 flex flex-col items-center gap-4">
+                                    <div className="relative">
+                                    <div className="absolute inset-0 bg-pink-200 rounded-full animate-ping opacity-75"></div>
+                                    <div className="w-12 h-12 bg-gradient-to-tr from-purple-500 to-pink-500 rounded-full flex items-center justify-center text-white relative z-10 shadow-lg">
+                                        <Sparkles className="w-6 h-6 animate-spin-slow" />
+                                    </div>
+                                    </div>
+                                    <div className="text-center">
+                                    <h3 className="text-sm font-bold text-gray-800">正在生成行动总结</h3>
+                                    <p className="text-xs text-gray-400 mt-1">整合您的反馈与情绪数据...</p>
+                                    </div>
+                                </div>
+                            </div>
+                            )}
+
+                            {/* Phase 3: 完成总结 */}
+                            {phase === 'completed' && (
+                            <div className="animate-slide-up-slow space-y-4">
+                                <div className="flex gap-3">
+                                <button className="px-4 py-1.5 bg-green-100 text-green-600 rounded-full text-xs font-bold shadow-sm flex items-center gap-1">
+                                    <CheckCircle2 className="w-3 h-3" /> 已完成
+                                </button>
+                                <button className="px-4 py-1.5 bg-white text-gray-400 rounded-full text-xs font-medium">进行中</button>
+                                <button className="px-4 py-1.5 bg-white text-gray-400 rounded-full text-xs font-medium">行动三</button>
+                                </div>
+
+                                <div className="bg-gradient-to-br from-white to-pink-50 rounded-2xl p-1 shadow-md border border-pink-100">
+                                <div className="bg-white/60 rounded-xl p-5 backdrop-blur-sm">
+                                    <div className="flex items-center gap-3 mb-6">
+                                        <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center text-green-600 shadow-sm animate-bounce-small">
+                                        <CheckCircle2 className="w-6 h-6" />
+                                        </div>
+                                        <div>
+                                        <h3 className="font-bold text-gray-800 text-lg">行动反馈总结</h3>
+                                        <p className="text-xs text-gray-500">基于您的2轮对话反馈生成</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="space-y-4">
+                                        <div className="bg-white p-4 rounded-xl border border-gray-100 text-sm text-gray-600 shadow-sm relative overflow-hidden transition-hover hover:shadow-md">
+                                        <div className="absolute top-0 left-0 w-1 h-full bg-purple-400"></div>
+                                        <span className="font-bold text-gray-800 block mb-2 flex items-center gap-2">
+                                            🎯 核心洞察
+                                        </span>
+                                        {generatedSummary ? generatedSummary.insight : "加载中..."}
+                                        </div>
+                                        
+                                        <div className="bg-white p-4 rounded-xl border border-gray-100 text-sm text-gray-600 shadow-sm relative overflow-hidden transition-hover hover:shadow-md">
+                                        <div className="absolute top-0 left-0 w-1 h-full bg-pink-400"></div>
+                                        <span className="font-bold text-gray-800 block mb-2 flex items-center gap-2">
+                                            ✨ 下一步建议
+                                        </span>
+                                        {generatedSummary ? generatedSummary.suggestion : "加载中..."}
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-6 pt-4 border-t border-gray-100/50">
+                                    <button 
+                                        onClick={handleContinueToChat}
+                                        className="w-full py-3 bg-gray-900 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-gray-200 active:scale-95 transition-transform group"
+                                    >
+                                        <span className="group-hover:mr-1 transition-all">继续</span>
+                                        <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                                    </button>
+                                    </div>
+                                </div>
+                                </div>
+                            </div>
+                            )}
+                        </>
+                        ) : (
+                        // --- 小话 Tab View (纯聊天 + 自动发送 + 卡片) ---
+                        <div className="space-y-6 animate-fade-in pt-4">
+                            {messages.map((msg) => {
+                            
+                            // 历史中的 AI 请求反馈卡片
+                            if (msg.type === 'ai-card-request') {
+                                return (
+                                <div key={msg.id} className="flex gap-3 animate-fade-in-up">
+                                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-400 to-pink-400 flex-shrink-0 border-2 border-white shadow-sm overflow-hidden">
+                                        <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="ai" />
+                                    </div>
+                                    <div className="max-w-[85%]">
+                                        <div className="bg-white p-4 rounded-2xl rounded-tl-sm border border-gray-100 shadow-sm text-sm text-gray-700">
+                                        <p className="mb-3 leading-relaxed font-medium text-gray-800">{msg.text}</p>
+                                        <button className="w-full py-2 bg-pink-50 border border-pink-100 text-pink-500 rounded-lg text-xs font-bold shadow-sm hover:bg-pink-100 active:scale-95 transition-all">
+                                            完成反馈
+                                        </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                )
+                            }
+
+                            // 用户自动发送的带总结的卡片
+                            if (msg.type === 'user-with-summary') {
+                                return (
+                                    <div key={msg.id} className="flex flex-col items-end gap-1 animate-fade-in-up">
+                                    {/* 气泡部分 */}
+                                    <div className="flex flex-row-reverse gap-3">
+                                        <div className="max-w-[80%] p-3.5 rounded-2xl text-sm leading-relaxed shadow-sm bg-pink-500 text-white rounded-tr-sm">
+                                            {msg.text}
+                                        </div>
+                                    </div>
+                                    {/* 附件小卡片部分 */}
+                                    <div className="mr-0 mt-1 w-[80%] bg-white rounded-xl border border-gray-200 p-3 shadow-sm">
+                                            <div className="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100">
+                                            <FileText className="w-3 h-3 text-pink-500" />
+                                            <span className="text-xs font-bold text-gray-800">{msg.summary.title}</span>
+                                            </div>
+                                            <div className="space-y-1">
+                                            <p className="text-[10px] text-gray-600 leading-tight">
+                                                <span className="font-bold text-gray-800">· </span>{msg.summary.insight}
+                                            </p>
+                                            <p className="text-[10px] text-gray-600 leading-tight">
+                                                <span className="font-bold text-gray-800">· </span>{msg.summary.suggestion}
+                                            </p>
+                                            </div>
+                                    </div>
+                                    </div>
+                                )
+                            }
+
+                            return (
+                                <div key={msg.id} className={`flex gap-3 ${msg.type === 'user' ? 'flex-row-reverse' : ''} animate-fade-in-up`}>
+                                    {msg.type === 'ai' && (
+                                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-400 to-pink-400 flex-shrink-0 border-2 border-white shadow-sm overflow-hidden">
+                                        <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="ai" />
+                                    </div>
+                                    )}
+                                    <div className={`
+                                    max-w-[80%] p-3.5 rounded-2xl text-sm leading-relaxed shadow-sm
+                                    ${msg.type === 'user' ? 'bg-pink-500 text-white rounded-tr-sm' : 'bg-white text-gray-700 rounded-tl-sm border border-gray-100'}
+                                    `}>
+                                    {msg.text}
+                                    </div>
+                                </div>
+                                );
+                            })}
+                            
+                            {isTyping && (
+                            <div className="flex gap-3 animate-pulse">
+                                <div className="w-8 h-8 rounded-full bg-gray-200"></div>
+                                <div className="bg-white p-3 rounded-2xl rounded-tl-sm border border-gray-100 flex items-center gap-1 h-10">
+                                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></div>
+                                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-100"></div>
+                                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-200"></div>
+                                </div>
+                            </div>
+                            )}
+                            <div className="h-12"></div>
+                        </div>
+                        )}
+                        
+                    </div>
+                    </div>
+
+                    {/* --- 底部输入区 --- */}
+                    <div className={`bg-white border-t border-gray-100 p-3 pb-6 shrink-0 z-20 transition-all duration-500 ${phase === 'generating' ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
+                    {phase === 'completed' && activeTab === 'plan' ? (
+                        <div className="flex justify-between items-center px-4 py-2 animate-fade-in">
+                            <button className="flex flex-col items-center gap-1 text-gray-400 hover:text-gray-600">
+                            <RefreshCw className="w-5 h-5" />
+                            <span className="text-[10px]">重新生成</span>
+                            </button>
+                            <div className="text-xs text-gray-300">本次咨询已结束</div>
+                            <button className="flex flex-col items-center gap-1 text-gray-400 hover:text-gray-600">
+                            <HelpCircle className="w-5 h-5" />
+                            <span className="text-[10px]">追问</span>
+                            </button>
+                        </div>
+                    ) : (
+                        <>
+                        <div className="flex justify-between px-2 mb-3">
+                            <button className="flex items-center gap-1 text-xs font-bold text-gray-700 bg-gray-50 px-3 py-1.5 rounded-full border border-gray-100">
+                            <HelpCircle className="w-3.5 h-3.5 text-gray-400" /> 情感快问
+                            </button>
+                            <button className="flex items-center gap-1 text-xs text-gray-400">
+                            <RefreshCw className="w-3 h-3" /> 重新生成
+                            </button>
+                        </div>
+                        <div className="flex items-center gap-2 bg-white shadow-[0_2px_15px_rgba(0,0,0,0.05)] rounded-2xl p-1.5 border border-gray-100 pl-4">
+                            <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-400 flex-shrink-0">
+                            <div className="w-4 h-4 bg-gray-400 rounded-sm"></div>
+                            </div>
+                            <input 
+                            type="text" 
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                            placeholder={phase === 'chatting' || activeTab === 'chat' ? "回复以继续..." : "请输入您的情感问题..."}
+                            className="flex-1 bg-transparent text-sm outline-none text-gray-700 placeholder-gray-300"
+                            disabled={phase === 'completed' && activeTab === 'plan' || isTyping || phase === 'generating'}
+                            />
+                            <button 
+                            onClick={handleSend}
+                            disabled={!inputValue.trim()}
+                            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${inputValue.trim() ? 'bg-purple-600 text-white shadow-md shadow-purple-200' : 'bg-purple-100 text-purple-300'}`}
+                            >
+                            <Send className="w-5 h-5" />
+                            </button>
+                        </div>
+                        </>
+                    )}
+                    </div>
+
+                </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

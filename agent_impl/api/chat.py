@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 
 router = APIRouter(prefix="/api")
 security = HTTPBearer(auto_error=False)
@@ -25,10 +25,44 @@ class FeedbackModeInput(BaseModel):
     completion_detail: Optional[str] = ""
 
 
+class ImageInfo(BaseModel):
+    image_url: Optional[str] = None
+    ocr_result: Optional[str] = None
+    screenshot_type: Optional[str] = None
+
+
 class ChatRequest(BaseModel):
     message: str
     session_id: str
     feedback_mode: Optional[FeedbackModeInput] = None
+    images: Optional[List[ImageInfo]] = None
+
+
+def _get_screenshot_label(screenshot_type: Optional[str]) -> str:
+    labels = {
+        "private_chat_screenshot": "私聊截图",
+        "group_chat_screenshot": "群聊截图",
+        "moments_screenshot": "朋友圈截图",
+        "other_social_media_screenshot": "其他社媒截图",
+        "universal_screenshot_analysis": "通用截图",
+    }
+    return labels.get(screenshot_type or "", "截图")
+
+
+def _build_user_message_with_images(request: ChatRequest) -> str:
+    final_message = request.message or ""
+    if request.images:
+        image_parts = []
+        for img in request.images:
+            if img.ocr_result:
+                type_label = _get_screenshot_label(img.screenshot_type)
+                image_parts.append(f"【{type_label}分析结果】\n{img.ocr_result}")
+
+        if image_parts:
+            final_message = "\n\n---\n\n".join(image_parts)
+            if request.message:
+                final_message += f"\n\n---\n\n用户补充说明：{request.message}"
+    return final_message
 
 
 async def get_optional_user_dep(
@@ -271,7 +305,8 @@ async def chat(
     background_tasks: BackgroundTasks,
     current_user=Depends(get_optional_user_dep),
 ):
-    logger.info(f"Received message from session {request.session_id}: {request.message[:50]}...")
+    final_message = _build_user_message_with_images(request)
+    logger.info(f"Received message from session {request.session_id}: {final_message[:50]}...")
 
     from api.sdk_client import (
         ensure_thread_exists,
@@ -289,12 +324,12 @@ async def chat(
     if base_state is None:
         logger.info(f"Creating new session for thread {thread_id} (checkpointer empty)")
         current_message_id = str(uuid.uuid4())
-        state = create_initial_state(request.message, current_message_id=current_message_id)
+        state = create_initial_state(final_message, current_message_id=current_message_id)
         state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
     else:
         state = dict(base_state)
         current_message_id = str(uuid.uuid4())
-        state["user_message"] = request.message
+        state["user_message"] = final_message
         state["current_message_id"] = current_message_id
         state["_iteration_count"] = 0
         state["debug_log"] = []
@@ -314,7 +349,7 @@ async def chat(
             data={
                 "session_id": request.session_id,
                 "thread_id": thread_id,
-                "message_preview": request.message[:100],
+                "message_preview": final_message[:100],
                 "use_stream": False,
                 "user_id": user_id,
             },

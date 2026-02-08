@@ -69,3 +69,24 @@ async def upload_screenshot(
     
     return result
 
+
+@router.post("/detect-type")
+async def detect_screenshot_type(
+    file: UploadFile = File(...),
+    current_user = Depends(get_optional_user)
+):
+    """
+    自动识别截图类型
+    """
+    _ = current_user  # 预留权限扩展，当前接口仅做可选登录校验
+
+    try:
+        image_bytes = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"读取图片失败: {str(e)}")
+
+    from utils.image_processor import get_image_processor
+
+    processor = get_image_processor()
+    result = await processor.detect_type(image_bytes=image_bytes)
+    return result

@@ -928,7 +928,26 @@
                                     <div v-if="msg.isAssessment" v-html="msg.content"></div>
                                     <div v-else v-html="renderMarkdown(msg.content)"></div>
                                 </div>
-                                <div v-else>{{ msg.content }}</div>
+                                <div v-else>
+                                    <div v-if="msg.images && msg.images.length > 0" class="mb-2">
+                                        <div class="flex flex-wrap gap-2">
+                                            <div
+                                                v-for="(img, idx) in msg.images"
+                                                :key="img.id || idx"
+                                                class="relative w-20 h-20 rounded-lg overflow-hidden bg-gray-100"
+                                            >
+                                                <img :src="img.preview || img.imageUrl" class="w-full h-full object-cover">
+                                                <div v-if="img.status === 'processing'" class="absolute inset-0 bg-black/30 flex items-center justify-center">
+                                                    <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                                </div>
+                                                <div v-else-if="img.status === 'error'" class="absolute inset-0 bg-red-500/70 flex items-center justify-center">
+                                                    <span class="text-white text-xs">失败</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div v-if="msg.content">{{ msg.content }}</div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -945,26 +964,76 @@
                 </div>
 
                 <!-- Input Area -->
-                <div class="p-3 border-t bg-white flex items-center space-x-2">
-                    <input 
-                        v-model="inputMessage" 
-                        @keyup.enter="sendMessage"
-                        type="text" 
-                        placeholder="请输入您的情感问题..." 
-                        data-testid="chat-input"
-                        class="flex-1 bg-gray-100 border-0 rounded-full px-4 py-2.5 text-sm focus:ring-2 focus:ring-violet-500 focus:outline-none"
-                        :disabled="isLoading"
-                    >
-                    <button 
-                        @click="sendMessage"
-                        :disabled="!inputMessage.trim() || isLoading"
-                        data-testid="chat-send-btn"
-                        class="bg-violet-600 text-white w-10 h-10 rounded-full flex items-center justify-center hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                            <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
-                        </svg>
-                    </button>
+                <div class="p-3 border-t bg-white">
+                    <div v-if="pendingImages.length > 0" class="flex flex-wrap gap-2 mb-2 p-2 bg-gray-50 rounded-lg">
+                        <div
+                            v-for="(img, index) in pendingImages"
+                            :key="index"
+                            class="relative w-16 h-16 rounded-lg overflow-hidden border"
+                            :class="{
+                                'border-gray-300': img.status === 'pending',
+                                'border-blue-400 animate-pulse': img.status === 'processing',
+                                'border-green-400': img.status === 'done',
+                                'border-red-400': img.status === 'error'
+                            }"
+                        >
+                            <img :src="img.preview" class="w-full h-full object-cover">
+                            <div v-if="img.status === 'processing'" class="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            </div>
+                            <button
+                                v-if="img.status !== 'processing'"
+                                @click="removeImage(index)"
+                                class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center hover:bg-red-600"
+                            >×</button>
+                            <div v-if="img.status === 'error'" class="absolute inset-0 bg-red-500/80 flex items-center justify-center">
+                                <span class="text-white text-xs">失败</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center space-x-2">
+                        <button
+                            @click="triggerImageUpload"
+                            :disabled="isLoading || isProcessingImages"
+                            class="text-gray-400 hover:text-violet-500 disabled:opacity-50 p-2"
+                            title="上传图片"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                        </button>
+                        <input
+                            type="file"
+                            ref="mainImageInput"
+                            accept="image/*"
+                            multiple
+                            @change="handleMainImageSelect"
+                            class="hidden"
+                        >
+
+                        <input
+                            v-model="inputMessage"
+                            @keyup.enter="sendMessageWithImages"
+                            @paste="handlePaste"
+                            type="text"
+                            placeholder="请输入您的情感问题..."
+                            data-testid="chat-input"
+                            class="flex-1 bg-gray-100 border-0 rounded-full px-4 py-2.5 text-sm focus:ring-2 focus:ring-violet-500 focus:outline-none"
+                            :disabled="isLoading || isProcessingImages"
+                        >
+                        <button
+                            @click="sendMessageWithImages"
+                            :disabled="(!inputMessage.trim() && pendingImages.length === 0) || isLoading || isProcessingImages"
+                            data-testid="chat-send-btn"
+                            class="bg-violet-600 text-white w-10 h-10 rounded-full flex items-center justify-center hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <svg v-if="!isProcessingImages" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                            </svg>
+                            <div v-else class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -1178,21 +1247,56 @@
                             
                             <!-- Screenshot Upload (截图上传) -->
                             <div v-else-if="isScreenshotType(q.type)" class="space-y-3">
+                                <input 
+                                    type="file" 
+                                    :ref="el => fileInputRefs[q.id] = el"
+                                    accept="image/*"
+                                    @change="handleFileSelect($event, q.id, q.type)"
+                                    class="hidden"
+                                >
+
+                                <!-- 上传中 -->
+                                <div v-if="inquiryAnswers[q.id]?.stage === 'uploading'" class="border border-violet-200 bg-violet-50 rounded-lg p-4 text-center">
+                                    <div class="animate-spin w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                                    <p class="text-sm text-violet-600">正在分析截图...</p>
+                                </div>
+
+                                <!-- 已选择/已上传 -->
+                                <div v-else-if="inquiryAnswers[q.id]?.stage === 'selected' || inquiryAnswers[q.id]?.stage === 'uploaded'" class="border border-green-200 bg-green-50 rounded-lg p-4">
+                                    <div class="flex items-start justify-between mb-3">
+                                        <div class="flex items-center text-green-600">
+                                            <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                                            </svg>
+                                            <span class="text-sm font-medium">{{ inquiryAnswers[q.id]?.stage === 'uploaded' ? '截图已分析' : '截图已选择' }}</span>
+                                        </div>
+                                        <div class="flex items-center gap-3">
+                                            <button @click="triggerFileInput(q.id)" class="text-gray-400 hover:text-violet-500 text-xs">重新选择</button>
+                                            <button @click="clearScreenshot(q.id)" class="text-gray-400 hover:text-red-500 text-xs">清空</button>
+                                        </div>
+                                    </div>
+                                    <div class="w-full h-40 rounded-lg overflow-hidden bg-gray-100 border border-gray-200">
+                                        <img :src="inquiryAnswers[q.id]?.preview || inquiryAnswers[q.id]?.imageUrl" class="w-full h-full object-cover">
+                                    </div>
+                                </div>
+
+                                <!-- 上传失败 -->
+                                <div v-else-if="inquiryAnswers[q.id]?.stage === 'error'" class="border border-red-200 bg-red-50 rounded-lg p-4">
+                                    <p class="text-sm text-red-600">{{ inquiryAnswers[q.id].error || '上传失败，请重试' }}</p>
+                                    <div class="flex items-center gap-3 mt-2">
+                                        <button @click="triggerFileInput(q.id)" class="text-xs text-red-500 underline">重选图片</button>
+                                        <button @click="clearScreenshot(q.id)" class="text-xs text-gray-500 underline">清空</button>
+                                    </div>
+                                </div>
+
                                 <!-- 上传区域 -->
                                 <div 
-                                    v-if="!inquiryAnswers[q.id]?.uploaded"
+                                    v-else
                                     class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-violet-400 transition-colors cursor-pointer"
                                     @click="triggerFileInput(q.id)"
                                     @dragover.prevent
                                     @drop.prevent="handleFileDrop($event, q.id, q.type)"
                                 >
-                                    <input 
-                                        type="file" 
-                                        :ref="el => fileInputRefs[q.id] = el"
-                                        accept="image/*"
-                                        @change="handleFileSelect($event, q.id, q.type)"
-                                        class="hidden"
-                                    >
                                     <div class="text-gray-400 mb-2">
                                         <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -1200,32 +1304,6 @@
                                     </div>
                                     <p class="text-sm text-gray-500">点击或拖拽上传{{ getScreenshotLabel(q.type) }}</p>
                                     <p class="text-xs text-gray-400 mt-1">支持 JPG、PNG 格式</p>
-                                </div>
-                                
-                                <!-- 上传中 -->
-                                <div v-else-if="inquiryAnswers[q.id]?.uploading" class="border border-violet-200 bg-violet-50 rounded-lg p-4 text-center">
-                                    <div class="animate-spin w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full mx-auto mb-2"></div>
-                                    <p class="text-sm text-violet-600">正在分析截图...</p>
-                                </div>
-                                
-                                <!-- 上传成功 -->
-                                <div v-else-if="inquiryAnswers[q.id]?.uploaded" class="border border-green-200 bg-green-50 rounded-lg p-4">
-                                    <div class="flex items-start justify-between">
-                                        <div class="flex items-center text-green-600 mb-2">
-                                            <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
-                                            </svg>
-                                            <span class="text-sm font-medium">截图已分析</span>
-                                        </div>
-                                        <button @click="clearScreenshot(q.id)" class="text-gray-400 hover:text-red-500 text-xs">重新上传</button>
-                                    </div>
-                                    <p class="text-xs text-gray-600 line-clamp-3">{{ inquiryAnswers[q.id]?.text?.substring(0, 100) }}...</p>
-                                </div>
-                                
-                                <!-- 上传失败 -->
-                                <div v-else-if="inquiryAnswers[q.id]?.error" class="border border-red-200 bg-red-50 rounded-lg p-4">
-                                    <p class="text-sm text-red-600">{{ inquiryAnswers[q.id].error }}</p>
-                                    <button @click="clearScreenshot(q.id)" class="text-xs text-red-500 underline mt-2">重试</button>
                                 </div>
                             </div>
 
@@ -1464,6 +1542,9 @@
                 const inputMessage = ref('');
                 const messages = ref([]);
                 const isLoading = ref(false);
+                const pendingImages = ref([]);
+                const isProcessingImages = ref(false);
+                const mainImageInput = ref(null);
                 const messagesContainer = ref(null);
                 const displayedMessageIds = ref(new Set()); // 防止 updates/values 重复展示同一回复
                 
@@ -1993,26 +2074,51 @@
                     if (input) input.click();
                 };
                 
-                // 处理文件选择
-                const handleFileSelect = async (event, questionId, screenshotType) => {
-                    const file = event.target.files?.[0];
-                    if (file) {
-                        await uploadScreenshot(file, questionId, screenshotType);
+                const buildInquiryScreenshotAnswer = (file, screenshotType, previous = null) => {
+                    if (previous?.preview && typeof previous.preview === 'string' && previous.preview.startsWith('blob:')) {
+                        URL.revokeObjectURL(previous.preview);
                     }
+                    return {
+                        file,
+                        preview: URL.createObjectURL(file),
+                        screenshotType,
+                        stage: 'selected',
+                        ocrText: '',
+                        imageUrl: null,
+                        error: null,
+                    };
+                };
+
+                // 处理文件选择
+                const handleFileSelect = (event, questionId, screenshotType) => {
+                    const file = event.target.files?.[0];
+                    if (file && file.type.startsWith('image/')) {
+                        const previous = inquiryAnswers.value[questionId];
+                        inquiryAnswers.value[questionId] = buildInquiryScreenshotAnswer(file, screenshotType, previous);
+                    }
+                    event.target.value = '';
                 };
                 
                 // 处理文件拖放
-                const handleFileDrop = async (event, questionId, screenshotType) => {
+                const handleFileDrop = (event, questionId, screenshotType) => {
                     const file = event.dataTransfer.files?.[0];
                     if (file && file.type.startsWith('image/')) {
-                        await uploadScreenshot(file, questionId, screenshotType);
+                        const previous = inquiryAnswers.value[questionId];
+                        inquiryAnswers.value[questionId] = buildInquiryScreenshotAnswer(file, screenshotType, previous);
                     }
                 };
                 
                 // 上传截图
-                const uploadScreenshot = async (file, questionId, screenshotType) => {
-                    // 设置上传中状态
-                    inquiryAnswers.value[questionId] = { uploading: true };
+                const uploadScreenshot = async (file, screenshotType, questionId = null) => {
+                    if (questionId) {
+                        const current = inquiryAnswers.value[questionId] || {};
+                        inquiryAnswers.value[questionId] = {
+                            ...current,
+                            screenshotType,
+                            stage: 'uploading',
+                            error: null,
+                        };
+                    }
                     
                     try {
                         const formData = new FormData();
@@ -2020,7 +2126,7 @@
                         formData.append('screenshot_type', screenshotType);
                         formData.append('session_id', sessionId.value);
                         
-                        const response = await fetch('/api/upload-screenshot', {
+                        const response = await fetch('/api/upload/upload-screenshot', {
                             method: 'POST',
                             headers: {
                                 'Authorization': `Bearer ${getToken()}`
@@ -2028,33 +2134,321 @@
                             body: formData
                         });
                         
-                        const result = await response.json();
+                        let result = {};
+                        try {
+                            result = await response.json();
+                        } catch (e) {
+                            console.warn('Screenshot upload json parse failed:', e);
+                        }
                         
-                        if (result.success) {
-                            inquiryAnswers.value[questionId] = {
-                                uploaded: true,
-                                text: result.text,
-                                screenshotType: screenshotType
-                            };
-                        } else {
-                            inquiryAnswers.value[questionId] = {
-                                error: result.error || '上传失败，请重试'
+                        if (response.ok && result.success) {
+                            if (questionId) {
+                                const current = inquiryAnswers.value[questionId] || {};
+                                inquiryAnswers.value[questionId] = {
+                                    ...current,
+                                    screenshotType,
+                                    stage: 'uploaded',
+                                    ocrText: result.text || '',
+                                    imageUrl: result.image_url || null,
+                                    error: null,
+                                };
+                            }
+                            return {
+                                success: true,
+                                text: result.text || '',
+                                imageUrl: result.image_url || null,
+                                screenshotType,
                             };
                         }
+
+                        const errorMessage = result.error || result.detail || '上传失败，请重试';
+                        if (questionId) {
+                            const current = inquiryAnswers.value[questionId] || {};
+                            inquiryAnswers.value[questionId] = {
+                                ...current,
+                                screenshotType,
+                                stage: 'error',
+                                error: errorMessage,
+                            };
+                        }
+                        return {
+                            success: false,
+                            error: errorMessage,
+                            text: '',
+                            imageUrl: null,
+                            screenshotType,
+                        };
                     } catch (error) {
                         console.error('Screenshot upload error:', error);
-                        inquiryAnswers.value[questionId] = {
-                            error: '网络错误，请重试'
+                        const errorMessage = '网络错误，请重试';
+                        if (questionId) {
+                            const current = inquiryAnswers.value[questionId] || {};
+                            inquiryAnswers.value[questionId] = {
+                                ...current,
+                                screenshotType,
+                                stage: 'error',
+                                error: errorMessage,
+                            };
+                        }
+                        return {
+                            success: false,
+                            error: errorMessage,
+                            text: '',
+                            imageUrl: null,
+                            screenshotType,
                         };
                     }
                 };
                 
                 // 清除截图
                 const clearScreenshot = (questionId) => {
+                    const current = inquiryAnswers.value[questionId];
+                    if (current?.preview && typeof current.preview === 'string' && current.preview.startsWith('blob:')) {
+                        URL.revokeObjectURL(current.preview);
+                    }
                     inquiryAnswers.value[questionId] = null;
                     // 清除 file input
                     const input = fileInputRefs.value[questionId];
                     if (input) input.value = '';
+                };
+
+                // ============ 主聊天图片上传相关 ============
+
+                const triggerImageUpload = () => {
+                    mainImageInput.value?.click();
+                };
+
+                const handleMainImageSelect = async (event) => {
+                    const files = Array.from(event.target.files || []);
+                    if (files.length > 0) {
+                        await addImages(files);
+                    }
+                    event.target.value = '';
+                };
+
+                const handlePaste = async (event) => {
+                    const items = event.clipboardData?.items;
+                    if (!items || isLoading.value || isProcessingImages.value) return;
+
+                    const imageFiles = [];
+                    for (const item of items) {
+                        if (item.type && item.type.startsWith('image/')) {
+                            const file = item.getAsFile();
+                            if (file) imageFiles.push(file);
+                        }
+                    }
+
+                    if (imageFiles.length > 0) {
+                        event.preventDefault();
+                        await addImages(imageFiles);
+                    }
+                };
+
+                const addImages = async (files) => {
+                    for (const file of files) {
+                        if (!file || !(file.type || '').startsWith('image/')) continue;
+                        const preview = URL.createObjectURL(file);
+                        pendingImages.value.push({
+                            file,
+                            preview,
+                            status: 'pending',
+                            ocrResult: null,
+                            type: null,
+                        });
+                    }
+                };
+
+                const removeImage = (index) => {
+                    const imageItem = pendingImages.value[index];
+                    if (!imageItem || imageItem.status === 'processing') return;
+                    if (imageItem.preview) {
+                        URL.revokeObjectURL(imageItem.preview);
+                    }
+                    pendingImages.value.splice(index, 1);
+                };
+
+                const clearPendingImages = (revokePreview = true) => {
+                    pendingImages.value.forEach((item) => {
+                        if (revokePreview && item.preview) {
+                            URL.revokeObjectURL(item.preview);
+                        }
+                    });
+                    pendingImages.value = [];
+                };
+
+                const processImagesForMessage = async (userMessage, imagesToProcess) => {
+                    const processPromises = imagesToProcess.map(async (imgItem, index) => {
+                        const msgImage = userMessage.images[index];
+                        if (!msgImage) return;
+                        msgImage.status = 'processing';
+
+                        try {
+                            const typeFormData = new FormData();
+                            typeFormData.append('file', imgItem.file);
+
+                            let detectedType = 'universal_screenshot_analysis';
+                            try {
+                                const typeResponse = await fetch('/api/upload/detect-type', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Authorization': `Bearer ${getToken()}`
+                                    },
+                                    body: typeFormData
+                                });
+                                let typeResult = {};
+                                try {
+                                    typeResult = await typeResponse.json();
+                                } catch (e) {
+                                    console.warn('Type detection json parse failed:', e);
+                                }
+                                if (typeResponse.ok && typeResult.success && typeResult.screenshot_type) {
+                                    detectedType = typeResult.screenshot_type;
+                                }
+                            } catch (e) {
+                                console.warn('Type detection failed:', e);
+                            }
+
+                            const ocrFormData = new FormData();
+                            ocrFormData.append('file', imgItem.file);
+                            ocrFormData.append('screenshot_type', detectedType);
+                            ocrFormData.append('session_id', sessionId.value);
+
+                            const ocrResponse = await fetch('/api/upload/upload-screenshot', {
+                                method: 'POST',
+                                headers: {
+                                    'Authorization': `Bearer ${getToken()}`
+                                },
+                                body: ocrFormData
+                            });
+                            const ocrResult = await ocrResponse.json();
+
+                            if (ocrResponse.ok && ocrResult.success) {
+                                msgImage.ocrResult = ocrResult.text || '';
+                                msgImage.imageUrl = ocrResult.image_url || null;
+                                msgImage.type = detectedType;
+                                msgImage.status = 'done';
+                            } else {
+                                throw new Error(ocrResult.error || 'OCR failed');
+                            }
+                        } catch (error) {
+                            console.error('Image processing error:', error);
+                            msgImage.type = msgImage.type || 'universal_screenshot_analysis';
+                            msgImage.status = 'error';
+                            msgImage.ocrResult = `[处理失败: ${error.message || '未知错误'}]`;
+                        }
+                    });
+
+                    await Promise.all(processPromises);
+                    userMessage.imageProcessingStatus = userMessage.images.every((img) => img.status === 'done') ? 'done' : 'error';
+                };
+
+                const sendMessageToBackend = async (userMessage) => {
+                    try {
+                        const requestBody = {
+                            message: userMessage.content || '',
+                            session_id: sessionId.value
+                        };
+
+                        if (userMessage.images && userMessage.images.length > 0) {
+                            requestBody.images = userMessage.images
+                                .filter((img) => img.status === 'done')
+                                .map((img) => ({
+                                    image_url: img.imageUrl,
+                                    ocr_result: img.ocrResult,
+                                    screenshot_type: img.type
+                                }));
+                        }
+
+                        const response = await fetch('/api/chat', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${getToken()}`
+                            },
+                            body: JSON.stringify(requestBody)
+                        });
+
+                        if (!response.ok) throw new Error('Network response was not ok');
+                        const data = await response.json();
+
+                        if (data.pending_responses && Array.isArray(data.pending_responses) && data.pending_responses.length > 0) {
+                            data.pending_responses.forEach(resp => {
+                                if (resp && resp.content) {
+                                    messages.value.push({ role: 'assistant', content: resp.content });
+                                }
+                            });
+                        } else if (data.response) {
+                            messages.value.push({ role: 'assistant', content: data.response });
+                        }
+
+                        if (data.state) {
+                            processStateUpdate(data.state);
+                        }
+
+                        if (showContext.value) {
+                            await refreshContext();
+                        }
+                    } catch (error) {
+                        console.error('Error:', error);
+                        messages.value.push({ role: 'assistant', content: `[错误] ${error.message}` });
+                    } finally {
+                        isLoading.value = false;
+                        await scrollToBottom();
+                    }
+                };
+
+                const sendMessageWithImages = async () => {
+                    const textContent = inputMessage.value.trim();
+                    const hasImages = pendingImages.value.length > 0;
+
+                    if (!textContent && !hasImages) return;
+                    if (isLoading.value || isProcessingImages.value) return;
+                    if (!hasImages) {
+                        await sendMessage();
+                        return;
+                    }
+
+                    const imagesToProcess = pendingImages.value.map((img) => ({
+                        file: img.file,
+                        preview: img.preview
+                    }));
+
+                    const userMessage = {
+                        id: Date.now().toString(),
+                        role: 'user',
+                        content: textContent,
+                        images: imagesToProcess.map((img, index) => ({
+                            id: `${Date.now()}_${index}`,
+                            preview: img.preview,
+                            imageUrl: null,
+                            ocrResult: null,
+                            type: 'universal_screenshot_analysis',
+                            status: 'pending'
+                        })),
+                        imageProcessingStatus: 'processing'
+                    };
+
+                    messages.value.push(userMessage);
+
+                    inputMessage.value = '';
+                    clearPendingImages(false);
+                    isLoading.value = true;
+                    isProcessingImages.value = true;
+                    await scrollToBottom();
+
+                    try {
+                        await processImagesForMessage(userMessage, imagesToProcess);
+                        const allFailed = userMessage.images.every((img) => img.status === 'error');
+                        if (allFailed && !userMessage.content) {
+                            messages.value.push({ role: 'assistant', content: '图片处理失败，请重试。' });
+                            isLoading.value = false;
+                            await scrollToBottom();
+                            return;
+                        }
+                        await sendMessageToBackend(userMessage);
+                    } finally {
+                        isProcessingImages.value = false;
+                    }
                 };
 
                 const renderMarkdown = (text) => {
@@ -2314,6 +2708,10 @@
                         }
                         // 截图题
                         if (isScreenshotType(q.type)) {
+                            if (!answer) return false;
+                            if (answer.stage) {
+                                return ['selected', 'uploading', 'uploaded'].includes(answer.stage);
+                            }
                             return answer?.uploaded === true;
                         }
                         // 其他题型
@@ -2337,9 +2735,20 @@
                     if (!canSubmitInquiry.value) return;
                     
                     try {
-                        const answerParts = [];
-                        for (const q of inquiryCard.value.questions) {
-                            const answer = inquiryAnswers.value[q.id];
+                        const card = inquiryCard.value;
+                        const questions = card?.questions || [];
+                        const snapshotAnswers = {};
+                        for (const q of questions) {
+                            snapshotAnswers[q.id] = inquiryAnswers.value[q.id];
+                        }
+
+                        // 阶段1：立即展示“伪装用户消息”（不等待 OCR）
+                        const immediateAnswerParts = [];
+                        const immediateImages = [];
+                        const now = Date.now();
+
+                        for (const q of questions) {
+                            const answer = snapshotAnswers[q.id];
                             if (answer === undefined || answer === '') continue;
                             
                             // 多选题 - 支持两种格式
@@ -2351,7 +2760,7 @@
                                         selectedLabels.push(getOptionLabel(opt));
                                     }
                                 }
-                                answerParts.push(`${q.question}：${selectedLabels.join('、')}`);
+                                immediateAnswerParts.push(`${q.question}：${selectedLabels.join('、')}`);
                             } 
                             // 单选题 - 支持两种格式
                             else if (q.type === 'single_choice' && q.options) {
@@ -2363,33 +2772,126 @@
                                         break;
                                     }
                                 }
-                                answerParts.push(`${q.question}：${selectedLabel}`);
+                                immediateAnswerParts.push(`${q.question}：${selectedLabel}`);
                             }
-                            // 截图题 - 使用分析后的文本
-                            else if (isScreenshotType(q.type) && answer?.uploaded) {
-                                answerParts.push(`【${getScreenshotLabel(q.type)}分析结果】\n${answer.text}`);
+                            // 截图题 - 立即消息只展示“已上传截图”与图片预览
+                            else if (isScreenshotType(q.type)) {
+                                const hasScreenshot = !!(
+                                    answer?.file ||
+                                    answer?.preview ||
+                                    answer?.imageUrl ||
+                                    answer?.stage === 'selected' ||
+                                    answer?.stage === 'uploading' ||
+                                    answer?.stage === 'uploaded' ||
+                                    answer?.uploaded
+                                );
+                                if (!hasScreenshot) continue;
+                                immediateAnswerParts.push(`${q.question}：已上传截图`);
+
+                                if (answer?.preview || answer?.imageUrl) {
+                                    immediateImages.push({
+                                        id: `inquiry_preview_${now}_${q.id}`,
+                                        preview: answer.preview || null,
+                                        imageUrl: answer.imageUrl || null,
+                                        status: 'done',
+                                        type: q.type,
+                                    });
+                                }
                             }
                             // 自由输入（支持旧版本的 "text" 类型）
                             else if (q.type === 'free_input_question' || q.type === 'text') {
-                                answerParts.push(`${q.question}：${answer}`);
+                                immediateAnswerParts.push(`${q.question}：${answer}`);
                             }
                             // 兜底
                             else {
-                                answerParts.push(`${q.question}：${answer}`);
+                                immediateAnswerParts.push(`${q.question}：${answer}`);
                             }
                         }
-                        
-                        const formattedAnswer = answerParts.join('\n\n');
-                        
-                        // Close modal
+
+                        const immediateContent = immediateAnswerParts.join('\n\n') || '已提交补充信息';
+
+                        // 立即关闭弹窗并显示伪装用户消息
                         showInquiryModal.value = false;
                         inquiryCard.value = null;
-                        
-                        // Send as user message
-                        inputMessage.value = formattedAnswer;
-                        await sendMessage();
+                        messages.value.push({
+                            role: 'user',
+                            content: immediateContent,
+                            images: immediateImages.length > 0 ? immediateImages : undefined,
+                        });
+                        await scrollToBottom();
+
+                        // 阶段2：后台并行 OCR，拼接最终输入后一次性发送到 /api/chat
+                        isLoading.value = true;
+
+                        const screenshotUploadPromises = new Map();
+                        for (const q of questions) {
+                            if (!isScreenshotType(q.type)) continue;
+                            const answer = snapshotAnswers[q.id];
+                            if (answer?.file) {
+                                screenshotUploadPromises.set(q.id, uploadScreenshot(answer.file, q.type));
+                            }
+                        }
+
+                        const backendAnswerParts = [];
+                        for (const q of questions) {
+                            const answer = snapshotAnswers[q.id];
+                            if (answer === undefined || answer === '') continue;
+
+                            if (q.type === 'multiple_choice' && q.options) {
+                                const selectedLabels = [];
+                                for (const opt of q.options) {
+                                    const optValue = getOptionValue(opt);
+                                    if (Array.isArray(answer) && answer.includes(optValue)) {
+                                        selectedLabels.push(getOptionLabel(opt));
+                                    }
+                                }
+                                backendAnswerParts.push(`${q.question}：${selectedLabels.join('、')}`);
+                            } else if (q.type === 'single_choice' && q.options) {
+                                let selectedLabel = answer;
+                                for (const opt of q.options) {
+                                    if (getOptionValue(opt) === answer) {
+                                        selectedLabel = getOptionLabel(opt);
+                                        break;
+                                    }
+                                }
+                                backendAnswerParts.push(`${q.question}：${selectedLabel}`);
+                            } else if (isScreenshotType(q.type)) {
+                                let ocrText = answer?.ocrText || answer?.text || '';
+                                if (!ocrText && screenshotUploadPromises.has(q.id)) {
+                                    const uploadResult = await screenshotUploadPromises.get(q.id);
+                                    if (uploadResult?.success) {
+                                        ocrText = uploadResult.text || '';
+                                    }
+                                }
+
+                                if (ocrText) {
+                                    backendAnswerParts.push(`【${getScreenshotLabel(q.type)}分析结果】\n${ocrText}`);
+                                } else {
+                                    backendAnswerParts.push(`【${getScreenshotLabel(q.type)}分析结果】\n截图解析失败，用户已上传图片`);
+                                }
+                            } else if (q.type === 'free_input_question' || q.type === 'text') {
+                                backendAnswerParts.push(`${q.question}：${answer}`);
+                            } else {
+                                backendAnswerParts.push(`${q.question}：${answer}`);
+                            }
+                        }
+
+                        const finalAnswerForBackend = backendAnswerParts.join('\n\n') || immediateContent;
+                        const backendUserMessage = {
+                            id: `inquiry_submit_${Date.now()}`,
+                            role: 'user',
+                            content: finalAnswerForBackend,
+                        };
+
+                        await sendMessageToBackend(backendUserMessage);
                     } catch (error) {
                         console.error('Submit inquiry error:', error);
+                        isLoading.value = false;
+                        messages.value.push({
+                            role: 'assistant',
+                            content: '抱歉，处理补充信息时遇到问题，请稍后再试。'
+                        });
+                        await scrollToBottom();
                     }
                 };
 
@@ -2759,8 +3261,16 @@
                     inputMessage,
                     messages,
                     isLoading,
+                    pendingImages,
+                    isProcessingImages,
+                    mainImageInput,
                     messagesContainer,
                     sendMessage,
+                    sendMessageWithImages,
+                    triggerImageUpload,
+                    handleMainImageSelect,
+                    handlePaste,
+                    removeImage,
                     renderMarkdown,
                     
                     // Data
