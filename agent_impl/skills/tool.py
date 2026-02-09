@@ -14,6 +14,7 @@ from typing import List
 from langchain_core.tools import StructuredTool
 
 from graph.tools.schemas import LoadSkillInput
+from agents.tooling.tool_result import error, ok
 from skills.registry import get_skill_registry
 
 
@@ -21,16 +22,21 @@ from skills.registry import get_skill_registry
 # 权限定制的工具工厂
 # ============================================================
 
-def create_skill_loader(allowed_skills: List[str]) -> StructuredTool:
+def create_skill_loader(allowed_skills: List[str] | None = None) -> StructuredTool:
     """
     创建指定权限的 load_skill 工具
     - 权限仅在工具挂载层控制（不做内部校验）
     """
-    skill_list = ", ".join(allowed_skills)
+    allowed = allowed_skills or ["inquiry", "consult_answer", "emotion_support"]
+    skill_list = ", ".join(allowed)
 
-    def _load_skill(skill_id: str) -> str:
+    def _load_skill(skill_id: str) -> dict:
         registry = get_skill_registry()
-        return registry.get_skill_instructions(skill_id)
+        try:
+            instructions = registry.get_skill_instructions(skill_id)
+        except Exception as e:
+            return error(str(e))
+        return ok(instructions, state_patch={"layer3_memory": {"loaded_skills": [skill_id]}})
 
     description = (
         "获取 Skill 的执行指令。\n"

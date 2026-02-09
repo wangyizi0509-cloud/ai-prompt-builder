@@ -12,8 +12,10 @@ from datetime import datetime
 from typing import Optional, Any
 
 from langchain_core.tools import tool
+from contextvars import ContextVar
 
 from utils.message_utils import get_msg_role_and_content
+from agents.tooling.tool_result import error, ok
 from graph.context_types import (
     create_empty_layer2_memory,
     create_status_report_item,
@@ -28,11 +30,16 @@ from graph.tools.schemas import (
     UpdateGuideStatusInput,
     UpdateGuideContentInput,
     ReturnToMainInput,
-    tool_response,
-    tool_error_response,
 )
 
 FEEDBACK_SUMMARY_TAG = "[反馈完成]"
+
+_submit_tools_state: ContextVar[dict | None] = ContextVar("submit_tools_state", default=None)
+
+
+def set_submit_tools_state(state: dict | None) -> None:
+    _submit_tools_state.set(state)
+
 
 # ============================================================
 # 工具实现（纯输出，不直接写 state）
@@ -46,11 +53,48 @@ def submit_status_report(
     acr_analysis: dict | None = None,
     key_issues: list[str] | None = None,
     risk_points: list[str] | None = None,
-) -> str:
-    """提交或更新现状分析报告（写入真源由 workflow 统一处理）"""
+) -> dict:
+    """提交或更新现状分析报告"""
     if not report_markdown.strip():
-        return tool_error_response("report_markdown 不能为空")
-    return tool_response(True, "已提交现状分析报告")
+        return error("report_markdown 不能为空")
+
+    state = _submit_tools_state.get()
+    if state:
+        patch = apply_submit_tool_state_update(
+            state,
+            "submit_status_report",
+            {
+                "report_markdown": report_markdown,
+                "stage": stage,
+                "stage_description": stage_description,
+                "acr_analysis": acr_analysis,
+                "key_issues": key_issues,
+                "risk_points": risk_points,
+            },
+        )
+        return ok("已提交现状分析报告", state_patch=patch)
+
+    layer2_memory = create_empty_layer2_memory()
+    new_report_item = create_status_report_item(
+        report_content=report_markdown.strip(),
+        report_id=0,
+        stage=stage or "",
+        stage_description=stage_description or "",
+        acr_analysis=acr_analysis or {},
+        key_issues=key_issues or [],
+        risk_points=risk_points or [],
+    )
+    updated_layer2 = dict(layer2_memory)
+    updated_layer2["current_status_report"] = new_report_item
+    updated_layer2["last_updated"] = datetime.now().isoformat()
+    updated_layer2["version"] = updated_layer2.get("version", 1) + 1
+    return ok(
+        "已提交现状分析报告",
+        state_patch={
+            "layer2_memory": updated_layer2,
+            "_submit_result": {"type": "status_report", "report_id": 0},
+        },
+    )
 
 
 @tool(args_schema=SubmitActionPlanInput)
@@ -60,11 +104,55 @@ def submit_action_plan(
     phases: list[dict[str, Any]],
     key_principles: list[str],
     summary: str = "",
-) -> str:
-    """提交或更新行动规划（写入真源由 workflow 统一处理）"""
+) -> dict:
+    """提交或更新行动规划"""
     if not goal.strip() or not strategy.strip():
-        return tool_error_response("goal 与 strategy 不能为空")
-    return tool_response(True, "已提交行动规划")
+        return error("goal 与 strategy 不能为空")
+
+    state = _submit_tools_state.get()
+    if state:
+        patch = apply_submit_tool_state_update(
+            state,
+            "submit_action_plan",
+            {
+                "goal": goal,
+                "strategy": strategy,
+                "phases": phases,
+                "key_principles": key_principles,
+                "summary": summary,
+            },
+        )
+        return ok("已提交行动规划", state_patch=patch)
+
+    layer2_memory = create_empty_layer2_memory()
+    plan_md = _format_plan_as_markdown(
+        {
+            "goal": goal,
+            "strategy": strategy,
+            "phases": phases,
+            "key_principles": key_principles,
+            "summary": summary,
+        }
+    )
+    new_plan_item = create_action_plan_item(
+        plan_content=plan_md,
+        plan_id=0,
+        goal=goal,
+        strategy=strategy,
+        phases=phases,
+        key_principles=key_principles,
+    )
+    updated_layer2 = dict(layer2_memory)
+    updated_layer2["current_action_plan"] = new_plan_item
+    updated_layer2["last_updated"] = datetime.now().isoformat()
+    updated_layer2["version"] = updated_layer2.get("version", 1) + 1
+    return ok(
+        "已提交行动规划",
+        state_patch={
+            "layer2_memory": updated_layer2,
+            "_submit_result": {"type": "action_plan", "plan_id": 0},
+        },
+    )
 
 
 @tool(args_schema=SubmitActionGuideInput)
@@ -78,11 +166,58 @@ def submit_action_guide(
     dos: list[str] | None = None,
     donts: list[str] | None = None,
     next_milestone: str = "",
-) -> str:
-    """提交或更新行动指南（写入真源由 workflow 统一处理）"""
+) -> dict:
+    """提交或更新行动指南"""
     if not title.strip() or not guide_markdown.strip():
-        return tool_error_response("title 与 guide_markdown 不能为空")
-    return tool_response(True, "已提交行动指南")
+        return error("title 与 guide_markdown 不能为空")
+
+    state = _submit_tools_state.get()
+    if state:
+        patch = apply_submit_tool_state_update(
+            state,
+            "submit_action_guide",
+            {
+                "title": title,
+                "one_liner": one_liner,
+                "guide_markdown": guide_markdown,
+                "current_task": current_task,
+                "steps": steps,
+                "talking_points": talking_points,
+                "dos": dos,
+                "donts": donts,
+                "next_milestone": next_milestone,
+            },
+        )
+        return ok("已提交行动指南", state_patch=patch)
+
+    layer2_memory = create_empty_layer2_memory()
+    guide_content = {
+        "current_task": current_task or title,
+        "steps": steps or [],
+        "talking_points": talking_points or [],
+        "dos": dos or [],
+        "donts": donts or [],
+        "next_milestone": next_milestone or "",
+        "guide_content": guide_markdown.strip(),
+    }
+    new_guide_item = create_action_guide_item(
+        guide=guide_content,
+        guide_id=0,
+        status="in_progress",
+        title=title,
+        one_liner=one_liner,
+    )
+    updated_layer2 = dict(layer2_memory)
+    updated_layer2["action_guides"] = [new_guide_item]
+    updated_layer2["last_updated"] = datetime.now().isoformat()
+    updated_layer2["version"] = updated_layer2.get("version", 1) + 1
+    return ok(
+        "已提交行动指南",
+        state_patch={
+            "layer2_memory": updated_layer2,
+            "_submit_result": {"type": "action_guide", "guide_id": 0},
+        },
+    )
 
 
 @tool(args_schema=UpdateGuideStatusInput)
@@ -93,11 +228,28 @@ def update_guide_status(
     feedback_completion_status: str | None = None,
     feedback_completion_detail: str = "",
     feedback_summary: str = "",
-) -> str:
-    """更新行动指南状态（写入真源由 workflow 统一处理）"""
+) -> dict:
+    """更新行动指南状态"""
     if not guide_id.strip() or not new_status.strip():
-        return tool_error_response("guide_id 与 new_status 不能为空")
-    return tool_response(True, "已更新行动指南状态")
+        return error("guide_id 与 new_status 不能为空")
+
+    state = _submit_tools_state.get()
+    if state:
+        patch = apply_submit_tool_state_update(
+            state,
+            "update_guide_status",
+            {
+                "guide_id": guide_id,
+                "new_status": new_status,
+                "reason": reason,
+                "feedback_completion_status": feedback_completion_status,
+                "feedback_completion_detail": feedback_completion_detail,
+                "feedback_summary": feedback_summary,
+            },
+        )
+        return ok("已更新行动指南状态", state_patch=patch)
+
+    return ok("已更新行动指南状态", state_patch={})
 
 
 @tool(args_schema=UpdateGuideContentInput)
@@ -113,19 +265,45 @@ def update_guide_content(
     donts: list[str] | None = None,
     next_milestone: str = "",
     update_reason: str = "",
-) -> str:
-    """更新行动指南内容（原地更新，保留编号，写入真源由 workflow 统一处理）"""
+) -> dict:
+    """更新行动指南内容（原地更新，保留编号）"""
     if not guide_id.strip():
-        return tool_error_response("guide_id 不能为空")
+        return error("guide_id 不能为空")
     if not guide_markdown.strip():
-        return tool_error_response("guide_markdown 不能为空")
-    return tool_response(True, "已更新行动指南内容")
+        return error("guide_markdown 不能为空")
+
+    state = _submit_tools_state.get()
+    if state:
+        patch = apply_submit_tool_state_update(
+            state,
+            "update_guide_content",
+            {
+                "guide_id": guide_id,
+                "guide_markdown": guide_markdown,
+                "title": title,
+                "one_liner": one_liner,
+                "current_task": current_task,
+                "steps": steps,
+                "talking_points": talking_points,
+                "dos": dos,
+                "donts": donts,
+                "next_milestone": next_milestone,
+                "update_reason": update_reason,
+            },
+        )
+        return ok("已更新行动指南内容", state_patch=patch)
+
+    return ok("已更新行动指南内容", state_patch={})
 
 
 @tool(args_schema=ReturnToMainInput)
-def return_to_main(reason: str = "") -> str:
+def return_to_main(reason: str = "") -> dict:
     """完成当前任务，将控制权交还给主 Agent"""
-    return tool_response(True, "已完成任务，转接回主 Agent")
+    state = _submit_tools_state.get()
+    if state:
+        patch = apply_submit_tool_state_update(state, "return_to_main", {"reason": reason})
+        return ok("已完成任务，转接回主 Agent", state_patch=patch)
+    return ok("已完成任务，转接回主 Agent", state_patch={})
 
 
 # ============================================================
