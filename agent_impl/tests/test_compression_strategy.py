@@ -166,7 +166,7 @@ class TestLayer3CompressionTrigger:
         assert len(to_compress) > 0, "应有消息被压缩"
 
     def test_layer3_memory_prioritized(self):
-        """测试：优先使用 layer3_memory 中的 all_messages"""
+        """测试：压缩触发基于工作区 messages（而非 all_messages）"""
         state = create_initial_state("test")
         
         # layer3_memory 中有 30 轮
@@ -178,8 +178,7 @@ class TestLayer3CompressionTrigger:
         state["messages"] = create_test_messages(5)
         
         result = check_layer3_compression_needed(state)
-        # 应基于 layer3_memory 中的 30 轮判断
-        assert result is True, "应优先使用 layer3_memory"
+        assert result is False, "应基于工作区 messages 判断"
 
 
 # ============================================================

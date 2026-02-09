@@ -7,13 +7,9 @@ import pytest
 from graph.state import (
     create_initial_state,
     AgentState,
-    migrate_to_layered_memory,
-    migrate_user_profile_to_context,
 )
 from graph.workflow import _wrap_step_counter
 from graph.context_types import (
-    create_empty_user_context,
-    create_empty_history_archive,
     get_active_action_guides,
     get_completed_action_guides,
 )
@@ -35,22 +31,37 @@ class TestStateManagement:
         assert state.get("current_message_id"), "current_message_id 应该存在"
         assert state["messages"][0].get("id") == state["current_message_id"], "首条消息 id 应与 current_message_id 一致"
         
-        # 验证上下文字段
-        assert "user_context" in state, "应该有 user_context"
-        assert "user_profile" in state, "应该有 user_profile"
-        assert "status_report" in state, "应该有 status_report"
-        assert "action_plan" in state, "应该有 action_plan"
-        assert "action_guides" in state, "应该有 action_guides"
+        assert "layer1_memory" in state
+        assert "layer2_memory" in state
+        assert "layer3_memory" in state
+        assert isinstance(state.get("runtime"), dict)
+        assert isinstance(state.get("tool_patch_log"), list)
         
         # 验证流程控制字段
         assert "intent_type" in state, "应该有 intent_type"
         
-        # 验证 Agent 执行状态字段
-        assert "current_agent" in state, "应该有 current_agent"
-        assert state["current_agent"] is None, "初始 current_agent 应该是 None"
-        assert "agent_resume_point" in state, "应该有 agent_resume_point"
-        assert "question_count" in state, "应该有 question_count"
-        assert state["question_count"] == 0, "初始 question_count 应该是 0"
+        legacy_keys = {
+            "current_agent",
+            "agent_resume_point",
+            "_tool_caller",
+            "_pending_action",
+            "_reply_skill_complete",
+            "_handoff_target",
+            "_handoff_instruction",
+            "_submit_result",
+            "ask_mode",
+            "consult_mode",
+            "emotion_mode",
+            "status_report",
+            "action_plan",
+            "action_guides",
+            "action_guide",
+            "history_archive",
+            "task_registry",
+            "user_context",
+            "user_profile",
+        }
+        assert legacy_keys.isdisjoint(state.keys())
     
     def test_state_update(self):
         """测试状态更新"""
@@ -58,101 +69,27 @@ class TestStateManagement:
         
         # 更新状态
         state["user_message"] = "新消息"
-        state["current_agent"] = "status_agent"
-        state["question_count"] = 1
+        state["runtime"] = {"foo": "bar"}
         
         # 验证更新
         assert state["user_message"] == "新消息", "user_message 应该更新"
-        assert state["current_agent"] == "status_agent", "current_agent 应该更新"
-        assert state["question_count"] == 1, "question_count 应该更新"
-    
-    def test_state_resume_agent(self):
-        """测试 Agent 恢复执行状态"""
-        # 创建恢复状态
-        state = create_test_state(
-            "继续回答",
-            current_agent="status_agent",
-            agent_resume_point="continue_analysis",
-            question_count=1,
-            collected_info={"answer1": "回答1"}
-        )
-        
-        # 验证恢复状态字段
-        assert state["current_agent"] == "status_agent", "current_agent 应该正确"
-        assert state["agent_resume_point"] == "continue_analysis", "agent_resume_point 应该正确"
-        assert state["question_count"] == 1, "question_count 应该正确"
-        assert state["collected_info"]["answer1"] == "回答1", "collected_info 应该正确"
-        
-        # 模拟恢复后清除状态
-        state["current_agent"] = None
-        state["agent_resume_point"] = None
-        state["question_count"] = 0
-        
-        assert state["current_agent"] is None, "应该清除 current_agent"
-        assert state["agent_resume_point"] is None, "应该清除 agent_resume_point"
-        assert state["question_count"] == 0, "应该重置 question_count"
+        assert state["runtime"]["foo"] == "bar"
     
     def test_state_context_layers(self):
         """测试分层上下文管理"""
         state = create_initial_state("测试消息")
         
         # Layer 1: 静态情报
-        user_context = state.get("user_context", {})
-        assert user_context is not None, "应该有 Layer 1: user_context"
-        assert "user_info" in user_context, "应该有 user_info"
-        assert "crush_info" in user_context, "应该有 crush_info"
-        assert "both_info" in user_context, "应该有 both_info"
+        layer1_memory = state.get("layer1_memory", {})
+        assert layer1_memory is not None
+        assert "full_data" in layer1_memory
         
         # Layer 2: 工作上下文
-        assert "status_report" in state, "应该有 Layer 2: status_report"
-        assert "action_plan" in state, "应该有 Layer 2: action_plan"
-        assert "action_guides" in state, "应该有 Layer 2: action_guides"
+        assert "layer2_memory" in state
         
         # Layer 3: 滚动对话区
         assert "messages" in state, "应该有 Layer 3: messages"
         assert isinstance(state["messages"], list), "messages 应该是列表"
-        
-        # Layer 4: 历史存档
-        assert "history_archive" in state, "应该有 Layer 4: history_archive"
-        history_archive = state.get("history_archive", {})
-        assert "status_history" in history_archive, "应该有 status_history"
-        assert "guide_history" in history_archive, "应该有 guide_history"
-        assert "conversation_archives" in history_archive, "应该有 conversation_archives"
-    
-    def test_state_migration(self):
-        """测试状态迁移（UserProfile -> UserContext）"""
-        # 创建旧版 UserProfile
-        old_profile = {
-            "name": "小明",
-            "age": 25,
-            "gender": "男",
-            "occupation": "程序员",
-            "crush_info": "小红，同事",
-            "relationship_context": "认识三个月",
-            "known_facts": ["经常一起吃饭", "周末出去玩"]
-        }
-        
-        # 迁移到新版 UserContext
-        new_context = migrate_user_profile_to_context(old_profile)
-        
-        # 验证迁移结果
-        assert new_context is not None, "应该生成新上下文"
-        assert "user_info" in new_context, "应该有 user_info"
-        assert "crush_info" in new_context, "应该有 crush_info"
-        assert "both_info" in new_context, "应该有 both_info"
-        
-        # 验证内容迁移
-        user_provide = new_context["user_info"].get("user_provide", "")
-        assert "小明" in user_provide or "25" in user_provide, "用户信息应该迁移"
-        
-        crush_provide = new_context["crush_info"].get("user_provide", "")
-        assert "小红" in crush_provide, "Crush 信息应该迁移"
-        
-        both_provide = new_context["both_info"].get("user_provide", "")
-        assert "认识三个月" in both_provide, "关系信息应该迁移"
-        
-        both_fact = new_context["both_info"].get("fact", "")
-        assert "一起吃饭" in both_fact or "出去玩" in both_fact, "已知事实应该迁移"
     
     def test_state_action_guides_filter(self):
         """测试行动指南过滤函数"""
@@ -194,7 +131,6 @@ class TestStateManagement:
         wrapped_with_id = _wrap_step_counter("dummy_with_id", dummy_node_with_id)
         out_with_id = wrapped_with_id({})
         assert out_with_id["messages"][0].get("id") == "fixed-id", "wrapper 不应覆盖已有 id"
-
 
 
 
