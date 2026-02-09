@@ -57,7 +57,24 @@ if __name__ == "__main__":
     logger.info("Starting server on http://0.0.0.0:8000")
     debug_mode = os.getenv("DEBUG_MODE", "0") == "1"
     if debug_mode:
-        logger.info("DEBUG_MODE=1: Running with auto-reload enabled")
-        uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+        reload_enabled = os.getenv("UVICORN_RELOAD", "1") != "0"
+        if reload_enabled:
+            logger.info("DEBUG_MODE=1: Running with auto-reload enabled")
+            uvicorn.run(
+                "server:app",
+                host="0.0.0.0",
+                port=8000,
+                reload=True,
+                reload_excludes=[
+                    "logs/*",
+                    "logs/**",
+                    ".cursor/*",
+                    ".cursor/**",
+                    "*.log",
+                ],
+            )
+        else:
+            logger.info("DEBUG_MODE=1: Running without auto-reload (UVICORN_RELOAD=0)")
+            uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
     else:
         uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
