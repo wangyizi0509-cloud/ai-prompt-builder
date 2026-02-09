@@ -400,7 +400,6 @@ def onboarding_agent_node(state: dict) -> dict:
                     "content": onboarding_message,
                 },
             ],
-            "pending_questions": [question_text] if question_text else [],
             "route_to": "end",  # 结束本轮，等待用户回答
             "next_action": "ask_user",
         }

@@ -24,6 +24,7 @@
 from typing import TYPE_CHECKING, Optional
 from datetime import datetime
 import uuid
+import logging
 
 if TYPE_CHECKING:
     from graph.state import AgentState
@@ -68,6 +69,9 @@ from graph.nodes.organize_agent import (
     summarize_task_reasoning,
 )
 from utils.message_utils import count_user_turns
+
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
