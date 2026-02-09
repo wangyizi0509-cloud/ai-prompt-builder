@@ -56,6 +56,9 @@ class ChatDeepSeekReasoning(ChatDeepSeek):
                     injected_count += 1
                     if os.getenv("DEBUG_REASONING", "false").lower() == "true":
                         print(f"[DEBUG] Injected reasoning_content to message {i}")
+                if message.get("tool_calls") and "reasoning_content" not in message:
+                    message["reasoning_content"] = ""
+                    injected_count += 1
         
         if os.getenv("DEBUG_REASONING", "false").lower() == "true":
             print(f"[DEBUG] Total reasoning_content injected: {injected_count}")
@@ -137,7 +140,19 @@ class MockLLM:
 
     def __init__(self):
         self._tool_names: set[str] = set()
-        self._did_interrupt = False
+        self._interrupt_tool_call_id = "tc_mock_ask_human"
+        self._status_tool_call_id = "tc_mock_call_status"
+
+    def _has_tool_observation(self, messages, *, tool_call_id: str) -> bool:
+        for m in messages or []:
+            if isinstance(m, dict):
+                if m.get("role") == "tool" and str(m.get("tool_call_id") or "") == tool_call_id:
+                    return True
+                continue
+            msg_type = getattr(m, "type", None)
+            if msg_type == "tool" and str(getattr(m, "tool_call_id", "") or "") == tool_call_id:
+                return True
+        return False
 
     def bind_tools(self, tools, **kwargs):
         names: set[str] = set()
@@ -160,12 +175,30 @@ class MockLLM:
                 last_user_text = content
                 break
 
+        already_has_status_result = self._has_tool_observation(messages, tool_call_id=self._status_tool_call_id)
         if (
-            (not self._did_interrupt)
+            (not already_has_status_result)
+            and ("[[TEST_CALL_STATUS_INTERRUPT]]" in last_user_text)
+            and ("call_status_agent" in self._tool_names)
+        ):
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "call_status_agent",
+                        "args": {"instruction": "[[TEST_INTERRUPT]]"},
+                        "id": self._status_tool_call_id,
+                        "type": "tool_call",
+                    }
+                ],
+            )
+
+        already_has_tool_result = self._has_tool_observation(messages, tool_call_id=self._interrupt_tool_call_id)
+        if (
+            (not already_has_tool_result)
             and ("[[TEST_INTERRUPT]]" in last_user_text)
             and ("ask_human" in self._tool_names)
         ):
-            self._did_interrupt = True
             inquiry_card = {
                 "intro": "测试用提问卡片",
                 "reasoning": "触发 interrupt/resume 的确定性测试",
@@ -186,7 +219,7 @@ class MockLLM:
                     {
                         "name": "ask_human",
                         "args": {"inquiry_card": inquiry_card},
-                        "id": "tc_mock_ask_human",
+                        "id": self._interrupt_tool_call_id,
                         "type": "tool_call",
                     }
                 ],
