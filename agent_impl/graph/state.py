@@ -313,11 +313,20 @@ def convert_message_to_dict(message) -> dict:
     """将消息转换为 dict，兼容 LangChain Message / dict"""
     if isinstance(message, dict):
         return dict(message)
+    additional_kwargs = getattr(message, "additional_kwargs", {}) or {}
+    response_metadata = getattr(message, "response_metadata", {}) or {}
+    reasoning_content = getattr(message, "reasoning_content", None)
+    if reasoning_content is None:
+        reasoning_content = additional_kwargs.get("reasoning_content")
+    if reasoning_content is None:
+        reasoning_content = response_metadata.get("reasoning_content")
     return {
         "id": getattr(message, "id", None),
         "role": getattr(message, "type", None) or getattr(message, "role", None),
         "content": getattr(message, "content", None),
-        "additional_kwargs": getattr(message, "additional_kwargs", {}),
+        "additional_kwargs": additional_kwargs,
+        "response_metadata": response_metadata,
+        "reasoning_content": reasoning_content,
         "tool_call_id": getattr(message, "tool_call_id", None),
         "name": getattr(message, "name", None),
         "tool_calls": getattr(message, "tool_calls", None),

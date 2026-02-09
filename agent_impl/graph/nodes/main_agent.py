@@ -176,7 +176,10 @@ def _run_langchain_supervisor(
     final = messages_out[-1] if messages_out else AIMessage(content="")
     new_messages = messages_out[len(initial_messages) :] if len(messages_out) >= len(initial_messages) else messages_out
 
-    return {"final": final, "new_messages": new_messages, "patches": patches}
+    out = {"final": final, "new_messages": new_messages, "patches": patches}
+    if "__interrupt__" in result:
+        out["__interrupt__"] = result["__interrupt__"]
+    return out
 
 
 def _call_subagent(
@@ -229,8 +232,8 @@ def _build_all_tools(state_getter) -> list[BaseTool]:
         if isinstance(sub_out, dict) and "__interrupt__" in sub_out:
             interrupts = sub_out.get("__interrupt__") or []
             payload = interrupts[0].value if interrupts else {}
-            resume_payload = interrupt(payload)
-            sub_out = subgraph.invoke(Command(resume=resume_payload), config=cfg)
+            answer = interrupt(payload)
+            sub_out = subgraph.invoke(Command(resume=answer), config=cfg)
         patch = dict(sub_out.get("state_patch") or {}) if isinstance(sub_out, dict) else {}
         final = sub_out.get("final") if isinstance(sub_out, dict) else None
         text = ""
@@ -254,8 +257,8 @@ def _build_all_tools(state_getter) -> list[BaseTool]:
         if isinstance(sub_out, dict) and "__interrupt__" in sub_out:
             interrupts = sub_out.get("__interrupt__") or []
             payload = interrupts[0].value if interrupts else {}
-            resume_payload = interrupt(payload)
-            sub_out = subgraph.invoke(Command(resume=resume_payload), config=cfg)
+            answer = interrupt(payload)
+            sub_out = subgraph.invoke(Command(resume=answer), config=cfg)
         patch = dict(sub_out.get("state_patch") or {}) if isinstance(sub_out, dict) else {}
         final = sub_out.get("final") if isinstance(sub_out, dict) else None
         text = ""
@@ -279,8 +282,8 @@ def _build_all_tools(state_getter) -> list[BaseTool]:
         if isinstance(sub_out, dict) and "__interrupt__" in sub_out:
             interrupts = sub_out.get("__interrupt__") or []
             payload = interrupts[0].value if interrupts else {}
-            resume_payload = interrupt(payload)
-            sub_out = subgraph.invoke(Command(resume=resume_payload), config=cfg)
+            answer = interrupt(payload)
+            sub_out = subgraph.invoke(Command(resume=answer), config=cfg)
         patch = dict(sub_out.get("state_patch") or {}) if isinstance(sub_out, dict) else {}
         final = sub_out.get("final") if isinstance(sub_out, dict) else None
         text = ""
@@ -366,4 +369,6 @@ def main_agent_node(state: AgentState, config: dict | None = None) -> dict[str, 
             "result_summary": None,
         }
     )
+    if "__interrupt__" in supervisor:
+        out["__interrupt__"] = supervisor["__interrupt__"]
     return out

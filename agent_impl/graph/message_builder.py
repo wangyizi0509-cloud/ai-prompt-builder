@@ -286,9 +286,9 @@ def build_conversation_history(
             tool_calls = getattr(msg, "tool_calls", None)
         
         if content is None or content == "":
-            if not tool_calls:
+            if role != "tool" and not tool_calls:
                 continue
-            content = ""
+            content = "" if content is None else content
         
         # 跳过 Context Injection 消息
         if _is_context_injection(role, content):
@@ -329,7 +329,8 @@ def build_conversation_history(
             filtered_messages.append(base_message)
     
     # 应用滑动窗口：保留最近 N 轮用户消息及其响应
-    return _apply_sliding_window(filtered_messages, max_turns)
+    windowed = _apply_sliding_window(filtered_messages, max_turns)
+    return _ensure_tool_call_integrity(windowed)
 
 
 # ============================================================
@@ -526,6 +527,53 @@ def _apply_sliding_window(
                 break
     
     return messages[start_idx:]
+
+
+def _ensure_tool_call_integrity(messages: list[BaseMessage]) -> list[BaseMessage]:
+    if not messages:
+        return []
+    out: list[BaseMessage] = []
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        if isinstance(msg, ToolMessage):
+            i += 1
+            continue
+        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+            tool_calls = getattr(msg, "tool_calls", None) or []
+            expected_ids = []
+            for tc in tool_calls:
+                if isinstance(tc, dict):
+                    tc_id = tc.get("id")
+                    if tc_id:
+                        expected_ids.append(str(tc_id))
+            if not expected_ids:
+                out.append(msg)
+                i += 1
+                continue
+            block: list[BaseMessage] = [msg]
+            remaining = set(expected_ids)
+            j = i + 1
+            while j < len(messages) and isinstance(messages[j], ToolMessage):
+                tm = messages[j]
+                tc_id = str(getattr(tm, "tool_call_id", "") or "")
+                if tc_id in remaining:
+                    remaining.remove(tc_id)
+                    block.append(tm)
+                    j += 1
+                    if not remaining:
+                        break
+                    continue
+                break
+            if not remaining:
+                out.extend(block)
+                i = j
+                continue
+            i += 1
+            continue
+        out.append(msg)
+        i += 1
+    return out
 
 
 def _build_feedback_compression_ranges(messages: list, compressions: list) -> list[dict]:
