@@ -8,6 +8,7 @@ import uuid
 from typing import Any
 
 from graph.state import AgentState
+from utils.reasoning_content import clear_reasoning_content
 
 
 # 风控关键词列表
@@ -72,6 +73,9 @@ def router_node(state: AgentState) -> dict[str, Any]:
                 elif role == "ai":
                     role = "assistant"
                 normalized_messages.append({"role": role, "content": m.content})
+    
+    # 清理上一轮的 reasoning_content（根据 DeepSeek 文档，新对话开始时需要清理）
+    normalized_messages = clear_reasoning_content(normalized_messages)
     state["messages"] = normalized_messages
 
     # 根因修复：若 user_message 为空，但 messages 已包含用户输入，则回填
@@ -90,34 +94,18 @@ def router_node(state: AgentState) -> dict[str, Any]:
     
     # [FIX] 状态清理：每轮开始时，确保清理上一轮的临时状态，防止上下文爆炸
     base_update = {
-        "debug_log": [],  # 重置调试日志
-        "pending_responses": [],  # 重置本轮回复
-        "inquiry_card": None,  # 重置提问卡片
-        "pending_questions": [],  # 重置待提问
-        "completion_status": None,  # 重置子 Agent 信号
+        "debug_log": [],
+        "pending_responses": [],
+        "inquiry_card": None,
+        "completion_status": None,
         "result_summary": None,
-        "_tool_caller": None,  # [FIX] 重置工具调用标记，防止 Skill 指令一直挂着
-        "_pending_action": None,  # 重置两阶段工具标记
-        "_reply_skill_complete": None,  # 重置回复技能完成标记
-        "_reasoning_content_cache": None,  # 新轮次清理思考内容
-        "_handoff_target": None,
-        "_handoff_instruction": None,
-        "_iteration_count": 0,  # [FIX] 重置单轮步数计数器，避免跨轮次累积导致流程被卡死（Studio 模式下不走 server.py）
-        "_submit_result": None,  # [FIX] 2026-01-26: 重置 submit tool 结果，避免跨轮次残留
-        "_return_to_main": None,
-        "_return_to_main_reason": None,
+        "runtime": {},
+        "_iteration_count": 0,
     }
     if fallback_user_message:
         base_update["user_message"] = fallback_user_message
         if fallback_message_id and not state.get("current_message_id"):
             base_update["current_message_id"] = fallback_message_id
-
-    # [v3.0] instruction 属于“主 Agent -> 专家”的临时 Brief：
-    # - 非 resume 场景：每轮开头清空，避免跨轮次残留导致下游误用旧指令
-    # - resume 场景：保留，用于子 Agent 提问后继续执行时保持任务连贯
-    is_resuming = bool(state.get("current_agent") and state.get("agent_resume_point"))
-    if not is_resuming:
-        base_update["instruction"] = None
 
     # 如果 Onboarding 已完成，携带 handoff 给主 Agent，并保留 Onboarding 的即时回复
     onboarding_handoff = state.get("onboarding_handoff")
@@ -270,19 +258,6 @@ def router_node(state: AgentState) -> dict[str, Any]:
             }],
         }
     
-    # 恢复执行：优先回到上一个 Agent（避免被默认 main_agent 覆盖）
-    if is_resuming:
-        current_agent = state.get("current_agent") or "main_agent"
-        return {
-            **base_update,
-            "route_to": current_agent,
-            "debug_log": [{
-                "node": "router",
-                "step": "Resume Agent",
-                "response": f"route_to={current_agent}",
-            }],
-        }
-    
     # 3. 业务相关，先决定是否需要 Onboarding，再转发
     go_onboarding = not state.get("onboarding_completed", False)
 
@@ -358,4 +333,3 @@ def _handle_small_talk(message: str) -> str:
         return "早安！新的一天，新的机会 ☀️ 今天有什么计划吗？"
     
     return "你好！有什么我能帮你的吗？"
-
