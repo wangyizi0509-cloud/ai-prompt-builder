@@ -1456,6 +1456,7 @@
                 // 并确保 Studio 正在运行（默认端口 2024）
                 // 默认关闭 Studio Mode，避免 2024 未启动时前端直接报 “Failed to fetch”
                 const useStudioMode = ref(false); // 修改为 false，默认使用本地后端
+                const useServerStream = ref(false); // 可选：使用本地 /api/chat/stream（SSE）以获得更细粒度事件
                 const studioBaseUrl = ref('http://127.0.0.1:2024'); // Studio 默认端口
                 const assistantId = ref('crushe_agent'); // 对应 langgraph.json 中的名称
                 // --------------------------
@@ -1556,8 +1557,12 @@
                             
                             if (historyData.success) {
                                 // 3. 填充消息列表
-                                messages.value = historyData.messages || [];
-                                console.log('[History] Loaded messages count:', messages.value.length);
+                                if (messages.value.length === 0) {
+                                    messages.value = historyData.messages || [];
+                                    console.log('[History] Loaded messages count:', messages.value.length);
+                                } else {
+                                    console.log('[History] Messages already present, skipping overwrite');
+                                }
                                 
                                 // 4. 填充状态看板
                                 if (historyData.state) {
@@ -2249,12 +2254,18 @@
                          }
                     }
 
-                    // Check Inquiry
+                    // Check Inquiry (interrupt/resume)
+                    if (!newState.inquiry_card && Array.isArray(newState.__interrupt__) && newState.__interrupt__.length > 0) {
+                        const first = newState.__interrupt__[0];
+                        const v = (first && typeof first === 'object') ? (first.value || first['value']) : null;
+                        if (v && typeof v === 'object') {
+                            newState.inquiry_card = v;
+                        }
+                    }
+
                     // If there is a NEW inquiry card (or one that hasn't been answered)
                     if (newState.inquiry_card && newState.inquiry_card.questions && newState.inquiry_card.questions.length > 0) {
-                        // We check if this is effectively a new card or if we should just show it
-                        // For simplicity, if the backend sends one, we assume it's relevant.
-                        // We will set local inquiryCard and show a task.
+                        const isNewInquiry = JSON.stringify(newState.inquiry_card) !== JSON.stringify(oldState.inquiry_card);
                         inquiryCard.value = newState.inquiry_card;
                         inquiryAnswers.value = {}; // Reset answers
                         
@@ -2265,16 +2276,19 @@
                             }
                         }
 
-                        messages.value.push({
-                            role: 'system_task',
-                            taskType: 'inquiry',
-                            label: 'QUESTION',
-                            title: '需要补充信息',
-                            desc: newState.inquiry_card.intro || '为了更好地制定策略，请回答几个问题'
-                        });
-                        hasUpdates = true;
+                        if (isNewInquiry) {
+                            messages.value.push({
+                                role: 'system_task',
+                                taskType: 'inquiry',
+                                label: 'QUESTION',
+                                title: '需要补充信息',
+                                desc: newState.inquiry_card.intro || '为了更好地制定策略，请回答几个问题'
+                            });
+                            hasUpdates = true;
+                        }
                     } else {
                         inquiryCard.value = null;
+                        newState.inquiry_card = null;
                     }
 
                     // Feedback flow updates
@@ -2338,9 +2352,11 @@
                     
                     try {
                         const answerParts = [];
+                        const rawAnswers = {};
                         for (const q of inquiryCard.value.questions) {
                             const answer = inquiryAnswers.value[q.id];
                             if (answer === undefined || answer === '') continue;
+                            rawAnswers[q.id] = answer;
                             
                             // 多选题 - 支持两种格式
                             if (q.type === 'multiple_choice' && q.options) {
@@ -2383,11 +2399,12 @@
                         
                         // Close modal
                         showInquiryModal.value = false;
+                        const resumePayload = { answers: JSON.parse(JSON.stringify(rawAnswers)) };
                         inquiryCard.value = null;
                         
-                        // Send as user message
+                        // Send as user message + resume payload (interrupt/resume)
                         inputMessage.value = formattedAnswer;
-                        await sendMessage();
+                        await sendMessage({ resumePayload });
                     } catch (error) {
                         console.error('Submit inquiry error:', error);
                     }
@@ -2400,10 +2417,11 @@
                     }
                 };
 
-                const sendMessage = async () => {
+                const sendMessage = async ({ resumePayload } = {}) => {
                     const content = inputMessage.value.trim();
-                    if (!content || isLoading.value) return;
+                    if ((!content && !resumePayload) || isLoading.value) return;
 
+                    displayedMessageIds.value.clear();
                     messages.value.push({ role: 'user', content });
                     inputMessage.value = '';
                     isLoading.value = true;
@@ -2430,21 +2448,25 @@
                             }
                             
                             // 2) 发起 Run (流式)
+                            const input = resumePayload
+                                ? { command: { resume: resumePayload } }
+                                : {
+                                      user_message: content,
+                                      // [FIX] Studio Mode 下可能不会经过 server.py:/api/chat 的归零逻辑，
+                                      // 导致 _iteration_count 跨轮累积触发 MAX_NODE_STEPS_PER_TURN，
+                                      // 表现为 router "to main_agent" 但被强制 end。
+                                      // 这里每轮显式归零，保留同一 thread 的上下文不变。
+                                      _iteration_count: 0,
+                                      // 如果是第一次，LangGraph 会自动调用 create_initial_state
+                                      // 如果不是第一次，它会合并到现有状态
+                                  };
+
                             const response = await fetch(`${studioBaseUrl.value}/threads/${studioThreadId.value}/runs/stream`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
                                     assistant_id: assistantId.value,
-                                    input: {
-                                        user_message: content,
-                                        // [FIX] Studio Mode 下可能不会经过 server.py:/api/chat 的归零逻辑，
-                                        // 导致 _iteration_count 跨轮累积触发 MAX_NODE_STEPS_PER_TURN，
-                                        // 表现为 router "to main_agent" 但被强制 end。
-                                        // 这里每轮显式归零，保留同一 thread 的上下文不变。
-                                        _iteration_count: 0,
-                                        // 如果是第一次，LangGraph 会自动调用 create_initial_state
-                                        // 如果不是第一次，它会合并到现有状态
-                                    },
+                                    input,
                                     stream_mode: ['updates', 'values'], // 我们需要更新来显示过程，values 来获取最终状态
                                 })
                             });
@@ -2543,41 +2565,139 @@
                                     }
                                 }
                             }
-                        } else {
-                            // === 原有逻辑: 调用本地 server.py ===
-                        const response = await fetch('/api/chat', {
-                            method: 'POST',
-                            headers: { 
-                                'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${getToken()}`
-                            },
-                            body: JSON.stringify({
-                                message: content,
-                                session_id: sessionId.value
-                            })
-                        });
+                        } else if (useServerStream.value) {
+                            // === Path B: 本地 /api/chat/stream (SSE) ===
+                            const bodyPayload = resumePayload
+                                ? {
+                                      session_id: sessionId.value,
+                                      resume_payload: resumePayload,
+                                      stream_mode: 'values',
+                                  }
+                                : {
+                                      message: content,
+                                      session_id: sessionId.value,
+                                      stream_mode: 'values',
+                                  };
 
-                        if (!response.ok) throw new Error('Network response was not ok');
-
-                        const data = await response.json();
-                        
-                        // 统一处理响应逻辑：优先使用结构化的 pending_responses
-                        if (data.pending_responses && Array.isArray(data.pending_responses) && data.pending_responses.length > 0) {
-                            data.pending_responses.forEach(resp => {
-                                if (resp && resp.content) {
-                                    messages.value.push({ role: 'assistant', content: resp.content });
-                                }
+                            const response = await fetch('/api/chat/stream', {
+                                method: 'POST',
+                                headers: { 
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${getToken()}`
+                                },
+                                body: JSON.stringify(bodyPayload)
                             });
-                        } 
-                        // 如果 pending_responses 为空，但有 response 字符串（后端 Fallback），则使用它
-                        else if (data.response) {
-                            messages.value.push({ role: 'assistant', content: data.response });
-                        }
-                        
-                        // 3. 更新状态
-                        if (data.state) {
-                            processStateUpdate(data.state);
-                        }
+
+                            if (!response.ok) throw new Error('Network response was not ok');
+
+                            const reader = response.body.getReader();
+                            const decoder = new TextDecoder();
+                            let buffer = '';
+
+                            while (true) {
+                                const { value, done } = await reader.read();
+                                if (done) break;
+
+                                buffer += decoder.decode(value, { stream: true });
+                                const lines = buffer.split('\n');
+                                buffer = lines.pop();
+
+                                for (const line of lines) {
+                                    if (!line.startsWith('data: ')) continue;
+                                    const raw = line.substring(6).trim();
+                                    if (!raw) continue;
+                                    if (raw === '[DONE]') {
+                                        buffer = '';
+                                        break;
+                                    }
+                                    try {
+                                        const chunk = JSON.parse(raw);
+                                        if (chunk && chunk.type === 'interrupt' && chunk.inquiry_card) {
+                                            processStateUpdate({ inquiry_card: chunk.inquiry_card });
+                                            await scrollToBottom();
+                                            continue;
+                                        }
+
+                                        const payload = chunk.event ? (chunk.data || {}) : chunk;
+                                        if (chunk.event === 'values') {
+                                            const finalState = payload;
+                                            const pending = finalState.pending_responses || [];
+                                            pending.forEach(resp => {
+                                                if (resp?.content) {
+                                                    const msgKey = `${resp.from || 'assistant'}_${resp.content.substring(0, 50)}`;
+                                                    if (!displayedMessageIds.value.has(msgKey)) {
+                                                        displayedMessageIds.value.add(msgKey);
+                                                        messages.value.push({ role: 'assistant', content: resp.content });
+                                                    }
+                                                }
+                                            });
+                                            await scrollToBottom();
+                                            processStateUpdate(finalState);
+                                            await scrollToBottom();
+                                        }
+
+                                        if (!chunk.event) {
+                                            const pending = payload.pending_responses || [];
+                                            pending.forEach(resp => {
+                                                if (resp?.content) {
+                                                    const msgKey = `${resp.from || 'assistant'}_${resp.content.substring(0, 50)}`;
+                                                    if (!displayedMessageIds.value.has(msgKey)) {
+                                                        displayedMessageIds.value.add(msgKey);
+                                                        messages.value.push({ role: 'assistant', content: resp.content });
+                                                    }
+                                                }
+                                            });
+                                            await scrollToBottom();
+                                            processStateUpdate(payload);
+                                            await scrollToBottom();
+                                        }
+                                    } catch (e) {
+                                        // 忽略非 JSON 行
+                                    }
+                                }
+                            }
+                        } else {
+                            // === Path C: 原有逻辑: 调用本地 /api/chat ===
+                            const bodyPayload = resumePayload
+                                ? {
+                                      session_id: sessionId.value,
+                                      resume_payload: resumePayload,
+                                  }
+                                : {
+                                      message: content,
+                                      session_id: sessionId.value,
+                                  };
+
+                            const response = await fetch('/api/chat', {
+                                method: 'POST',
+                                headers: { 
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${getToken()}`
+                                },
+                                body: JSON.stringify(bodyPayload)
+                            });
+
+                            if (!response.ok) throw new Error('Network response was not ok');
+
+                            const data = await response.json();
+                            
+                            // 统一处理响应逻辑：优先使用结构化的 pending_responses
+                            if (data.pending_responses && Array.isArray(data.pending_responses) && data.pending_responses.length > 0) {
+                                data.pending_responses.forEach(resp => {
+                                    if (resp && resp.content) {
+                                        messages.value.push({ role: 'assistant', content: resp.content });
+                                    }
+                                });
+                            } 
+                            // 如果 pending_responses 为空，但有 response 字符串（后端 Fallback），则使用它
+                            else if (data.response) {
+                                messages.value.push({ role: 'assistant', content: data.response });
+                            }
+                            
+                            // 3. 更新状态
+                            if (data.state) {
+                                processStateUpdate(data.state);
+                            }
                         }
                         
                         if (showContext.value) {
