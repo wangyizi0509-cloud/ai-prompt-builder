@@ -44,6 +44,26 @@ def stop_service(port, service_name):
     return True
 
 
+def get_lan_ip():
+    """
+    Best-effort LAN IP detection for iOS/device testing.
+    Uses a UDP connect trick (no packets necessarily sent) to infer the outbound interface IP.
+    """
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("8.8.8.8", 80))
+        return sock.getsockname()[0]
+    except Exception:
+        return None
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
 def main():
     parser = argparse.ArgumentParser(description="Start Crushe AI Agent services")
     parser.add_argument(
@@ -90,18 +110,18 @@ def main():
     print(f"🚀 Starting services using agent_impl/{start_script_name}...")
     try:
         # 使用 Popen 运行以保持在后台
-        process = subprocess.Popen(
-            ['bash', start_script],
-            cwd=project_root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True,
-            bufsize=1
-        )
+        # IMPORTANT: do not pipe stdout/stderr here.
+        # This script exits immediately after spawning the bash script; if we pipe and do not
+        # actively drain the pipe, child processes (LangGraph / Uvicorn) can block once the
+        # pipe buffer fills, making the server appear "hung" (no responses).
+        subprocess.Popen(['bash', start_script], cwd=project_root)
         
         print(f"✅ Services start command issued successfully! (Mode: {args.mode})")
         print("\n📊 Service Information:")
         print("   - FastAPI: http://localhost:8000")
+        lan_ip = get_lan_ip()
+        if lan_ip:
+            print(f"   - iOS/Device (LAN): http://{lan_ip}:8000")
         print(f"   - LangGraph: http://127.0.0.1:{lg_port} ({'Local' if args.mode == 'dev' else 'Docker'})")
         print(f"   - LangSmith Studio: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:{lg_port}")
         

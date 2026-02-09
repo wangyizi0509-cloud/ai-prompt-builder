@@ -49,15 +49,34 @@ app.include_router(api_router)
 
 frontend_path = os.path.join(current_dir, "frontend")
 if os.path.exists(frontend_path):
-    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="static")
+    # iOS Safari can be quite aggressive about caching static assets during dev.
+    # In DEBUG_MODE=1, disable cache to reduce stale UI issues on real devices.
+    debug_mode_for_static = os.getenv("DEBUG_MODE", "0") == "1"
+
+    if debug_mode_for_static:
+        class NoCacheStaticFiles(StaticFiles):
+            async def get_response(self, path: str, scope):
+                response = await super().get_response(path, scope)
+                if response.status_code == 200:
+                    response.headers["Cache-Control"] = "no-store"
+                return response
+
+        app.mount("/", NoCacheStaticFiles(directory=frontend_path, html=True), name="static")
+    else:
+        app.mount("/", StaticFiles(directory=frontend_path, html=True), name="static")
 else:
     logger.warning(f"Frontend path not found: {frontend_path}")
 
 if __name__ == "__main__":
     logger.info("Starting server on http://0.0.0.0:8000")
     debug_mode = os.getenv("DEBUG_MODE", "0") == "1"
-    if debug_mode:
+    # Some sandboxed environments disallow file watching syscalls required by reload.
+    # Allow disabling reload explicitly while still keeping DEBUG_MODE=1 (local LangGraph).
+    reload_enabled = os.getenv("UVICORN_RELOAD", "1") == "1"
+    if debug_mode and reload_enabled:
         logger.info("DEBUG_MODE=1: Running with auto-reload enabled")
         uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
     else:
+        if debug_mode and not reload_enabled:
+            logger.info("DEBUG_MODE=1: Auto-reload disabled via UVICORN_RELOAD=0")
         uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
