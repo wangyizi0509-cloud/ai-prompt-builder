@@ -396,7 +396,7 @@ async def chat(
         # 进而引发 response 体积膨胀、性能劣化，甚至 /threads/{id}/state 400。
         # 对话历史的持久化由 LangGraph + post_turn_finalize_node 负责（layer3_memory.all_messages）。
         
-        if feedback_prefill:
+        if feedback_prefill and inquiry_card is None:
             try:
                 update_thread_state(thread_id, {"feedback_prefill": None})
             except Exception:
