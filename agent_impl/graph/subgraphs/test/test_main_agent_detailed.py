@@ -5,7 +5,7 @@
 import os
 import sys
 
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
@@ -69,7 +69,7 @@ def main():
                 msg_dict = convert_message_to_dict(latest_msg) if hasattr(latest_msg, 'content') else latest_msg
                 reasoning = extract_reasoning_content(msg_dict)
                 if reasoning:
-                    reasoning_count = reasoning_count + 1
+                    reasoning_count += 1
                     print(f"    ✓ 找到 reasoning_content #{reasoning_count}: {reasoning[:80]}...")
         
         if "tool_patch_log" in event_data:
@@ -78,7 +78,7 @@ def main():
                 for patch in patches:
                     tool_name = patch.get("tool_name") if isinstance(patch, dict) else None
                     if tool_name:
-                        tool_call_count = tool_call_count + 1
+                        tool_call_count += 1
                         print(f"    ✓ 工具调用 #{tool_call_count}: {tool_name}")
     
     print("\n" + "=" * 80)
