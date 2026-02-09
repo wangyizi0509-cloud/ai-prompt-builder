@@ -23,6 +23,7 @@ PROMPT_PATH = Path(__file__).parent / "prompts" / "onboarding_agent.md"
 LOGIC_PATH = Path(__file__).parent / "onboarding_logic.md"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LOG_PATH = PROJECT_ROOT / ".cursor" / "debug.log"
+GUIDE_DONE_TOKEN = "[SYS:CRUSHE_GUIDE_DONE]"
 
 
 #region agent log
@@ -164,6 +165,22 @@ def _convert_messages_to_dict(messages: list) -> list:
     return result
 
 
+def _replace_last_user_message(messages: list, from_text: str, to_text: str) -> list:
+    """Replace the last user message content if it matches the token."""
+    if not messages:
+        return messages
+    last = messages[-1]
+    if (
+        isinstance(last, dict)
+        and last.get("role") == "user"
+        and (last.get("content") or "").strip() == from_text
+    ):
+        updated = dict(last)
+        updated["content"] = to_text
+        return messages[:-1] + [updated]
+    return messages
+
+
 def _build_conversation_history(messages: list) -> str:
     """
     构建对话历史（与主 Agent 格式一致）
@@ -300,6 +317,44 @@ def onboarding_agent_node(state: dict) -> dict:
     # 统一消息为 dict，确保不丢失已有用户消息
     existing_messages = _convert_messages_to_dict(state.get("messages", []))
 
+    # 如果已完成 Onboarding，但需要先完成 Crushe 指南，则拦截等待
+    if state.get("pending_crushe_guide"):
+        if (user_message or "").strip() == GUIDE_DONE_TOKEN:
+            handoff = state.get("onboarding_handoff") or {
+                "collected_context": collected_info,
+                "recommendation": "信息已收集完毕，进入主流程进一步分析。",
+                "suggested_action": "建议进行现状分析",
+                "reason": "Onboarding 收集完成。",
+            }
+            # 清理 token，避免进入主流程
+            cleaned_messages = _replace_last_user_message(existing_messages, GUIDE_DONE_TOKEN, "继续")
+            onboarding_ack = (
+                "[SYS:ONBOARDING_DONE] 用户初次注册流程已完成，可以正式进入业务流程。"
+                f"\n参考建议：{handoff.get('suggested_action')}（仅供参考，最终由主流程决定）"
+            )
+            return {
+                "onboarding_completed": True,
+                "pending_crushe_guide": False,
+                "onboarding_handoff": handoff,
+                "collected_info": collected_info,
+                "user_message": "继续",
+                "messages": cleaned_messages + [
+                    {
+                        "role": "assistant",
+                        "name": "onboarding_agent",
+                        "content": onboarding_ack,
+                    }
+                ],
+                "next_action": "end_turn",
+            }
+        return {
+            "onboarding_completed": False,
+            "pending_crushe_guide": True,
+            "collected_info": collected_info,
+            "next_action": "end_turn",
+            "route_to": "end",
+        }
+
     # 构建对话历史（与主 Agent 格式一致）
     conversation_history = _build_conversation_history(existing_messages)
 
@@ -310,8 +365,15 @@ def onboarding_agent_node(state: dict) -> dict:
         max_turns=max_turns,
     )
 
-    llm_resp = llm.invoke(prompt)
-    parsed = _safe_json_loads(getattr(llm_resp, "content", ""))
+    try:
+        llm_resp = llm.invoke(prompt)
+        parsed = _safe_json_loads(getattr(llm_resp, "content", ""))
+    except Exception as e:
+        print(f"[ERROR] OnboardingAgent LLM invoke failed: {str(e)}")
+        # 兜底：返回一个默认问题
+        parsed = {}
+        llm_resp = type('obj', (object,), {'content': ''})
+
 
     needs_more = bool(parsed.get("needs_more", False))
     preliminary_assessment = parsed.get("preliminary_assessment")
@@ -514,7 +576,8 @@ def onboarding_agent_node(state: dict) -> dict:
         f"\n参考建议：{handoff.get('suggested_action')}（仅供参考，最终由主流程决定）"
     )
     result = {
-        "onboarding_completed": True,
+        "onboarding_completed": False,  # 等待用户看完 Crushe 指南再进入主流程
+        "pending_crushe_guide": True,
         "onboarding_handoff": handoff,
         "collected_info": updated_info,
         "pending_responses": [
@@ -529,13 +592,6 @@ def onboarding_agent_node(state: dict) -> dict:
         ],
         # 顶层透传：便于前端在 state 更新时直接识别并渲染
         **({"preliminary_assessment": preliminary_assessment} if preliminary_assessment else {}),
-        "messages": existing_messages + [
-            {
-                "role": "assistant",
-                "name": "onboarding_agent",
-                "content": onboarding_ack,
-            }
-        ],
     }
     #region agent log
     _append_debug_log(
