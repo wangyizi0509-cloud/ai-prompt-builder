@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Crushe AI - 恋爱军师</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -14,10 +14,38 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
     
     <style>
+        :root {
+            --cr-bg: #fbf4ff;
+            --cr-bg-2: #fff7fb;
+            --cr-surface: rgba(255, 255, 255, 0.92);
+            --cr-border: rgba(17, 24, 39, 0.06);
+            --cr-text: #0f172a;
+            --cr-muted: rgba(15, 23, 42, 0.55);
+            --cr-muted-2: rgba(15, 23, 42, 0.4);
+
+            --cr-pink: #ff3bbf;
+            --cr-purple: #7c4dff;
+            --cr-purple-2: #9b7bff;
+
+            --cr-radius-xl: 28px;
+            --cr-radius-lg: 22px;
+            --cr-radius-md: 16px;
+
+            --cr-shadow-sm: 0 8px 26px rgba(15, 23, 42, 0.06);
+            --cr-shadow-md: 0 14px 38px rgba(15, 23, 42, 0.08);
+
+            /* Plan 右上角头像“扶正”角度（正值=顺时针） */
+            --plan-hero-avatar-tilt: -2.5deg;
+        }
+
         body {
             font-family: 'Noto Sans SC', sans-serif;
-            background-color: #f3f4f6;
-            height: 100vh;
+            background: radial-gradient(1200px 700px at 20% 0%, rgba(255, 59, 191, 0.10), transparent 55%),
+                        radial-gradient(900px 600px at 80% 20%, rgba(124, 77, 255, 0.10), transparent 60%),
+                        linear-gradient(180deg, var(--cr-bg), var(--cr-bg-2));
+            /* iOS Safari: prefer dynamic viewport height */
+            min-height: 100vh;
+            height: 100dvh;
             overflow: hidden;
         }
         .layout-container {
@@ -44,15 +72,538 @@
         .app-container {
             width: 100%;
             max-width: 480px;
-            background: white;
+            background: rgba(255, 255, 255, 0.82);
             height: 100%;
             max-height: 100vh;
+            max-height: 100dvh;
             display: flex;
             flex-direction: column;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            box-shadow: 0 16px 56px rgba(15, 23, 42, 0.10);
             position: relative;
             z-index: 10;
             overflow: hidden;
+        }
+
+        /* ====== Top Segmented Tabs (小话 / 规划) ====== */
+        .app-header {
+            background: transparent !important;
+            border-bottom: none !important;
+            box-shadow: none !important;
+            backdrop-filter: blur(10px);
+        }
+        .app-header-bar {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            gap: 12px;
+        }
+        .app-header-right {
+            justify-self: end;
+        }
+        .app-header-bar .top-seg {
+            justify-self: center;
+        }
+        .top-seg {
+            background: rgba(255, 255, 255, 0.55);
+            border: 1px solid rgba(17, 24, 39, 0.05);
+            border-radius: 999px;
+            padding: 6px;
+            display: flex;
+            gap: 6px;
+            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+        }
+        .top-seg-btn {
+            position: relative;
+            border-radius: 999px;
+            padding: 8px 18px;
+            font-weight: 700;
+            font-size: 14px;
+            color: rgba(15, 23, 42, 0.55);
+            transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease, color 160ms ease;
+        }
+        .top-seg-btn:hover {
+            transform: translateY(-1px);
+            color: rgba(15, 23, 42, 0.72);
+        }
+        .top-seg-btn.active {
+            background: rgba(255, 255, 255, 0.95);
+            color: rgba(15, 23, 42, 0.92);
+            box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
+        }
+        .top-tools-btn {
+            border-radius: 10px;
+            transition: background 160ms ease, transform 160ms ease;
+        }
+        .top-tools-btn:hover {
+            background: rgba(255, 255, 255, 0.7);
+            transform: translateY(-1px);
+        }
+
+        /* ====== Plan Screen (视觉对齐参考图) ====== */
+        .plan-root {
+            background: transparent;
+        }
+        .plan-scroll {
+            /* pull modules up a bit */
+            padding: 10px 16px 18px 16px;
+        }
+        .plan-scroll.has-plan-fab {
+            /* reserve space so last card isn't covered by floating button */
+            padding-bottom: 130px;
+        }
+        .plan-hero {
+            position: relative;
+            background: transparent;
+            padding: 10px 4px 8px 4px;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            overflow: visible;
+            min-height: 160px;
+        }
+        .plan-hero::before {
+            content: "";
+            position: absolute;
+            left: -16px;
+            right: -16px;
+            top: -12px;
+            bottom: -36px;
+            border-radius: 32px;
+            background: radial-gradient(520px 260px at 20% 0%, rgba(255, 59, 191, 0.12), transparent 58%),
+                        radial-gradient(520px 260px at 85% 15%, rgba(124, 77, 255, 0.12), transparent 60%),
+                        linear-gradient(180deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0));
+            pointer-events: none;
+            z-index: 0;
+        }
+        .plan-hero > :not(.plan-hero-figure) {
+            position: relative;
+            z-index: 3;
+        }
+        .plan-hero-left {
+            max-width: calc(100% - 170px);
+            /* move "情感攻略 / Crush" into target box */
+            position: relative;
+            left: 30px;
+            top: 14px;
+        }
+        .plan-hero-figure {
+            position: absolute;
+            right: 14px;
+            top: -18px;
+            width: 210px;
+            max-height: 260px;
+            height: auto;
+            object-fit: contain;
+            object-position: 50% 12%;
+            z-index: 2; /* behind text, above background */
+            filter: drop-shadow(0 18px 26px rgba(15, 23, 42, 0.10));
+            transform: rotate(var(--plan-hero-avatar-tilt));
+            transform-origin: 50% 50%;
+            pointer-events: none;
+        }
+        .plan-hero-title-line {
+            /* Typography ratio tuning (body text is baseline, do not change) */
+            font-size: 40px;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            color: rgba(15, 23, 42, 0.94);
+            line-height: 1.05;
+        }
+        .plan-hero-title-en {
+            color: var(--cr-pink);
+            margin-left: 6px;
+        }
+        .plan-hero-avatar {
+            width: 110px;
+            height: 130px;
+            flex: 0 0 auto;
+            border-radius: 26px;
+            background: radial-gradient(60px 60px at 40% 30%, rgba(255,255,255,0.9), rgba(255,255,255,0.35)),
+                        linear-gradient(135deg, rgba(124,77,255,0.20), rgba(255,59,191,0.14));
+            border: 1px solid rgba(17, 24, 39, 0.06);
+            box-shadow: var(--cr-shadow-sm);
+            overflow: hidden;
+            position: relative;
+        }
+        .plan-hero-avatar::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(80px 80px at 70% 25%, rgba(255,255,255,0.55), transparent 60%);
+            pointer-events: none;
+        }
+        .plan-hero-avatar-img {
+            position: absolute;
+            inset: 0;
+            /* 头像轻微“扶正”并更居中，避免看起来歪/偏 */
+            width: 128%;
+            height: 128%;
+            left: -14%;
+            top: -8%;
+            object-fit: cover;
+            object-position: 50% 20%;
+            filter: drop-shadow(0 14px 18px rgba(15, 23, 42, 0.12));
+            transform: rotate(var(--plan-hero-avatar-tilt));
+            transform-origin: 50% 50%;
+            /* 让人物边缘更自然：轻微羽化到背景渐变 */
+            -webkit-mask-image: radial-gradient(closest-side at 50% 35%, rgba(0,0,0,1) 78%, rgba(0,0,0,0) 100%);
+            mask-image: radial-gradient(closest-side at 50% 35%, rgba(0,0,0,1) 78%, rgba(0,0,0,0) 100%);
+            -webkit-mask-repeat: no-repeat;
+            mask-repeat: no-repeat;
+            -webkit-mask-size: cover;
+            mask-size: cover;
+        }
+
+        .plan-two-cards {
+            /* overlap hero and "block" the lower body */
+            margin-top: -14px;
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid rgba(17, 24, 39, 0.05);
+            border-radius: var(--cr-radius-xl);
+            padding: 8px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            box-shadow: 0 12px 34px rgba(15, 23, 42, 0.06);
+            position: relative;
+            z-index: 5;
+            backdrop-filter: blur(10px);
+        }
+        .plan-two-card {
+            text-align: left;
+            padding: 14px 14px 12px 14px;
+            border-radius: 22px;
+            border: 1px solid transparent;
+            background: transparent;
+            transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease, border-color 160ms ease;
+            cursor: pointer;
+            user-select: none;
+        }
+        .plan-two-card:hover {
+            transform: translateY(-1px);
+            background: rgba(255, 255, 255, 0.68);
+            box-shadow: 0 14px 32px rgba(15, 23, 42, 0.06);
+        }
+        .plan-two-card:active {
+            transform: translateY(0) scale(0.99);
+        }
+        .plan-two-card.active {
+            background: rgba(255, 255, 255, 0.96);
+            border-color: rgba(17, 24, 39, 0.06);
+            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+        }
+        .plan-two-top {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+        .plan-two-num {
+            font-weight: 800;
+            font-size: 20px;
+            color: rgba(255, 59, 191, 0.55);
+        }
+        .plan-two-title {
+            font-weight: 800;
+            font-size: 20px;
+            color: rgba(15, 23, 42, 0.48);
+        }
+        .plan-two-card.active .plan-two-title {
+            color: rgba(15, 23, 42, 0.92);
+        }
+        .plan-two-sub {
+            margin-top: 6px;
+            font-size: 12px;
+            color: rgba(15, 23, 42, 0.42);
+        }
+
+        .plan-card {
+            margin-top: 10px;
+            background: rgba(255, 255, 255, 0.96);
+            border: 1px solid rgba(17, 24, 39, 0.06);
+            border-radius: var(--cr-radius-xl);
+            padding: 16px;
+            box-shadow: 0 16px 46px rgba(15, 23, 42, 0.06);
+        }
+        .plan-card-title {
+            font-weight: 800;
+            color: rgba(15, 23, 42, 0.92);
+            font-size: 20px;
+        }
+        .plan-card-highlight {
+            color: var(--cr-pink);
+            margin-left: 6px;
+        }
+        .plan-pills {
+            margin-top: 12px;
+            display: flex;
+            gap: 10px;
+        }
+        .plan-pill {
+            padding: 10px 18px;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.04);
+            color: rgba(15, 23, 42, 0.55);
+            font-weight: 700;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease, color 160ms ease;
+            border: 1px solid rgba(17, 24, 39, 0.04);
+        }
+        .plan-pill-status {
+            font-size: 11px;
+            font-weight: 800;
+            line-height: 1;
+            padding: 4px 8px;
+            border-radius: 999px;
+            border: 1px solid rgba(17, 24, 39, 0.06);
+            background: rgba(15, 23, 42, 0.03);
+            color: rgba(15, 23, 42, 0.48);
+            white-space: nowrap;
+        }
+        .plan-pill-status.is-pending {
+            background: rgba(251, 191, 36, 0.14);
+            border-color: rgba(251, 191, 36, 0.22);
+            color: rgba(180, 83, 9, 0.92);
+        }
+        .plan-pill-status.is-in_progress {
+            background: rgba(124, 77, 255, 0.12);
+            border-color: rgba(124, 77, 255, 0.18);
+            color: rgba(124, 77, 255, 0.92);
+        }
+        .plan-pill-status.is-completed {
+            background: rgba(34, 197, 94, 0.14);
+            border-color: rgba(34, 197, 94, 0.20);
+            color: rgba(22, 163, 74, 0.92);
+        }
+        .plan-pill-status.is-cancelled,
+        .plan-pill-status.is-expired {
+            background: rgba(15, 23, 42, 0.06);
+            border-color: rgba(15, 23, 42, 0.10);
+            color: rgba(15, 23, 42, 0.42);
+        }
+        .plan-pill:hover {
+            transform: translateY(-1px);
+            background: rgba(124, 77, 255, 0.08);
+            color: rgba(124, 77, 255, 0.86);
+            box-shadow: 0 12px 26px rgba(15, 23, 42, 0.06);
+        }
+        .plan-pill.active {
+            background: rgba(124, 77, 255, 0.10);
+            border-color: rgba(124, 77, 255, 0.10);
+            color: rgba(124, 77, 255, 0.92);
+        }
+        .plan-subcard {
+            margin-top: 12px;
+            border: 1px solid rgba(17, 24, 39, 0.06);
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.86);
+            padding: 14px;
+        }
+        .plan-subcard h4, .plan-subcard h3, .plan-subcard h2 {
+            margin-top: 0.7em !important;
+        }
+        .plan-subcard-title {
+            font-weight: 800;
+            font-size: 18px;
+            color: rgba(15, 23, 42, 0.92);
+            margin-bottom: 6px;
+        }
+        .plan-subcard-body {
+            color: rgba(15, 23, 42, 0.72);
+            font-size: 14px;
+            line-height: 1.65;
+        }
+        .plan-subcard-body.is-clamped {
+            max-height: 220px;
+            overflow: hidden;
+            mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 60%, rgba(0,0,0,0));
+        }
+        .plan-subcard-footer {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 8px;
+        }
+        .plan-link {
+            color: rgba(15, 23, 42, 0.55);
+            font-weight: 700;
+            font-size: 13px;
+            transition: color 160ms ease, transform 160ms ease;
+        }
+        .plan-link:hover {
+            color: rgba(15, 23, 42, 0.80);
+            transform: translateY(-1px);
+        }
+
+        .plan-feedback-btn {
+            margin-top: 14px;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.96);
+            border: 1px solid rgba(124, 77, 255, 0.28);
+            color: rgba(124, 77, 255, 0.92);
+            font-weight: 800;
+            border-radius: 18px;
+            padding: 14px 16px;
+            transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
+            box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+        }
+        .plan-feedback-btn:hover {
+            transform: translateY(-1px);
+            background: rgba(124, 77, 255, 0.06);
+            box-shadow: 0 18px 44px rgba(15, 23, 42, 0.08);
+        }
+        .plan-feedback-btn:active {
+            transform: translateY(0) scale(0.99);
+        }
+        .plan-feedback-hint {
+            margin-top: 10px;
+            font-size: 12px;
+            color: rgba(15, 23, 42, 0.35);
+            line-height: 1.6;
+        }
+        .plan-feedback-float {
+            position: fixed;
+            left: 50%;
+            transform: translateX(-50%);
+            width: min(396px, calc(100vw - 26px));
+            padding: 0;
+            /* keep it floating above the global chat input */
+            bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+            z-index: 35;
+        }
+        .plan-feedback-float > * { pointer-events: auto; }
+        .plan-feedback-float { pointer-events: none; }
+        .plan-feedback-float .plan-feedback-btn { margin-top: 0; }
+
+        /* ====== Global Input (match screenshot: purple stroke + left icon tile + big placeholder + right send circle) ====== */
+        .global-input-bar {
+            background: transparent !important;
+            border-top: none !important;
+            backdrop-filter: blur(10px);
+            display: flex;
+            justify-content: center;
+            padding: 9px 13px calc(11px + env(safe-area-inset-bottom, 0px));
+        }
+
+        .chatbar-shell {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            /* height -15% (keep width/length unchanged) */
+            padding: 8px 14px;
+            /* 参考图一：更方一些（避免胶囊感） */
+            border-radius: 22px;
+            background: rgba(255, 255, 255, 0.96);
+            border: 1.5px solid rgba(124, 77, 255, 0.38);
+            box-shadow: 0 18px 52px rgba(124, 77, 255, 0.07);
+            max-width: 396px;
+        }
+        .chatbar-upload-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 16px;
+            background: rgba(15, 23, 42, 0.04);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+            transition: transform 160ms ease, background 160ms ease;
+        }
+        .chatbar-upload-btn:active {
+            transform: scale(0.98);
+        }
+        .chatbar-upload-btn svg {
+            width: 20px;
+            height: 20px;
+            display: block;
+            color: rgba(15, 23, 42, 0.72);
+        }
+        .chatbar-upload-btn img {
+            width: 20px;
+            height: 20px;
+            display: block;
+        }
+
+        .chatbar-input {
+            flex: 1 1 auto;
+            border: none;
+            outline: none;
+            background: transparent;
+            /* match chat bubble text-sm */
+            font-size: 15px;
+            /* 参考图一：字体更细 */
+            font-weight: 400;
+            color: rgba(15, 23, 42, 0.92);
+            line-height: 1.2;
+            padding: 2px 0;
+            min-width: 0;
+        }
+        .chatbar-input::placeholder {
+            color: rgba(15, 23, 42, 0.34);
+            font-weight: 400;
+        }
+
+        .chatbar-send-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 999px;
+            background: rgba(124, 77, 255, 0.98);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+            box-shadow: 0 16px 40px rgba(124, 77, 255, 0.24);
+            transition: transform 160ms ease, background 160ms ease, opacity 160ms ease;
+        }
+        .chatbar-send-btn:hover {
+            background: rgba(124, 77, 255, 1);
+        }
+        .chatbar-send-btn:active {
+            transform: scale(0.98);
+        }
+        .chatbar-send-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+        .chatbar-send-btn svg {
+            width: 18px;
+            height: 18px;
+            display: block;
+        }
+
+        /* ====== Tab sliding transition (Chat <-> Plan) ====== */
+        .tab-stage {
+            position: relative;
+            overflow: hidden;
+            touch-action: pan-y;
+        }
+        .tab-stage-inner {
+            height: 100%;
+            display: flex;
+            width: 200%;
+            transform: translateX(0);
+            transition: transform 340ms cubic-bezier(0.16, 1, 0.3, 1);
+            will-change: transform;
+        }
+        .tab-stage-inner.is-plan {
+            transform: translateX(-50%);
+        }
+        .tab-pane {
+            width: 50%;
+            flex: 0 0 50%;
+            height: 100%;
+            min-width: 0;
+        }
+        /* prevent interacting with offscreen pane */
+        .tab-stage-inner.is-plan .tab-pane-chat { pointer-events: none; }
+        .tab-stage-inner.is-chat .tab-pane-plan { pointer-events: none; }
+        @media (prefers-reduced-motion: reduce) {
+            .tab-stage-inner { transition: none; }
         }
 
         /* Context Sidebar (Left) */
@@ -241,14 +792,117 @@
         }
 
         .chat-bubble-user {
-            background-color: #8b5cf6; /* Violet-500 */
-            color: white;
-            border-radius: 18px 18px 4px 18px;
+            /* 我方消息（改成图一：白底 + 紫色描边） */
+            background: rgba(255, 255, 255, 0.96);
+            color: rgba(15, 23, 42, 0.92);
+            border: 1.5px solid rgba(124, 77, 255, 0.35);
+            border-radius: 18px;
+            box-shadow: none; /* 外层已有 shadow-sm，这里去掉更像图一 */
         }
         .chat-bubble-ai {
-            background-color: #f3f4f6; /* Gray-100 */
-            color: #1f2937;
-            border-radius: 18px 18px 18px 4px;
+            /* 军师消息（改成图二：更“卡片感”的大圆角气泡） */
+            background: rgba(255, 255, 255, 0.96);
+            color: rgba(15, 23, 42, 0.94);
+            border-radius: 22px;
+            border: 1px solid rgba(17, 24, 39, 0.06);
+            /* 字体跟我方保持一致（不要覆盖外层 text-sm） */
+        }
+
+        /* 修复：军师气泡底部“多一行空行”（来自 markdown 段落默认 margin） */
+        .chat-bubble-ai .markdown-body p:last-child,
+        .chat-bubble-ai .markdown-body ul:last-child,
+        .chat-bubble-ai .markdown-body ol:last-child,
+        .chat-bubble-ai .markdown-body blockquote:last-child {
+            margin-bottom: 0;
+        }
+
+        .chat-ai-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 999px;
+            background: radial-gradient(14px 14px at 40% 30%, rgba(255,255,255,0.95), rgba(255,255,255,0.25)),
+                        linear-gradient(135deg, rgba(124,77,255,0.22), rgba(255,59,191,0.16));
+            border: 1px solid rgba(17, 24, 39, 0.06);
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+            overflow: hidden;
+            flex: 0 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .chat-ai-avatar.lg {
+            width: 88px;
+            height: 88px;
+        }
+        .chat-ai-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain; /* 小头像里尽量展示整个人物 */
+            object-position: 50% 50%;
+            transform: scale(1.06);
+            /* 轻微羽化，避免硬边 */
+            -webkit-mask-image: radial-gradient(circle at 50% 45%, rgba(0,0,0,1) 78%, rgba(0,0,0,0) 100%);
+            mask-image: radial-gradient(circle at 50% 45%, rgba(0,0,0,1) 78%, rgba(0,0,0,0) 100%);
+            -webkit-mask-repeat: no-repeat;
+            mask-repeat: no-repeat;
+            -webkit-mask-size: cover;
+            mask-size: cover;
+        }
+        .chat-ai-avatar.lg img {
+            /* 截图二：让面部和爱心更居中，且更“饱满” */
+            object-position: 50% 32%;
+            transform: scale(1.14);
+        }
+
+        /* 空状态人物（参考截图一：不要圆圈限制 + 放大 1.5 倍） */
+        .chat-empty-avatar {
+            /* 再放大一倍：同时限制最大宽度避免小屏溢出 */
+            width: min(688px, 92vw);
+            height: auto;
+            border-radius: 0;
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            overflow: visible; /* 不要裁剪成圆形 */
+        }
+        .chat-empty-avatar img {
+            /* 去掉圆形羽化遮罩，不要“圆圈感” */
+            width: 100%;
+            height: auto;
+            object-fit: contain;
+            -webkit-mask-image: none;
+            mask-image: none;
+            -webkit-mask-repeat: initial;
+            mask-repeat: initial;
+            -webkit-mask-size: initial;
+            mask-size: initial;
+            transform: none;
+        }
+
+        /* Onboarding Button Style */
+        .onboarding-btn {
+            margin-top: 8px;
+            background: rgba(255, 255, 255, 0.96);
+            border: 1.5px solid #7c4dff;
+            color: #7c4dff;
+            font-weight: 700;
+            border-radius: 999px;
+            padding: 10px 24px;
+            font-size: 15px;
+            box-shadow: 0 8px 20px rgba(124, 77, 255, 0.15);
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+        .onboarding-btn:hover {
+            background: #f5f3ff;
+            transform: translateY(-1px);
+            box-shadow: 0 10px 24px rgba(124, 77, 255, 0.2);
+        }
+        .onboarding-btn:active {
+            transform: scale(0.98);
         }
         
         /* Overlay Drawers */
@@ -303,36 +957,144 @@
         .bottom-modal.open {
             transform: translateY(0);
         }
+        .bottom-modal-footer {
+            position: fixed;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100%;
+            max-width: 480px;
+            z-index: 61;
+            transition: bottom 0.15s ease-out;
+        }
 
-        /* Task Card Styles */
+        /* Task Card Styles (match design screenshots) */
         .task-card {
-            background: white;
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 12px;
+            width: 100%;
+            max-width: 252px;
+            background: rgba(255, 255, 255, 0.96);
+            border: 1px solid rgba(17, 24, 39, 0.06);
+            border-radius: 17px;
+            padding: 10px 10px 8px;
             margin-top: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            box-shadow: 0 12px 34px rgba(15, 23, 42, 0.06);
             cursor: pointer;
-            transition: all 0.2s;
+            user-select: none;
+            transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background 160ms ease;
             position: relative;
             overflow: hidden;
         }
         .task-card:hover {
-            border-color: #8b5cf6;
             transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(139, 92, 246, 0.1);
+            border-color: rgba(17, 24, 39, 0.08);
+            box-shadow: 0 18px 52px rgba(15, 23, 42, 0.08);
         }
-        .task-card::before {
-            content: '';
-            position: absolute;
-            left: 0;
-            top: 0;
-            bottom: 0;
-            width: 4px;
+        .task-card:active {
+            transform: translateY(0) scale(0.995);
         }
-        .task-card.type-status::before { background-color: #f97316; } /* Orange */
-        .task-card.type-plan::before { background-color: #ec4899; } /* Pink */
-        .task-card.type-inquiry::before { background-color: #8b5cf6; } /* Violet */
+
+        .task-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 2px 2px 7px 2px;
+        }
+        .task-card-header-left {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            min-width: 0;
+        }
+        .task-card-icon {
+            width: 18px;
+            height: 18px;
+            border-radius: 6px;
+            background: rgba(124, 77, 255, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+        }
+        .task-card-icon svg {
+            width: 10px;
+            height: 10px;
+            display: block;
+        }
+        .task-card-title {
+            font-size: 15px;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            color: rgba(15, 23, 42, 0.94);
+            line-height: 1.1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .task-card-chevron {
+            color: rgba(15, 23, 42, 0.28);
+            flex: 0 0 auto;
+        }
+        .task-card-chevron svg {
+            width: 17px;
+            height: 17px;
+        }
+
+        .task-card-divider {
+            height: 1px;
+            background: rgba(15, 23, 42, 0.06);
+            margin: 0 2px 7px;
+        }
+
+        .task-card-section {
+            padding: 0 2px;
+        }
+        .task-card-section + .task-card-section {
+            margin-top: 7px;
+        }
+        .task-card-section-title {
+            font-size: 11px;
+            font-weight: 800;
+            color: rgba(15, 23, 42, 0.94);
+            margin-bottom: 4px;
+        }
+        .task-card-section-desc {
+            font-size: 10px;
+            color: rgba(15, 23, 42, 0.35);
+            line-height: 1.4;
+            letter-spacing: -0.01em;
+        }
+        .task-card-section-desc.clamp-1 {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .task-card-section-desc.clamp-2 {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+            overflow: hidden;
+        }
+
+        /* Carousel Animations */
+        .slide-fade-enter-active,
+        .slide-fade-leave-active {
+            transition: all 0.3s ease;
+        }
+        .slide-fade-enter-from {
+            opacity: 0;
+            transform: translateX(20px);
+        }
+        .slide-fade-leave-to {
+            opacity: 0;
+            transform: translateX(-20px);
+        }
+        
+        .animate-scale-up {
+            animation: scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes scaleUp {
+            from { transform: scale(0.9); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
 
     </style>
 </head>
@@ -807,51 +1569,72 @@
 
         <!-- CENTER: Main App Container -->
         <div class="app-container">
-            <!-- Header (Always Visible) -->
-            <header class="bg-white px-4 py-3 border-b flex justify-between items-center sticky top-0 z-30 shadow-sm">
-                <!-- Left: Logo/Title -->
-                <div class="flex items-center space-x-2">
-                    <span class="text-lg font-bold text-gray-800">Crushe AI</span>
-                    <button @click="toggleContext" class="text-xs bg-green-100 px-2 py-1 rounded text-green-600 hover:bg-green-200" title="上下文状态">
-                        {{ showContext ? '关闭' : '📊' }}
+            <!-- Header / Tab Bar -->
+            <header class="app-header app-header-bar px-4 py-3 sticky top-0 z-30">
+                <!-- Left spacer (keeps tabs truly centered) -->
+                <div></div>
+
+                <!-- Center: Segmented Tabs -->
+                <div class="top-seg" role="tablist" aria-label="主导航">
+                    <button
+                        @click="switchTab('chat')"
+                        class="top-seg-btn"
+                        :class="{ active: currentTab === 'chat' }"
+                        role="tab"
+                        :aria-selected="currentTab === 'chat'"
+                    >
+                        小话
                     </button>
-                    <button @click="toggleDebug" class="text-xs bg-gray-100 px-2 py-1 rounded text-gray-500 hover:bg-gray-200" title="决策日志">
-                        {{ showDebug ? '关闭' : '🔍' }}
+                    <button
+                        @click="switchTab('plan')"
+                        class="top-seg-btn"
+                        :class="{ active: currentTab === 'plan' }"
+                        role="tab"
+                        :aria-selected="currentTab === 'plan'"
+                    >
+                        规划
                     </button>
                 </div>
 
-                <!-- Right: Board Toggles & User Info -->
-                <div class="flex items-center space-x-2">
-                    <div class="flex space-x-2 mr-2">
-                        <button 
-                            @click="toggleStatusDrawer"
-                            class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors border"
-                            :class="showStatusDrawer ? 'bg-orange-100 text-orange-700 border-orange-200' : 'bg-gray-50 text-gray-600 border-gray-100 hover:bg-gray-100'"
+                <!-- Right: Tools & User -->
+                <div class="app-header-right flex items-center space-x-3">
+                    <!-- User Avatar -->
+                    <div v-if="currentUser" class="relative" ref="userMenuRef">
+                        <button
+                            type="button"
+                            class="w-8 h-8 rounded-full bg-violet-100 text-violet-600 flex items-center justify-center font-bold border border-violet-200"
+                            @click.stop="toggleUserMenu"
+                            aria-haspopup="menu"
+                            :aria-expanded="showUserMenu ? 'true' : 'false'"
+                            title="用户菜单"
                         >
-                            01 现状
+                            {{ currentUser.username.substring(0,1).toUpperCase() }}
                         </button>
-                        <button 
-                            @click="togglePlanDrawer"
-                            class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors border"
-                            :class="showPlanDrawer ? 'bg-pink-100 text-pink-700 border-pink-200' : 'bg-gray-50 text-gray-600 border-gray-100 hover:bg-gray-100'"
+                        <!-- Dropdown (click to show, click outside to close) -->
+                        <div
+                            v-if="showUserMenu"
+                            class="absolute right-0 top-full mt-2 w-40 bg-white rounded-lg shadow-lg border py-1"
+                            role="menu"
+                            @click.stop
                         >
-                            02 计划
-                        </button>
-                    </div>
-
-                    <!-- User Info -->
-                    <div v-if="currentUser" class="flex items-center ml-2 border-l pl-3">
-                        <div class="text-xs text-right mr-2">
-                            <div class="font-medium text-gray-700">{{ currentUser.username }}</div>
+                            <button
+                                @click="handleLogout"
+                                class="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-gray-50"
+                                role="menuitem"
+                            >
+                                退出登录
+                            </button>
                         </div>
-                        <button 
-                            @click="handleLogout"
-                            class="text-xs text-red-500 hover:text-red-700 font-medium"
-                            title="退出登录"
-                        >
-                            退出
-                        </button>
                     </div>
+                    <!-- Guest: Login entry -->
+                    <a
+                        v-else
+                        href="/auth.html"
+                        class="top-tools-btn px-3 py-1.5 text-sm font-bold bg-white/70 border border-white/40 text-slate-700 hover:bg-white/90"
+                        title="登录以同步对话"
+                    >
+                        登录
+                    </a>
                 </div>
             </header>
 
@@ -860,7 +1643,7 @@
                 <div class="absolute inset-0 bg-black bg-opacity-50" @click="cancelLogout"></div>
                 <div class="bg-white rounded-lg p-6 max-w-sm w-full mx-4 relative z-10 shadow-xl">
                     <h3 class="text-lg font-bold mb-2">确认退出</h3>
-                    <p class="text-gray-600 mb-6">确定要退出登录吗？退出后将无法查看当前对话。</p>
+                    <p class="text-gray-600 mb-6">确定要退出登录吗？退出后将无法查看当前对话.</p>
                     <div class="flex justify-end space-x-3">
                         <button 
                             @click="cancelLogout"
@@ -878,17 +1661,29 @@
                 </div>
             </div>
 
-            <!-- Main Content: Chat View -->
-            <div class="flex-1 flex flex-col bg-white overflow-hidden relative z-0">
-                <!-- Messages Area -->
-                <div class="flex-1 overflow-y-auto p-4 space-y-4 min-h-0" ref="messagesContainer">
-                    <div v-if="messages.length === 0" class="text-center py-10 text-gray-400 text-sm">
-                        <div class="w-16 h-16 bg-violet-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                            <span class="text-2xl">🤖</span>
+            <!-- Main Content: Sliding Tabs Stage -->
+            <div
+                class="tab-stage flex-1 relative z-0"
+                @touchstart.passive="onTabTouchStart"
+                @touchmove.passive="onTabTouchMove"
+                @touchend="onTabTouchEnd"
+                @touchcancel="onTabTouchEnd"
+            >
+                <div
+                    class="tab-stage-inner"
+                    :class="currentTab === 'plan' ? 'is-plan' : 'is-chat'"
+                >
+                    <!-- CHAT PANE -->
+                    <div class="tab-pane tab-pane-chat flex flex-col bg-white overflow-hidden" :aria-hidden="currentTab !== 'chat'">
+                        <!-- Messages Area -->
+                        <div class="flex-1 overflow-y-auto p-4 space-y-4 min-h-0" ref="messagesContainer">
+                    <div v-if="messages.length === 0" class="text-center py-10 mt-12 text-gray-400 text-sm">
+                        <div class="chat-ai-avatar lg chat-empty-avatar mx-auto mb-3" aria-hidden="true">
+                            <img src="./assets/xiaohua_empty.png" alt="" />
                         </div>
-                        <p class="font-medium text-gray-600 mb-1">你好，我是小话。</p>
-                        <p>你的AI恋爱军师。</p>
-                        <p class="mt-4 text-xs bg-gray-50 inline-block px-3 py-1 rounded-full">试着说："我最近有点头疼..."</p>
+                        <p class="font-medium text-gray-600 mb-1">你好，我是小话.</p>
+                        <p>你的AI恋爱军师</p>
+                        <p class="mt-4 text-xs bg-gray-50 inline-block px-3 py-1 rounded-full">来和我说说你和ta的现状吧...</p>
                     </div>
 
                     <div v-for="(msg, index) in messages" :key="index" class="flex flex-col space-y-1">
@@ -896,28 +1691,53 @@
                         <!-- System Task Card -->
                         <div v-if="msg.role === 'system_task'" class="flex justify-center my-2">
                             <div 
-                                class="task-card w-64"
-                                :class="`type-${msg.taskType}`"
-                                @click="handleTaskClick(msg)"
+                                class="task-card"
+                                :class="[`type-${msg.taskType}`, msg.disabled ? 'opacity-60 pointer-events-none' : '']"
+                                @click="!msg.disabled && handleTaskClick(msg)"
                             >
-                                <div class="flex items-center justify-between mb-1">
-                                    <span class="text-xs font-bold uppercase tracking-wider text-gray-500">{{ msg.label }}</span>
-                                    <span class="text-gray-400">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                                <div class="task-card-header">
+                                    <div class="task-card-header-left">
+                                        <div class="task-card-icon" aria-hidden="true">
+                                            <!-- inquiry uses same icon as status -->
+                                            <svg v-if="msg.taskType === 'status' || msg.taskType === 'inquiry'" viewBox="0 0 24 24" fill="none">
+                                                <path d="M6 18V10" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+                                                <path d="M12 18V6" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+                                                <path d="M18 18V13" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+                                            </svg>
+                                            <svg v-else-if="msg.taskType === 'strategy'" viewBox="0 0 24 24" fill="none">
+                                                <path d="M7 7h10" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+                                                <path d="M7 12h10" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+                                                <path d="M7 17h8" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+                                            </svg>
+                                            <svg v-else viewBox="0 0 24 24" fill="none">
+                                                <path d="M12 4l6 8-6 8-6-8 6-8z" fill="white" opacity="0.95"/>
+                                            </svg>
+                                        </div>
+                                        <div class="task-card-title">{{ getTaskCardTitle(msg) }}</div>
+                                    </div>
+                                    <div class="task-card-chevron" aria-hidden="true">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none">
+                                            <path d="M9 5l7 7-7 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
                                         </svg>
-                                    </span>
+                                    </div>
                                 </div>
-                                <div class="font-medium text-gray-800 text-sm">{{ msg.title }}</div>
-                                <div class="text-xs text-gray-500 mt-1 truncate">{{ msg.desc }}</div>
+                                <div class="task-card-divider" aria-hidden="true"></div>
+                                <div class="task-card-section">
+                                    <div class="task-card-section-title">{{ getTaskCardSectionLabel(msg.taskType, 'a') }}</div>
+                                    <div class="task-card-section-desc clamp-1">{{ getTaskCardSectionText(msg, 'a') }}</div>
+                                </div>
+                                <div class="task-card-section">
+                                    <div class="task-card-section-title">{{ getTaskCardSectionLabel(msg.taskType, 'b') }}</div>
+                                    <div class="task-card-section-desc clamp-2">{{ getTaskCardSectionText(msg, 'b') }}</div>
+                                </div>
                             </div>
                         </div>
 
                         <!-- Chat Message -->
                         <div v-else :class="['flex', msg.role === 'user' ? 'justify-end' : 'justify-start']">
                             <!-- Avatar for AI -->
-                            <div v-if="msg.role === 'assistant'" class="w-8 h-8 rounded-full bg-violet-100 flex-shrink-0 mr-2 flex items-center justify-center text-sm">
-                                🤖
+                            <div v-if="msg.role === 'assistant'" class="chat-ai-avatar mr-2" aria-hidden="true">
+                                <img src="./assets/xiaohua.png" alt="" />
                             </div>
                             
                             <!-- Bubble -->
@@ -931,38 +1751,399 @@
                                 <div v-else>{{ msg.content }}</div>
                             </div>
                         </div>
+                        
+                        <!-- Onboarding Button (Separate from bubble, but aligned) -->
+                        <div v-if="msg.showOnboardingButton" class="flex justify-start ml-10 mb-4 fade-in-up">
+                            <button 
+                                class="onboarding-btn" 
+                                :class="{ 'opacity-50 cursor-not-allowed': msg.onboardingButtonDisabled }"
+                                :disabled="msg.onboardingButtonDisabled"
+                                @click="handleOnboardingStart(msg)"
+                            >
+                                {{ msg.onboardingButtonDisabled ? '已开启' : '开启情感攻略' }}
+                            </button>
+                        </div>
+
+                        <!-- Guide Button (Step 4) -->
+                        <div v-if="msg.showGuideButton" class="flex justify-start ml-10 mb-4 fade-in-up">
+                            <button class="onboarding-btn" @click="openGuideModal">
+                                快速了解Crushe用法
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Loading Indicator -->
                     <div v-if="isLoading" class="flex justify-start">
-                        <div class="w-8 h-8 rounded-full bg-violet-100 flex-shrink-0 mr-2 flex items-center justify-center text-sm">🤖</div>
+                        <div class="chat-ai-avatar mr-2" aria-hidden="true">
+                            <img src="./assets/xiaohua.png" alt="" />
+                        </div>
                         <div class="chat-bubble-ai px-4 py-3 flex items-center space-x-1">
                             <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
                             <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
                             <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.4s"></div>
                         </div>
                     </div>
+                        </div>
+                    </div>
+
+                    <!-- PLAN PANE -->
+                    <div class="tab-pane tab-pane-plan plan-root flex flex-col overflow-hidden" :aria-hidden="currentTab !== 'plan'">
+                        <div class="flex-1 overflow-y-auto plan-scroll" :class="{ 'has-plan-fab': showPlanFeedbackFab }">
+                    <!-- Hero -->
+                    <div class="plan-hero">
+                        <div class="plan-hero-left">
+                            <div class="plan-hero-title-line">
+                                <span>情感攻略</span><span class="plan-hero-title-en">Crush</span>
+                            </div>
+                        </div>
+                        <!-- 人物：露出半身，底部被下方卡片遮挡 -->
+                        <img class="plan-hero-figure" src="./assets/xiaohua_plan.png" alt="" aria-hidden="true" />
+                    </div>
+
+                    <!-- 01/02 Segmented Cards -->
+                    <div class="plan-two-cards" role="tablist" aria-label="规划分区">
+                        <button
+                            class="plan-two-card"
+                            :class="{ active: currentPlanTab === 'status' }"
+                            @click="switchPlanTab('status')"
+                            role="tab"
+                            :aria-selected="currentPlanTab === 'status'"
+                        >
+                            <div class="plan-two-top">
+                                <span class="plan-two-num">01</span>
+                                <span class="plan-two-title">当前现状</span>
+                            </div>
+                            <div class="plan-two-sub">专业情感现状分析</div>
+                        </button>
+                        <button
+                            class="plan-two-card"
+                            :class="{ active: currentPlanTab === 'plan' }"
+                            @click="switchPlanTab('plan')"
+                            role="tab"
+                            :aria-selected="currentPlanTab === 'plan'"
+                        >
+                            <div class="plan-two-top">
+                                <span class="plan-two-num">02</span>
+                                <span class="plan-two-title">情感计划</span>
+                            </div>
+                            <div class="plan-two-sub">全方位Crush攻略</div>
+                        </button>
+                    </div>
+
+                    <!-- 01 STATUS -->
+                    <div v-show="currentPlanTab === 'status'">
+                        <div class="plan-card" id="status-analysis">
+                            <div class="plan-card-title">当前关系阶段</div>
+                            <div class="plan-subcard">
+                                <div class="plan-subcard-title">{{ state.status_report ? '已生成' : '待分析' }}</div>
+                                <div class="plan-subcard-body">
+                                    <div v-if="state.status_report" v-html="renderMarkdown(state.status_report)"></div>
+                                    <div v-else class="text-sm" style="color: rgba(15,23,42,0.45);">请在对话中多描述一些你们的情况.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div v-if="state.action_plan" class="plan-card" id="plan-analysis">
+                            <div class="plan-card-title">总体规划</div>
+                            <div class="plan-subcard">
+                                <div class="plan-subcard-title">专属情感计划</div>
+                                <div class="plan-subcard-body" v-html="renderMarkdown(state.action_plan)"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 02 PLAN -->
+                    <div v-show="currentPlanTab === 'plan'">
+                        <div class="plan-card">
+                            <div class="plan-card-title">
+                                当前计划：<span class="plan-card-highlight">{{ planHeadline }}</span>
+                            </div>
+
+                            <div v-if="state.action_guides && state.action_guides.length > 0" class="plan-pills" role="tablist" aria-label="行动切换">
+                                <button
+                                    v-for="(guide, idx) in state.action_guides"
+                                    :key="guide.id || idx"
+                                    class="plan-pill"
+                                    :class="{ active: idx === selectedGuideIndex }"
+                                    @click="selectGuide(idx)"
+                                    role="tab"
+                                    :aria-selected="idx === selectedGuideIndex"
+                                >
+                                    <span>行动{{ idx + 1 }}</span>
+                                    <span
+                                        v-if="guide && guide.status"
+                                        class="plan-pill-status"
+                                        :class="getGuideStatusClass(guide.status)"
+                                    >
+                                        {{ getGuideStatusLabel(guide.status) }}
+                                    </span>
+                                </button>
+                            </div>
+
+                            <div v-if="selectedGuide" class="plan-subcard">
+                                <div class="plan-subcard-title">{{ selectedGuideHeadline }}</div>
+                                <div class="plan-subcard-body markdown-body" :class="{ 'is-clamped': !planDetailExpanded }"
+                                     v-html="renderMarkdown(selectedGuideContentDisplay)"></div>
+                                <div class="plan-subcard-footer">
+                                    <button class="plan-link" @click="planDetailExpanded = !planDetailExpanded">
+                                        {{ planDetailExpanded ? '收起' : '查看全部' }}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div v-else-if="state.action_guide" class="plan-subcard">
+                                <div class="plan-subcard-title">行动指南</div>
+                                <div class="plan-subcard-body markdown-body" v-html="renderMarkdown(state.action_guide)"></div>
+                            </div>
+
+                            <div v-else class="plan-subcard">
+                                <div class="plan-subcard-title">暂无行动</div>
+                                <div class="plan-subcard-body" style="color: rgba(15,23,42,0.45);">
+                                    请继续对话，我会为你制定更具体的行动步骤.
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- Input Area -->
-                <div class="p-3 border-t bg-white flex items-center space-x-2">
+                <div v-if="showPlanFeedbackFab" class="plan-feedback-float">
+                    <button
+                        class="plan-feedback-btn"
+                        @click="openFeedbackModal(selectedGuide)"
+                    >
+                        行动反馈
+                    </button>
+                </div>
+            </div>
+
+            <!-- GUIDE CAROUSEL MODAL -->
+            <div v-if="showGuideModal" class="fixed inset-0 z-[70] flex items-center justify-center">
+                <div class="absolute inset-0 bg-black/80 backdrop-blur-sm" @click="closeGuideModal"></div>
+                <div class="bg-white rounded-2xl w-full max-w-sm mx-6 relative z-10 overflow-hidden flex flex-col shadow-2xl animate-scale-up">
+                    
+                    <!-- Carousel Content -->
+                    <div class="relative w-full aspect-[3/4] bg-white">
+                        <transition-group name="slide-fade">
+                            <!-- Slide 1: 随时聊天 -->
+                            <div v-if="currentGuideStep === 0" key="0" class="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-gradient-to-b from-violet-50 to-white">
+                                <div class="w-full max-w-[280px] flex flex-col gap-3 mb-6">
+                                    <!-- AI Bubble -->
+                                    <div class="flex items-start gap-2">
+                                        <div class="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 border border-gray-100 shadow-sm">
+                                            <img src="./assets/xiaohua.png" class="w-full h-full object-cover">
+                                        </div>
+                                        <div class="bg-white px-3 py-2 rounded-2xl rounded-tl-none shadow-sm border border-gray-100 text-xs text-gray-700 text-left">
+                                            收到！正在为你生成专属攻略，请稍候...
+                                        </div>
+                                    </div>
+                                    <!-- User Bubble -->
+                                    <div class="flex items-start justify-end gap-2">
+                                        <div class="bg-violet-600 px-3 py-2 rounded-2xl rounded-tr-none shadow-sm text-xs text-white text-left">
+                                            军师，这我该怎么回？
+                                        </div>
+                                        <div class="w-8 h-8 rounded-full bg-gray-200 flex-shrink-0 flex items-center justify-center text-xs text-gray-500 font-bold">
+                                            我
+                                        </div>
+                                    </div>
+                                    <!-- AI Typing -->
+                                    <div class="flex items-start gap-2">
+                                        <div class="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 border border-gray-100 shadow-sm">
+                                            <img src="./assets/xiaohua.png" class="w-full h-full object-cover">
+                                        </div>
+                                        <div class="bg-white px-3 py-2 rounded-2xl rounded-tl-none shadow-sm border border-gray-100 flex items-center gap-1 h-8">
+                                            <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></div>
+                                            <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.15s"></div>
+                                            <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.3s"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <h3 class="text-2xl font-bold text-gray-800 mb-3">24小时贴身军师</h3>
+                                <p class="text-gray-500 text-sm leading-relaxed">
+                                    无论是聊天回复、情感现状分析<br>下一步行动...<br>我都在这等着你
+                                </p>
+                            </div>
+
+                            <!-- Slide 2: 补充信息 -->
+                            <div v-if="currentGuideStep === 1" key="1" class="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-gradient-to-b from-blue-50 to-white">
+                                <div class="w-full max-w-[260px] bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden mb-8 transform scale-105">
+                                    <!-- Card Header -->
+                                    <div class="flex items-center justify-between p-3 border-b border-gray-50">
+                                        <div class="flex items-center gap-2">
+                                            <div class="w-6 h-6 rounded bg-violet-600 flex items-center justify-center">
+                                                <svg viewBox="0 0 24 24" class="w-3 h-3 text-white" fill="none" stroke="currentColor" stroke-width="3">
+                                                    <path d="M12 5v14M5 12h14" stroke-linecap="round"/>
+                                                </svg>
+                                            </div>
+                                            <span class="text-sm font-bold text-gray-800">信息补充</span>
+                                        </div>
+                                        <svg class="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                                        </svg>
+                                    </div>
+                                    <!-- Card Body -->
+                                    <div class="p-3 space-y-3">
+                                        <div class="text-left">
+                                            <div class="text-[10px] font-bold text-gray-800 mb-1">信息标题</div>
+                                            <div class="text-[10px] text-gray-400 truncate">请补充第一个信息标题</div>
+                                        </div>
+                                        <div class="text-left">
+                                            <div class="text-[10px] font-bold text-gray-800 mb-1">信息明细</div>
+                                            <div class="text-[10px] text-gray-400 truncate">点击填写双方档案与诉求</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <h3 class="text-2xl font-bold text-gray-800 mb-3">知己知彼，百战百胜</h3>
+                                <p class="text-gray-500 text-sm leading-relaxed">
+                                    为了制定更精准的情感策略<br>我会适时向你提问各类信息<br>信息越全，胜算越大
+                                </p>
+                            </div>
+
+                            <!-- Slide 3: 查看报告 -->
+                            <div v-if="currentGuideStep === 2" key="2" class="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-gradient-to-b from-purple-50 to-white">
+                                <div class="w-full max-w-[260px] mb-10">
+                                    <!-- Mock Tab Bar -->
+                                    <div class="flex justify-center mb-3">
+                                        <div class="bg-white/80 backdrop-blur rounded-full p-1 flex gap-1 shadow-sm border border-gray-100">
+                                            <div class="px-4 py-1.5 rounded-full text-xs font-bold text-gray-400">小话</div>
+                                            <div class="px-4 py-1.5 rounded-full bg-white text-xs font-bold text-gray-900 shadow-sm border border-gray-100">规划</div>
+                                        </div>
+                                    </div>
+
+                                    <!-- AI Bubble (Under Tabs) -->
+                                    <div class="flex items-start gap-2 max-w-[220px] mb-3 animate-bounce" style="animation-duration: 3s;">
+                                        <div class="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 border border-gray-100 shadow-sm bg-white">
+                                            <img src="./assets/xiaohua.png" class="w-full h-full object-cover">
+                                        </div>
+                                        <div class="bg-white px-3 py-2 rounded-2xl rounded-tl-none shadow-md border border-gray-100 text-[10px] text-gray-700 text-left">
+                                            已为你生成情感分析和下一步计划...
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Mock Cards Stack -->
+                                    <div class="flex flex-col gap-2 relative">
+                                        <!-- Status Card -->
+                                        <div class="bg-white rounded-xl p-3 shadow-sm border border-gray-100 text-left">
+                                            <div class="text-xs font-bold text-gray-800 mb-1">当前关系阶段</div>
+                                            <div class="text-[10px] text-gray-500 leading-relaxed">
+                                                暧昧萌芽期：你们目前处于职场弱连接阶段...
+                                            </div>
+                                        </div>
+                                        <!-- Guide Card -->
+                                        <div class="bg-white rounded-xl p-3 shadow-sm border border-gray-100 text-left opacity-90">
+                                            <div class="text-xs font-bold text-gray-800 mb-1">行动指南</div>
+                                            <div class="text-[10px] text-gray-500 leading-relaxed">
+                                                行动一：朋友圈互动 - 发一张精致的周末brunch照片...
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- User Bubble (Below Cards; no overlap with guides) -->
+                                    <div class="flex items-start justify-end gap-2 mt-3 max-w-[200px] ml-auto animate-bounce" style="animation-duration: 3s; animation-delay: 1.5s;">
+                                        <div class="bg-violet-600 px-3 py-2 rounded-2xl rounded-tr-none shadow-md text-[10px] text-white text-left">
+                                            收到！我将立刻执行
+                                        </div>
+                                        <div class="w-8 h-8 rounded-full bg-gray-200 flex-shrink-0 flex items-center justify-center text-xs text-gray-500 font-bold border border-white shadow-sm">
+                                            我
+                                        </div>
+                                    </div>
+                                </div>
+                                <h3 class="text-2xl font-bold text-gray-800 mb-3 mt-2">分析现状，制定行动方案</h3>
+                                <p class="text-gray-500 text-sm leading-relaxed">
+                                    精准分析双方现状&识别情感陷阱<br>
+                                    为你制定最佳行动方案<br>
+                                    可在顶部「规划」Tab内查看
+                                </p>
+                            </div>
+
+                            <!-- Slide 4: 执行行动 -->
+                            <div v-if="currentGuideStep === 3" key="3" class="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-gradient-to-b from-green-50 to-white">
+                                <div class="w-24 h-24 bg-white rounded-full shadow-lg flex items-center justify-center mb-6 text-5xl border-4 border-green-100">
+                                    ✅
+                                </div>
+                                <h3 class="text-2xl font-bold text-gray-800 mb-3">执行任务，反馈迭代</h3>
+                                <p class="text-gray-500 text-sm leading-relaxed">
+                                    领取专属行动指南<br>完成后记得回来反馈<br>我会调整下一步计划
+                                </p>
+                                <div class="mt-8 flex items-center gap-2 text-gray-300 text-xs">
+                                    <span class="px-2 py-1 bg-gray-100 rounded">执行</span>
+                                    <span>→</span>
+                                    <span class="px-2 py-1 bg-green-100 text-green-600 font-bold rounded border border-green-200">反馈</span>
+                                    <span>→</span>
+                                    <span class="px-2 py-1 bg-gray-100 rounded">新计划</span>
+                                </div>
+                            </div>
+                        </transition-group>
+                    </div>
+
+                    <!-- Footer / Dots -->
+                    <div class="p-6 pt-2 bg-white flex flex-col items-center">
+                        <div class="flex space-x-2 mb-6">
+                            <div v-for="i in 4" :key="i" 
+                                class="w-2 h-2 rounded-full transition-colors duration-300"
+                                :class="(i-1) === currentGuideStep ? 'bg-violet-600 w-4' : 'bg-gray-200'"
+                            ></div>
+                        </div>
+                        
+                        <div class="w-full flex gap-3">
+                            <button 
+                                v-if="currentGuideStep > 0"
+                                @click="prevGuideStep"
+                                class="flex-1 bg-white border-2 border-gray-100 text-gray-500 font-bold py-2.5 rounded-full text-sm hover:bg-gray-50 transition-colors"
+                            >
+                                上一张
+                            </button>
+                            <button 
+                                @click="nextGuideStep"
+                                class="onboarding-btn flex-1 justify-center !mt-0"
+                            >
+                                {{ currentGuideStep === 3 ? '生成情感分析' : '下一张' }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Global Input Area -->
+            <div class="global-input-bar z-20">
+                <div class="chatbar-shell">
+                    <!-- Photo Upload Button (keeps same interaction) -->
+                    <button 
+                        @click="triggerGeneralImageUpload"
+                        class="chatbar-upload-btn"
+                        title="上传图片"
+                        aria-label="上传图片"
+                    >
+                        <img src="./assets/chat_upload_icon.png" alt="" aria-hidden="true" />
+                    </button>
+                    
+                    <!-- Hidden File Input for General Upload -->
+                    <input 
+                        type="file" 
+                        ref="generalFileInput"
+                        accept="image/*"
+                        @change="handleGeneralImageSelect"
+                        class="hidden"
+                    >
+
                     <input 
                         v-model="inputMessage" 
-                        @keyup.enter="sendMessage"
+                        @keyup.enter="sendMessageAndSwitch"
                         type="text" 
-                        placeholder="请输入您的情感问题..." 
-                        data-testid="chat-input"
-                        class="flex-1 bg-gray-100 border-0 rounded-full px-4 py-2.5 text-sm focus:ring-2 focus:ring-violet-500 focus:outline-none"
+                        placeholder="请输入 您的情感问题..." 
+                        class="chatbar-input"
                         :disabled="isLoading"
                     >
                     <button 
-                        @click="sendMessage"
+                        @click="sendMessageAndSwitch"
                         :disabled="!inputMessage.trim() || isLoading"
-                        data-testid="chat-send-btn"
-                        class="bg-violet-600 text-white w-10 h-10 rounded-full flex items-center justify-center hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        class="chatbar-send-btn"
+                        aria-label="发送"
                     >
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                            <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+                            <path d="M3.5 11.2L20.5 4.4c.6-.24 1.18.34.94.94l-6.8 17c-.22.55-1.02.56-1.26.02l-2.5-5.4a.8.8 0 00-.4-.4l-5.4-2.5c-.54-.25-.53-1.04.02-1.26z" fill="white"/>
                         </svg>
                     </button>
                 </div>
@@ -975,137 +2156,17 @@
                 @click="closeAllOverlays"
             ></div>
 
-            <!-- STATUS DRAWER (Top Down) -->
-            <div class="top-drawer" :class="{ 'open': showStatusDrawer }">
-                <div class="p-4 border-b flex justify-between items-center bg-orange-50">
-                    <h3 class="font-bold text-gray-800 flex items-center">
-                        <span class="w-6 h-6 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-xs mr-2 border border-orange-200">01</span>
-                        当前现状
-                    </h3>
-                    <button @click="showStatusDrawer = false" class="text-gray-400 hover:text-gray-600">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
-                        </svg>
-                    </button>
-                </div>
-                <div class="flex-1 overflow-y-auto p-4 bg-gray-50">
-                    <!-- Stage Card -->
-                    <div class="bg-white p-4 rounded-xl shadow-sm mb-4">
-                        <h3 class="font-bold text-gray-800 mb-2 text-sm">当前关系阶段</h3>
-                        <div class="bg-orange-50 p-4 rounded-lg flex items-center justify-center space-x-2 border border-orange-100">
-                            <span class="text-2xl">🤝</span>
-                            <span class="text-orange-600 font-bold text-lg">{{ state.status_report ? '已生成' : '待分析' }}</span>
-                        </div>
-                        <p class="text-xs text-gray-400 mt-2 text-center">基于对话内容自动分析</p>
-                    </div>
-
-                    <!-- Analysis Content -->
-                    <div v-if="state.status_report" class="bg-white p-4 rounded-xl shadow-sm">
-                        <div class="flex items-center space-x-2 mb-3">
-                            <span class="bg-violet-600 text-white text-xs px-2 py-0.5 rounded">重点分析</span>
-                        </div>
-                        <div class="markdown-body text-sm text-gray-600 leading-relaxed" v-html="renderMarkdown(state.status_report)"></div>
-                    </div>
-                    <div v-else class="text-center py-8 text-gray-400">
-                        <p>还没有生成现状分析报告</p>
-                        <p class="text-xs mt-1">请在对话中多描述一些你们的情况</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- PLAN DRAWER (Top Down) -->
-            <div class="top-drawer" :class="{ 'open': showPlanDrawer }">
-                <div class="p-4 border-b flex justify-between items-center bg-pink-50">
-                    <h3 class="font-bold text-gray-800 flex items-center">
-                        <span class="w-6 h-6 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-xs mr-2 border border-pink-200">02</span>
-                        情感计划
-                    </h3>
-                    <button @click="showPlanDrawer = false" class="text-gray-400 hover:text-gray-600">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
-                        </svg>
-                    </button>
-                </div>
-                <div class="flex-1 overflow-y-auto p-4 bg-gray-50">
-                    <!-- Plan Info -->
-                    <div class="bg-white p-4 rounded-xl shadow-sm mb-4 border-l-4 border-pink-400">
-                        <h3 class="font-bold text-gray-800 flex justify-between text-sm">
-                            计划说明
-                        </h3>
-                        <p class="text-sm text-gray-600 mt-2">
-                            {{ state.action_plan ? '已为您生成专属情感计划' : '暂无计划，请先进行咨询' }}
-                        </p>
-                    </div>
-
-                    <!-- Action Plan Details -->
-                    <div v-if="state.action_plan" class="bg-white p-4 rounded-xl shadow-sm mb-4">
-                        <h4 class="font-bold text-gray-800 mb-3 text-sm">总体规划</h4>
-                        <div class="markdown-body text-sm text-gray-600" v-html="renderMarkdown(state.action_plan)"></div>
-                    </div>
-
-                    <!-- Action Guide Details -->
-                    <!-- 新版：支持多个指南 -->
-                    <div v-if="state.action_guides && state.action_guides.length > 0" class="space-y-4">
-                        <div v-for="(guide, idx) in state.action_guides" :key="guide.id || idx" 
-                             data-testid="guide-card"
-                             :data-guide-id="guide.id || idx"
-                             class="bg-white p-4 rounded-xl shadow-sm">
-                            <div class="flex justify-between items-start mb-3">
-                                <h4 class="font-bold text-gray-800 text-sm">
-                                    行动指南 {{ idx + 1 }}
-                                    <span class="ml-2 text-xs px-2 py-1 rounded" 
-                                          :class="{
-                                              'bg-yellow-100 text-yellow-800': guide.status === 'pending',
-                                              'bg-blue-100 text-blue-800': guide.status === 'in_progress',
-                                              'bg-green-100 text-green-800': guide.status === 'completed'
-                                          }">
-                                        {{ guide.status === 'pending' ? '待执行' : guide.status === 'in_progress' ? '执行中' : '已完成' }}
-                                    </span>
-                                </h4>
-                                <button v-if="canGiveFeedback(guide)" 
-                                        @click="openFeedbackModal(guide)"
-                                        data-testid="guide-feedback-btn"
-                                        class="px-3 py-1 bg-pink-500 text-white text-xs rounded hover:bg-pink-600 transition">
-                                    反馈
-                                </button>
-                            </div>
-                            <div class="markdown-body text-sm text-gray-600" 
-                                 v-html="renderMarkdown(guide.guide?.guide_content || guide.guide_content || '')"></div>
-                            
-                            <!-- 反馈总结模块 -->
-                            <div v-if="guide.feedback_data && guide.feedback_data.feedback_summary" 
-                                 class="mt-4 pt-4 border-t border-gray-100">
-                                <div class="flex items-start gap-2">
-                                    <span class="text-pink-500">💭</span>
-                                    <div>
-                                        <h5 class="text-xs font-semibold text-gray-500 mb-1">反馈总结</h5>
-                                        <p class="text-sm text-gray-700">{{ guide.feedback_data.feedback_summary }}</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- 旧版兼容：单个指南 -->
-                    <div v-else-if="state.action_guide" class="bg-white p-4 rounded-xl shadow-sm">
-                        <h4 class="font-bold text-gray-800 mb-3 text-sm">行动指南 (Action Guide)</h4>
-                        <div class="markdown-body text-sm text-gray-600" v-html="renderMarkdown(state.action_guide)"></div>
-                    </div>
-                    
-                    <div v-if="!state.action_plan && !state.action_guide && (!state.action_guides || state.action_guides.length === 0)" 
-                         class="text-center py-8 text-gray-400">
-                        <p>暂无行动计划</p>
-                        <p class="text-xs mt-1">请继续对话，我会为你制定策略</p>
-                    </div>
-                </div>
-            </div>
-
             <!-- INQUIRY MODAL (Bottom Up) -->
             <div class="bottom-modal" :class="{ 'open': showInquiryModal }">
                 <div class="p-4 border-b flex justify-between items-center flex-shrink-0 bg-white">
                     <h3 class="font-bold text-gray-800">🤔 需要更多信息</h3>
                     <button @click="showInquiryModal = false" class="text-gray-400 hover:text-gray-600">✕</button>
                 </div>
-                <div class="flex-1 overflow-y-auto p-4 bg-gray-50 min-h-0" v-if="inquiryCard && inquiryCard.questions">
+                <div
+                    class="flex-1 overflow-y-auto p-4 bg-gray-50 min-h-0"
+                    v-if="inquiryCard && inquiryCard.questions"
+                    :style="{ paddingBottom: modalContentPaddingBottom }"
+                >
                     <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
                         <p class="text-violet-700 font-medium mb-2">{{ inquiryCard.intro || '为了更好的帮助你，我需要了解以下信息：' }}</p>
                     </div>
@@ -1124,7 +2185,8 @@
                                     :placeholder="q.placeholder || '请输入...'"
                                     class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none"
                                     rows="4"
-                                    @focus="$event.target.style.height = 'auto'; $event.target.style.height = $event.target.scrollHeight + 'px'"
+                                    @focus="autoResizeTextarea"
+                                    @input="autoResizeTextarea"
                                 ></textarea>
                             </div>
                             
@@ -1236,7 +2298,8 @@
                                     :placeholder="q.placeholder || '请输入...'"
                                     class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none"
                                     rows="4"
-                                    @focus="$event.target.style.height = 'auto'; $event.target.style.height = $event.target.scrollHeight + 'px'"
+                                    @focus="autoResizeTextarea"
+                                    @input="autoResizeTextarea"
                                 ></textarea>
                                 <p class="text-xs text-gray-400 mt-2">（系统提示：该题型暂未适配，已按文本输入处理）</p>
                             </div>
@@ -1245,7 +2308,12 @@
                 </div>
                 
                 <!-- Fixed Submit Footer -->
-                <div class="p-4 border-t bg-white flex-shrink-0">
+                <div
+                    v-if="showInquiryModal"
+                    ref="inquiryFooterRef"
+                    class="bottom-modal-footer p-4 border-t bg-white flex-shrink-0"
+                    :style="{ bottom: `${modalFooterOffset}px` }"
+                >
                     <button 
                         @click="submitInquiry"
                         :disabled="!canSubmitInquiry"
@@ -1257,59 +2325,85 @@
             </div>
 
             <!-- FEEDBACK MODAL (Bottom Up) -->
-            <div class="bottom-modal" :class="{ 'open': showFeedbackModal }" data-testid="feedback-modal">
+            <div class="bottom-modal" :class="{ 'open': showFeedbackModal && (currentFeedbackGuide || isFeedbackFollowup) }" data-testid="feedback-modal">
                 <div class="p-4 border-b flex justify-between items-center flex-shrink-0 bg-white">
                     <h3 class="font-bold text-gray-800">📝 行动反馈</h3>
                     <button @click="closeFeedbackModal" data-testid="feedback-modal-close" class="text-gray-400 hover:text-gray-600">✕</button>
                 </div>
-                <div class="flex-1 overflow-y-auto p-4 bg-gray-50 min-h-0" v-if="currentFeedbackGuide">
-                    <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
-                        <h4 class="font-bold text-gray-800 mb-2 text-sm">任务：{{ currentFeedbackGuide.guide?.current_task || currentFeedbackGuide.title || '行动指南' }}</h4>
-                    </div>
-                    
-                    <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">完成状态</label>
-                        <select v-model="feedbackForm.completion_status" 
-                                :disabled="isFeedbackFollowup"
-                                data-testid="feedback-status-select"
-                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500">
-                            <option value="">请选择</option>
-                            <option value="success">成功</option>
-                            <option value="partial">部分完成</option>
-                            <option value="failed">失败</option>
-                            <option value="abandoned">放弃</option>
-                            <option value="other">其他</option>
-                        </select>
-                    </div>
-                    
-                    <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">完成详情</label>
-                        <textarea v-model="feedbackForm.completion_detail" 
-                                  :disabled="isFeedbackFollowup"
-                                  placeholder="请描述执行结果、对方的反应、遇到的问题等..."
-                                  rows="4"
-                                  data-testid="feedback-detail-textarea"
-                                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500"></textarea>
+                
+                <div
+                    class="flex-1 overflow-y-auto p-4 bg-gray-50 min-h-0"
+                    :style="{ paddingBottom: modalContentPaddingBottom }"
+                >
+                    <!-- Followup Question Mode -->
+                    <div v-if="isFeedbackFollowup">
+                        <div class="bg-violet-50 p-4 rounded-xl mb-4 border border-violet-100">
+                            <h4 class="font-bold text-violet-800 text-sm mb-2">军师追问</h4>
+                            <p class="text-sm text-gray-700">{{ feedbackQuestion }}</p>
+                        </div>
+                        <textarea 
+                            v-model="feedbackForm.followup_answer"
+                            placeholder="请输入你的回答..."
+                            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none"
+                            rows="4"
+                        ></textarea>
                     </div>
 
-                    <div v-if="feedbackQuestion" class="bg-white rounded-xl p-4 shadow-sm mb-4" data-testid="feedback-followup-block">
-                        <div class="text-sm font-medium text-gray-700 mb-2">追问</div>
-                        <div class="text-sm text-gray-600 mb-3" data-testid="feedback-followup-question">{{ feedbackQuestion }}</div>
-                        <textarea v-model="feedbackForm.followup_answer" 
-                                  placeholder="请在这里补充..."
-                                  rows="3"
-                                  data-testid="feedback-followup-textarea"
-                                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500"></textarea>
+                    <!-- Standard Feedback Mode -->
+                    <div v-else-if="currentFeedbackGuide" class="space-y-4">
+                        <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
+                            <h4 class="font-bold text-gray-800 mb-2 text-sm">任务：{{ feedbackGuideTitle }}</h4>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">完成状态</label>
+                            <div class="grid grid-cols-3 gap-2">
+                                <button 
+                                    v-for="status in ['success', 'partial', 'failed', 'abandoned', 'other']"
+                                    :key="status"
+                                    @click="feedbackForm.completion_status = status"
+                                    class="py-2 text-sm rounded-lg border transition-all"
+                                    :class="feedbackForm.completion_status === status ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-gray-600 border-gray-200 hover:border-violet-300'"
+                                >
+                                    {{ 
+                                        status === 'success' ? '成功' : 
+                                        status === 'partial' ? '部分完成' : 
+                                        status === 'failed' ? '失败' : 
+                                        status === 'abandoned' ? '放弃' : '其他' 
+                                    }}
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">详情描述</label>
+                            <textarea 
+                                v-model="feedbackForm.completion_detail"
+                                placeholder="请详细描述执行过程和结果..."
+                                class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none"
+                                rows="4"
+                            ></textarea>
+                        </div>
+                    </div>
+                    
+                    <!-- Empty State -->
+                    <div v-else class="text-center py-10 text-gray-400">
+                        <p>未选择行动指南</p>
                     </div>
                 </div>
                 
                 <!-- Fixed Submit Footer -->
-                <div class="p-4 border-t bg-white flex-shrink-0">
+                <div
+                    v-if="showFeedbackModal && (currentFeedbackGuide || isFeedbackFollowup)"
+                    ref="feedbackFooterRef"
+                    class="bottom-modal-footer p-4 border-t bg-white flex-shrink-0"
+                    :style="{ bottom: `${modalFooterOffset}px` }"
+                >
                     <button 
                         @click="submitFeedback"
                         :disabled="!canSubmitFeedback"
                         data-testid="feedback-submit-btn"
-                        class="w-full bg-pink-600 text-white py-3 rounded-full font-bold hover:bg-pink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-lg"
+                        class="w-full bg-violet-600 text-white py-3 rounded-full font-bold hover:bg-violet-700 disabled:bg-violet-300 disabled:text-white disabled:cursor-not-allowed transition-colors shadow-lg"
                     >
                         {{ isFeedbackFollowup ? '提交回答' : '提交反馈' }}
                     </button>
@@ -1364,16 +2458,24 @@
     </div>
 
     <script>
-        const { createApp, ref, computed, onMounted, nextTick, watch } = Vue;
+        const { createApp, ref, computed, onMounted, onBeforeUnmount, nextTick, watch } = Vue;
 
         createApp({
             setup() {
                 // Auth State
                 const currentUser = ref(null);
                 const showLogoutConfirm = ref(false);
+                const showUserMenu = ref(false);
+                const userMenuRef = ref(null);
 
                 const getToken = () => {
                     return localStorage.getItem('token') || '';
+                };
+
+                const buildAuthHeaders = () => {
+                    const token = getToken();
+                    if (!token) return {};
+                    return { 'Authorization': `Bearer ${token}` };
                 };
 
                 const getStoredUser = () => {
@@ -1392,7 +2494,8 @@
                 const checkAuth = async () => {
                     const token = getToken();
                     if (!token) {
-                        redirectToAuth();
+                        // Guest mode: allow using /api/chat without login
+                        currentUser.value = null;
                         return;
                     }
 
@@ -1405,14 +2508,16 @@
                         const res = await fetch('/api/auth/me', {
                             method: 'GET',
                             headers: {
-                                'Authorization': `Bearer ${token}`
+                                ...buildAuthHeaders()
                             }
                         });
 
                         if (!res.ok) {
+                            // Auth service may be disabled/misconfigured in dev.
+                            // Fall back to guest mode instead of hard redirect.
                             localStorage.removeItem('token');
                             localStorage.removeItem('user');
-                            redirectToAuth();
+                            currentUser.value = null;
                             return;
                         }
 
@@ -1423,24 +2528,47 @@
                             localStorage.setItem('user', JSON.stringify(user));
                         }
                     } catch (e) {
+                        // Network/auth error -> fall back to guest mode
                         localStorage.removeItem('token');
                         localStorage.removeItem('user');
-                        redirectToAuth();
+                        currentUser.value = null;
                     }
                 };
 
                 const handleLogout = () => {
+                    showUserMenu.value = false;
                     showLogoutConfirm.value = true;
                 };
 
                 const confirmLogout = () => {
                     localStorage.removeItem('token');
                     localStorage.removeItem('user');
+                    localStorage.removeItem('session_id');
+                    localStorage.removeItem('crusheGuideCompleted');
                     redirectToAuth();
                 };
 
                 const cancelLogout = () => {
                     showLogoutConfirm.value = false;
+                };
+
+                const toggleUserMenu = () => {
+                    showUserMenu.value = !showUserMenu.value;
+                };
+
+                const closeUserMenu = () => {
+                    showUserMenu.value = false;
+                };
+
+                const handleDocumentClick = (e) => {
+                    if (!showUserMenu.value) return;
+                    const el = userMenuRef.value;
+                    if (!el) {
+                        showUserMenu.value = false;
+                        return;
+                    }
+                    if (el.contains(e.target)) return;
+                    showUserMenu.value = false;
                 };
 
                 // UI State
@@ -1450,6 +2578,23 @@
                 const showFeedbackModal = ref(false);
                 const showDebug = ref(false);
                 const showContext = ref(false);
+
+
+                // New Tab State
+                const currentTab = ref('chat'); // 'chat' | 'plan'
+                const currentPlanTab = ref('status'); // 'status' | 'plan'
+                const swipeState = ref({
+                    active: false,
+                    startX: 0,
+                    startY: 0,
+                    lastX: 0,
+                    lastY: 0
+                });
+
+                const isSwipeInteractiveTarget = (target) => {
+                    if (!target || !target.closest) return false;
+                    return Boolean(target.closest('input, textarea, [contenteditable="true"]'));
+                };
 
                 // --- Studio Mode Config ---
                 // 如果你想配合 LangGraph Studio 使用，请将 useStudioMode 设为 true
@@ -1466,6 +2611,10 @@
                 const isLoading = ref(false);
                 const messagesContainer = ref(null);
                 const displayedMessageIds = ref(new Set()); // 防止 updates/values 重复展示同一回复
+                const taskMessageIds = ref(new Set()); // 防止重复 System Task 卡片
+                const assistantMessageIds = ref(new Set()); // 防止重复的普通提示
+                const CRUSHE_GUIDE_DONE_TOKEN = '[SYS:CRUSHE_GUIDE_DONE]';
+                const guideCompletionQueued = ref(false);
                 
                 // Data State
                 const state = ref({
@@ -1478,6 +2627,193 @@
                     preliminary_assessment: null,
                     debug_log: []
                 });
+
+                // Plan UI State (纯前端展示，不影响后端逻辑)
+                const selectedGuideIndex = ref(0);
+                const planDetailExpanded = ref(false);
+
+                const safeToText = (v) => {
+                    if (!v) return '';
+                    if (typeof v === 'string') return v;
+                    try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+                };
+
+                const pushSystemTaskOnce = (key, payload) => {
+                    if (taskMessageIds.value.has(key)) return;
+                    taskMessageIds.value.add(key);
+                    messages.value.push(payload);
+                };
+
+                const pushAssistantOnce = (key, content) => {
+                    if (assistantMessageIds.value.has(key)) return;
+                    assistantMessageIds.value.add(key);
+                    messages.value.push({ role: 'assistant', content });
+                };
+
+                const getInquiryTaskKey = (card) => {
+                    if (!card || !Array.isArray(card.questions)) return '';
+                    const qKeys = card.questions.map(q => q?.id || q?.question || '').join('|');
+                    const intro = (card.intro || '').slice(0, 30);
+                    return `inquiry_${qKeys}_${intro}`;
+                };
+
+                const disableLatestInquiryTask = () => {
+                    for (let i = messages.value.length - 1; i >= 0; i--) {
+                        const msg = messages.value[i];
+                        if (msg?.role === 'system_task' && msg.taskType === 'inquiry' && !msg.disabled) {
+                            msg.disabled = true;
+                            break;
+                        }
+                    }
+                };
+
+                const extractFirstMeaningfulLine = (md) => {
+                    const text = safeToText(md);
+                    if (!text) return '';
+                    const lines = text.split('\n').map(l => (l || '').trim()).filter(Boolean);
+                    for (const raw of lines) {
+                        if (raw.startsWith('```')) continue;
+                        const cleaned = raw
+                            .replace(/^#{1,6}\s*/, '')
+                            .replace(/^[>\-\*\+\s]+/, '')
+                            .replace(/\*\*/g, '')
+                            .replace(/`/g, '')
+                            .trim();
+                        if (cleaned) return cleaned;
+                    }
+                    return '';
+                };
+
+                const cleanMarkdownLine = (raw) => {
+                    if (!raw) return '';
+                    const t = String(raw).trim();
+                    if (!t || t.startsWith('```')) return '';
+                    return t
+                        .replace(/^#{1,6}\s*/, '')
+                        .replace(/^[>\-\*\+\s]+/, '')
+                        .replace(/\*\*/g, '')
+                        .replace(/`/g, '')
+                        .trim();
+                };
+
+                const planHeadline = computed(() => {
+                    const line = extractFirstMeaningfulLine(state.value?.action_plan);
+                    if (!line) return '待生成';
+                    return line.length > 16 ? line.slice(0, 16) + '…' : line;
+                });
+
+                const selectedGuide = computed(() => {
+                    const guides = state.value?.action_guides || [];
+                    if (!guides.length) return null;
+                    const idx = Math.min(Math.max(0, selectedGuideIndex.value), guides.length - 1);
+                    return guides[idx] || null;
+                });
+
+                const selectedGuideContent = computed(() => {
+                    const g = selectedGuide.value;
+                    if (!g) return '';
+                    return g.guide?.guide_content || g.guide_content || '';
+                });
+
+                const selectedGuideHeadlineFull = computed(() => {
+                    const headline = extractFirstMeaningfulLine(selectedGuideContent.value);
+                    return headline || '行动详情';
+                });
+
+                const selectedGuideHeadline = computed(() => {
+                    const headline = selectedGuideHeadlineFull.value;
+                    if (headline) return headline.length > 22 ? headline.slice(0, 22) + '…' : headline;
+                    return '行动详情';
+                });
+
+                const selectedGuideContentDisplay = computed(() => {
+                    const md = safeToText(selectedGuideContent.value);
+                    const headline = selectedGuideHeadlineFull.value;
+                    if (!md || !headline) return md || '';
+
+                    const lines = md.split('\n');
+                    // find first meaningful line index
+                    let firstIdx = -1;
+                    for (let i = 0; i < lines.length; i++) {
+                        const cleaned = cleanMarkdownLine(lines[i]);
+                        if (cleaned) { firstIdx = i; break; }
+                    }
+                    if (firstIdx === -1) return md;
+
+                    const firstClean = cleanMarkdownLine(lines[firstIdx]);
+                    if (firstClean && firstClean === headline) {
+                        // drop the duplicated headline line; also drop one following empty line if present
+                        const out = lines.slice(0, firstIdx).concat(lines.slice(firstIdx + 1));
+                        if (out[firstIdx] !== undefined && String(out[firstIdx]).trim() === '') {
+                            out.splice(firstIdx, 1);
+                        }
+                        return out.join('\n');
+                    }
+                    return md;
+                });
+
+                const selectGuide = (idx) => {
+                    selectedGuideIndex.value = idx;
+                    planDetailExpanded.value = false;
+                };
+
+                const switchTab = (tab) => {
+                    currentTab.value = tab;
+                    closeAllOverlays();
+                };
+
+                const onTabTouchStart = (event) => {
+                    const touch = event?.touches?.[0];
+                    if (!touch) return;
+                    if (isSwipeInteractiveTarget(event.target)) return;
+                    swipeState.value = {
+                        active: true,
+                        startX: touch.clientX,
+                        startY: touch.clientY,
+                        lastX: touch.clientX,
+                        lastY: touch.clientY
+                    };
+                };
+
+                const onTabTouchMove = (event) => {
+                    if (!swipeState.value.active) return;
+                    const touch = event?.touches?.[0];
+                    if (!touch) return;
+                    swipeState.value.lastX = touch.clientX;
+                    swipeState.value.lastY = touch.clientY;
+                };
+
+                const onTabTouchEnd = () => {
+                    const state = swipeState.value;
+                    if (!state.active) return;
+                    swipeState.value.active = false;
+
+                    const dx = state.lastX - state.startX;
+                    const dy = state.lastY - state.startY;
+                    const absX = Math.abs(dx);
+                    const absY = Math.abs(dy);
+                    const swipeThreshold = 60;
+
+                    if (absX < swipeThreshold) return;
+                    if (absX < absY * 1.2) return;
+
+                    if (dx < 0 && currentTab.value === 'chat') {
+                        switchTab('plan');
+                        return;
+                    }
+                    if (dx > 0 && currentTab.value === 'plan') {
+                        switchTab('chat');
+                    }
+                };
+
+                const switchPlanTab = (tab) => {
+                    currentPlanTab.value = tab;
+                    planDetailExpanded.value = false;
+                    const guides = state.value?.action_guides || [];
+                    if (guides.length && selectedGuideIndex.value > guides.length - 1) {
+                        selectedGuideIndex.value = 0;
+                    }
+                };
 
                 // Context Debug State
                 const contextData = ref(null);
@@ -1506,6 +2842,7 @@
                 const inquiryCard = ref(null);
                 const inquiryAnswers = ref({});
                 const fileInputRefs = ref({});  // 文件输入框引用
+                const generalFileInput = ref(null);
                 
                 // Feedback Form State
                 const currentFeedbackGuide = ref(null);
@@ -1518,7 +2855,15 @@
                 const feedbackStatus = ref(null);
                 const isFeedbackSubmitting = ref(false);
 
-                const sessionId = ref('session_' + Math.random().toString(36).substr(2, 9));
+                const getOrCreateGuestSessionId = () => {
+                    const existing = localStorage.getItem('session_id') || '';
+                    if (existing) return existing;
+                    const sid = 'session_' + Math.random().toString(36).substr(2, 9);
+                    localStorage.setItem('session_id', sid);
+                    return sid;
+                };
+
+                const sessionId = ref(getOrCreateGuestSessionId());
                 // Studio thread_id（需要符合 UUID，否则会报 400）
                 const studioThreadId = ref(null);
 
@@ -1571,6 +2916,9 @@
                             }
                         } else {
                             console.log('[History] No existing thread_id found for this user');
+                            const freshSessionId = `session_${Math.random().toString(36).slice(2, 11)}`;
+                            sessionId.value = freshSessionId;
+                            localStorage.setItem('session_id', freshSessionId);
                         }
                     } catch (e) {
                         console.error('[History] Error during history restoration:', e);
@@ -1584,12 +2932,15 @@
                 
                 // 规范化选项：将对象数组转换为 {value, label} 格式，字符串数组转换为 {value: str, label: str}
                 const normalizeOption = (opt) => {
+                    if (opt === null || opt === undefined) {
+                        return { value: '', label: '' };
+                    }
                     if (typeof opt === 'string') {
                         return { value: opt, label: opt };
-                    } else if (typeof opt === 'object' && opt !== null) {
+                    } else if (typeof opt === 'object') {
                         return {
-                            value: opt.value !== undefined ? opt.value : opt.label || JSON.stringify(opt),
-                            label: opt.label !== undefined ? opt.label : opt.value || JSON.stringify(opt)
+                            value: opt.value !== undefined ? opt.value : (opt.label || JSON.stringify(opt)),
+                            label: opt.label !== undefined ? opt.label : (opt.value || JSON.stringify(opt))
                         };
                     }
                     return { value: String(opt), label: String(opt) };
@@ -1865,7 +3216,7 @@
                                 const idx = parseInt(id);
                                 if (idx >= 0 && idx < summaries.length) {
                                     const summary = summaries[idx];
-                                    content = (summary.summary || '（无摘要内容）') + '\n\n---\n\n**注意:** 原始消息在压缩后被删除，仅保留摘要。';
+                                    content = (summary.summary || '（无摘要内容）') + '\n\n---\n\n**注意:** 原始消息在压缩后被删除，仅保留摘要.';
                                     metadata = {
                                         index: idx,
                                         turn_count: summary.turn_count,
@@ -2023,7 +3374,7 @@
                         const response = await fetch('/api/upload-screenshot', {
                             method: 'POST',
                             headers: {
-                                'Authorization': `Bearer ${getToken()}`
+                                ...buildAuthHeaders()
                             },
                             body: formData
                         });
@@ -2071,6 +3422,9 @@
                     showPlanDrawer.value = false;
                     showInquiryModal.value = false;
                     showFeedbackModal.value = false;
+                    currentFeedbackGuide.value = null;
+                    feedbackQuestion.value = '';
+                    feedbackStatus.value = null;
                 };
 
                 // Openers
@@ -2090,14 +3444,184 @@
                 };
 
                 // Task Click Handler
-                const handleTaskClick = (task) => {
+                const handleTaskClick = async (task) => {
+                    // Force close any open modals to prevent state leakage
+                    closeAllOverlays();
+                    // Ensure feedback modal is closed explicitly
+                    showFeedbackModal.value = false;
+                    
+                    await nextTick();
+
                     if (task.taskType === 'status') {
-                        showStatusDrawer.value = true;
+                        switchTab('plan');
+                        switchPlanTab('status');
+                        // Optional: scroll to status analysis
+                    } else if (task.taskType === 'strategy') {
+                        // 新增：总体规划卡片
+                        switchTab('plan');
+                        switchPlanTab('status');
+                        // Optional: scroll to plan analysis
+                        setTimeout(() => {
+                            const el = document.getElementById('plan-analysis');
+                            if (el) el.scrollIntoView({ behavior: 'smooth' });
+                        }, 100);
                     } else if (task.taskType === 'plan') {
-                        showPlanDrawer.value = true;
+                        // 对应行动指南
+                        switchTab('plan');
+                        switchPlanTab('plan');
                     } else if (task.taskType === 'inquiry') {
                         showInquiryModal.value = true;
                     }
+                };
+
+                // ====== Task Card (Chat) helpers: style-only, keep interactions unchanged ======
+                const getTaskCardTitle = (task) => {
+                    const type = task?.taskType;
+                    if (type === 'inquiry') return '信息补充';
+                    if (type === 'status') return '现状分析报告';
+                    if (type === 'strategy') return '专属情感计划';
+                    if (type === 'plan') return '行动指南';
+                    return task?.title || '';
+                };
+
+                const getTaskCardSectionLabel = (taskType, slot) => {
+                    const map = {
+                        inquiry: { a: '信息标题', b: '信息明细' },
+                        status: { a: '现状分析标题', b: '现状分析内容' },
+                        strategy: { a: '规划标题', b: '分析内容' },
+                        plan: { a: '任务目标', b: '执行步骤' },
+                    };
+                    return map?.[taskType]?.[slot] || (slot === 'a' ? '标题' : '内容');
+                };
+
+                const extractMeaningfulLines = (markdownText) => {
+                    if (!markdownText || typeof markdownText !== 'string') return [];
+                    const lines = markdownText.split('\n');
+                    const out = [];
+                    for (const raw of lines) {
+                        if (!raw) continue;
+                        if (raw.trim().startsWith('```')) continue;
+                        const cleaned = raw
+                            .replace(/^#{1,6}\s*/, '')
+                            .replace(/^[>\-\*\+\s]+/, '')
+                            .replace(/\*\*/g, '')
+                            .replace(/`/g, '')
+                            .trim();
+                        if (cleaned) out.push(cleaned);
+                        if (out.length >= 8) break; // avoid overly long extraction
+                    }
+                    return out;
+                };
+
+                const getTaskCardSectionText = (task, slot) => {
+                    const type = task?.taskType;
+
+                    if (type === 'inquiry') {
+                        const q0 = inquiryCard.value?.questions?.[0] || null;
+                        const title = (q0?.title || q0?.info_title || q0?.label || q0?.name || q0?.question || '').trim?.() || '';
+                        const detail = (q0?.question_detail || q0?.detail || q0?.description || q0?.question || q0?.placeholder || '').trim?.() || '';
+                        if (slot === 'a') return title || '请补充第一个信息标题';
+                        return detail || task?.desc || '点击填写信息明细';
+                    }
+
+                    if (type === 'status') {
+                        const lines = extractMeaningfulLines(state.value?.status_report || '');
+                        if (slot === 'a') return lines[0] || '待生成';
+                        return (lines.slice(1).join(' ') || task?.desc || '点击查看现状分析内容').trim();
+                    }
+
+                    if (type === 'strategy') {
+                        const lines = extractMeaningfulLines(state.value?.action_plan || '');
+                        if (slot === 'a') return lines[0] || '待生成';
+                        return (lines.slice(1).join(' ') || task?.desc || '点击查看专属情感计划').trim();
+                    }
+
+                    if (type === 'plan') {
+                        const md = selectedGuideContent.value || state.value?.action_guide || '';
+                        const lines = extractMeaningfulLines(md);
+                        if (slot === 'a') return lines[0] || '待生成';
+                        return (lines.slice(1).join(' ') || task?.desc || '点击查看行动步骤').trim();
+                    }
+
+                    return slot === 'a' ? (task?.title || '') : (task?.desc || '');
+                };
+
+                // General Image Upload
+                const triggerGeneralImageUpload = () => {
+                    if (generalFileInput.value) {
+                        generalFileInput.value.click();
+                    }
+                };
+
+                const handleGeneralImageSelect = async (event) => {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    
+                    // Switch to chat immediately
+                    switchTab('chat');
+                    await nextTick();
+                    await scrollToBottom();
+                    
+                    // Create a temporary message to show uploading
+                    const tempId = Date.now();
+                    messages.value.push({
+                        role: 'user',
+                        content: '📷 [正在上传图片...]',
+                        id: tempId
+                    });
+                    await scrollToBottom();
+                    
+                    try {
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        formData.append('screenshot_type', 'universal_screenshot_analysis');
+                        formData.append('session_id', sessionId.value);
+                        
+                        const response = await fetch('/api/upload-screenshot', {
+                            method: 'POST',
+                            headers: { ...buildAuthHeaders() },
+                            body: formData
+                        });
+                        
+                        const result = await response.json();
+                        
+                        // Remove temp message
+                        const idx = messages.value.findIndex(m => m.id === tempId);
+                        if (idx > -1) messages.value.splice(idx, 1);
+                        
+                        if (result.success) {
+                            // Send the analysis result as a message
+                            const messageContent = `[用户上传了一张图片]\n\n图片内容分析：\n${result.text}`;
+                            inputMessage.value = messageContent;
+                            await sendMessage();
+                        } else {
+                             messages.value.push({
+                                role: 'assistant',
+                                content: `图片上传失败: ${result.error || '未知错误'}`
+                            });
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        // Remove temp message if still there
+                        const idx = messages.value.findIndex(m => m.id === tempId);
+                        if (idx > -1) messages.value.splice(idx, 1);
+                        
+                         messages.value.push({
+                            role: 'assistant',
+                            content: `图片上传出错: ${e.message}`
+                        });
+                    }
+                    
+                    // Reset input
+                    event.target.value = '';
+                };
+
+                const sendMessageAndSwitch = async () => {
+                    if (currentTab.value !== 'chat') {
+                        switchTab('chat');
+                        await nextTick();
+                    }
+                    await sendMessage();
                 };
 
                 // Render Preliminary Assessment
@@ -2168,6 +3692,17 @@
                     `;
                 };
 
+                const notifyGuideCompleted = async () => {
+                    if (guideCompletionSent.value) return;
+                    if (isLoading.value) {
+                        guideCompletionQueued.value = true;
+                        return;
+                    }
+                    inputMessage.value = CRUSHE_GUIDE_DONE_TOKEN;
+                    await sendMessage(true); // skipPush=true (do not show token)
+                    guideCompletionSent.value = true;
+                };
+
                 // Logic for detecting changes
                 const processStateUpdate = (newState) => {
                     if (!newState) return;
@@ -2175,9 +3710,72 @@
                     const oldState = state.value;
                     let hasUpdates = false;
 
+                    // ====== Gate first report behind Crushe guide ======
+                    // Desired flow:
+                    // 1) User fills basic info
+                    // 2) Backend keeps asking inquiry until info is enough
+                    // 3) When outputs are ready (status/plan/guides), show Crushe guide first
+                    // 4) After guide is finished, reveal the report/plan
+                    const isFirstReportPhase = !oldState.status_report;
+                    const onboardingCompleted = Boolean(newState.onboarding_completed);
+                    const hasPendingInquiry = Boolean(
+                        newState.inquiry_card &&
+                        Array.isArray(newState.inquiry_card.questions) &&
+                        newState.inquiry_card.questions.length > 0
+                    );
+                    const isInquiryModalActive = showInquiryModal.value || Boolean(inquiryCard.value?.questions?.length);
+                    const pendingCrusheGuide = Boolean(newState.pending_crushe_guide);
+                    const hasReadyOutputs = Boolean(
+                        newState.status_report ||
+                        newState.action_plan ||
+                        newState.action_guide ||
+                        (Array.isArray(newState.action_guides) && newState.action_guides.length > 0)
+                    );
+
+                    const promptGuideIfNeeded = () => {
+                        if (guidePrompted.value || hasPendingInquiry || isInquiryModalActive) return;
+                        guidePrompted.value = true;
+                        messages.value.push({
+                            role: 'assistant',
+                            content: '我将为您生成详细的情感攻略，在此之前，为了让我们双方在后续的攻略过程中合作得更好，请先花 30 秒看完这份《Crushe使用指南》~',
+                            showGuideButton: true
+                        });
+                        hasUpdates = true;
+                    };
+
+                    if (pendingCrusheGuide) {
+                        if (guideCompleted.value) {
+                            notifyGuideCompleted();
+                        } else {
+                            promptGuideIfNeeded();
+                        }
+                    }
+
+                    if (isFirstReportPhase && hasReadyOutputs && !guideCompleted.value) {
+                        pendingGatedOutputs.value = {
+                            ...(pendingGatedOutputs.value || {}),
+                            ...(newState.status_report ? { status_report: newState.status_report } : {}),
+                            ...(newState.action_plan ? { action_plan: newState.action_plan } : {}),
+                            ...(newState.action_guide ? { action_guide: newState.action_guide } : {}),
+                            ...(newState.action_guides ? { action_guides: newState.action_guides } : {})
+                        };
+
+                        // Suppress showing outputs before the guide is completed
+                        newState.status_report = oldState.status_report;
+                        newState.action_plan = oldState.action_plan;
+                        newState.action_guide = oldState.action_guide;
+                        newState.action_guides = oldState.action_guides;
+
+                        // Prompt the guide only once
+                        if (onboardingCompleted) {
+                            promptGuideIfNeeded();
+                        }
+                    }
+
                     // Check Status Update
                     if (newState.status_report && newState.status_report !== oldState.status_report) {
-                        messages.value.push({
+                        pushAssistantOnce(`status_preface_${newState.status_report}`, '这是基于你提供的信息生成的现状分析报告：');
+                        pushSystemTaskOnce(`status_${newState.status_report}`, {
                             role: 'system_task',
                             taskType: 'status',
                             label: 'STATUS REPORT',
@@ -2189,12 +3787,12 @@
 
                     // Check Plan Update
                     if (newState.action_plan && newState.action_plan !== oldState.action_plan) {
-                        messages.value.push({
+                        pushSystemTaskOnce(`plan_${newState.action_plan}`, {
                             role: 'system_task',
-                            taskType: 'plan',
+                            taskType: 'strategy',
                             label: 'PLANNING',
                             title: oldState.action_plan ? '情感计划已更新' : '专属情感计划已生成',
-                            desc: '点击查看最新的行动策略与指南'
+                            desc: '点击查看最新的情感计划'
                         });
                         hasUpdates = true;
                     }
@@ -2206,7 +3804,7 @@
                         
                         // 检查是否有新指南
                         if (newGuides.length > oldGuides.length) {
-                            messages.value.push({
+                            pushSystemTaskOnce(`guide_count_${newGuides.length}`, {
                                 role: 'system_task',
                                 taskType: 'plan',
                                 label: 'ACTION GUIDE',
@@ -2247,6 +3845,9 @@
                              });
                              hasUpdates = true;
                          }
+                         if (!guideCompleted.value) {
+                             promptGuideIfNeeded();
+                         }
                     }
 
                     // Check Inquiry
@@ -2265,7 +3866,8 @@
                             }
                         }
 
-                        messages.value.push({
+                        const inquiryKey = getInquiryTaskKey(newState.inquiry_card);
+                        pushSystemTaskOnce(inquiryKey || `inquiry_${Date.now()}`, {
                             role: 'system_task',
                             taskType: 'inquiry',
                             label: 'QUESTION',
@@ -2384,10 +3986,16 @@
                         // Close modal
                         showInquiryModal.value = false;
                         inquiryCard.value = null;
-                        
-                        // Send as user message
+                        disableLatestInquiryTask();
+
+                        // Always send answers to backend immediately.
+                        // Backend will keep asking inquiry until info is enough.
+                        // The Crushe guide will be shown later (gated) right before revealing the first report.
+                        messages.value.push({ role: 'user', content: formattedAnswer });
+                        await scrollToBottom();
                         inputMessage.value = formattedAnswer;
-                        await sendMessage();
+                        await sendMessage(true); // skipPush=true (already pushed)
+
                     } catch (error) {
                         console.error('Submit inquiry error:', error);
                     }
@@ -2400,11 +4008,14 @@
                     }
                 };
 
-                const sendMessage = async () => {
+                const sendMessage = async (skipPush = false) => {
                     const content = inputMessage.value.trim();
                     if (!content || isLoading.value) return;
 
-                    messages.value.push({ role: 'user', content });
+                    if (!skipPush) {
+                        messages.value.push({ role: 'user', content });
+                    }
+                    
                     inputMessage.value = '';
                     isLoading.value = true;
                     await scrollToBottom();
@@ -2439,8 +4050,8 @@
                                         user_message: content,
                                         // [FIX] Studio Mode 下可能不会经过 server.py:/api/chat 的归零逻辑，
                                         // 导致 _iteration_count 跨轮累积触发 MAX_NODE_STEPS_PER_TURN，
-                                        // 表现为 router "to main_agent" 但被强制 end。
-                                        // 这里每轮显式归零，保留同一 thread 的上下文不变。
+                                        // 表现为 router "to main_agent" 但被强制 end.
+                                        // 这里每轮显式归零，保留同一 thread 的上下文不变.
                                         _iteration_count: 0,
                                         // 如果是第一次，LangGraph 会自动调用 create_initial_state
                                         // 如果不是第一次，它会合并到现有状态
@@ -2547,9 +4158,9 @@
                             // === 原有逻辑: 调用本地 server.py ===
                         const response = await fetch('/api/chat', {
                             method: 'POST',
-                            headers: { 
+                            headers: {
                                 'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${getToken()}`
+                                ...buildAuthHeaders(),
                             },
                             body: JSON.stringify({
                                 message: content,
@@ -2557,21 +4168,35 @@
                             })
                         });
 
-                        if (!response.ok) throw new Error('Network response was not ok');
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            throw new Error(`Network response was not ok: ${response.status} - ${errorText}`);
+                        }
 
                         const data = await response.json();
+                        console.log('[API Response]', data);
+                        
+                        let hasResponse = false;
                         
                         // 统一处理响应逻辑：优先使用结构化的 pending_responses
                         if (data.pending_responses && Array.isArray(data.pending_responses) && data.pending_responses.length > 0) {
                             data.pending_responses.forEach(resp => {
                                 if (resp && resp.content) {
                                     messages.value.push({ role: 'assistant', content: resp.content });
+                                    hasResponse = true;
                                 }
                             });
                         } 
                         // 如果 pending_responses 为空，但有 response 字符串（后端 Fallback），则使用它
                         else if (data.response) {
                             messages.value.push({ role: 'assistant', content: data.response });
+                            hasResponse = true;
+                        }
+                        
+                        if (!hasResponse && !data.state?.inquiry_card) {
+                            console.warn('No response content found in API result');
+                            // Optional: Show a generic message if absolutely nothing came back
+                            // messages.value.push({ role: 'assistant', content: '（AI 似乎没有回复，请重试或检查日志）' });
                         }
                         
                         // 3. 更新状态
@@ -2589,6 +4214,10 @@
                         messages.value.push({ role: 'assistant', content: `[错误] ${error.message}` });
                     } finally {
                         isLoading.value = false;
+                        if (guideCompletionQueued.value && !guideCompletionSent.value) {
+                            guideCompletionQueued.value = false;
+                            await notifyGuideCompleted();
+                        }
                         await scrollToBottom();
                     }
                 };
@@ -2604,7 +4233,45 @@
                     return true;
                 };
 
+                const getGuideStatusLabel = (status) => {
+                    const map = {
+                        pending: '待执行',
+                        in_progress: '执行中',
+                        completed: '已执行',
+                        cancelled: '已取消',
+                        expired: '已过期'
+                    };
+                    return map[String(status || '').trim()] || String(status || '');
+                };
+                const getGuideStatusClass = (status) => {
+                    return `is-${String(status || '').trim()}`;
+                };
+
+                const showPlanFeedbackFab = computed(() => {
+                    // Only show floating feedback button in: 规划 Tab -> 情感计划 subtab
+                    if (currentTab.value !== 'plan') return false;
+                    if (currentPlanTab.value !== 'plan') return false;
+                    const g = selectedGuide.value;
+                    return Boolean(g && canGiveFeedback(g));
+                });
+
+                const getFeedbackGuideTitle = (guide) => {
+                    if (!guide) return '行动指南';
+                    const md =
+                        guide?.guide?.guide_content ||
+                        guide?.guide_content ||
+                        guide?.guide?.content ||
+                        '';
+                    const headline = extractFirstMeaningfulLine(md);
+                    return headline || guide?.title || guide?.guide?.current_task || '行动指南';
+                };
+
+                const feedbackGuideTitle = computed(() => {
+                    return getFeedbackGuideTitle(currentFeedbackGuide.value);
+                });
+
                 const openFeedbackModal = (guide, prefill = null) => {
+                    if (!guide) return;
                     currentFeedbackGuide.value = guide;
                     feedbackForm.value = {
                         completion_status: prefill?.prefilled_status || '',
@@ -2631,6 +4298,74 @@
                 const isFeedbackFollowup = computed(() => {
                     return Boolean(feedbackQuestion.value);
                 });
+
+                const inquiryFooterRef = ref(null);
+                const feedbackFooterRef = ref(null);
+                const modalFooterOffset = ref(0);
+                const modalFooterHeight = ref(72);
+
+                const isBottomModalOpen = computed(() => {
+                    return showInquiryModal.value || (showFeedbackModal.value && (currentFeedbackGuide.value || isFeedbackFollowup.value));
+                });
+
+                const modalContentPaddingBottom = computed(() => {
+                    return `calc(1rem + ${modalFooterHeight.value}px)`;
+                });
+
+                const updateModalFooterOffset = () => {
+                    if (!window.visualViewport) {
+                        modalFooterOffset.value = 0;
+                        return;
+                    }
+                    const viewport = window.visualViewport;
+                    const keyboardOffset = window.innerHeight - viewport.height - viewport.offsetTop;
+                    modalFooterOffset.value = Math.max(0, Math.round(keyboardOffset));
+                };
+
+                const updateModalFooterHeight = () => {
+                    nextTick(() => {
+                        const el = inquiryFooterRef.value || feedbackFooterRef.value;
+                        if (!el) return;
+                        const nextHeight = Math.round(el.getBoundingClientRect().height || 0);
+                        if (nextHeight > 0) {
+                            modalFooterHeight.value = nextHeight;
+                        }
+                    });
+                };
+
+                const startViewportTracking = () => {
+                    updateModalFooterOffset();
+                    if (window.visualViewport) {
+                        window.visualViewport.addEventListener('resize', updateModalFooterOffset);
+                        window.visualViewport.addEventListener('scroll', updateModalFooterOffset);
+                    }
+                    window.addEventListener('resize', updateModalFooterOffset);
+                };
+
+                const stopViewportTracking = () => {
+                    if (window.visualViewport) {
+                        window.visualViewport.removeEventListener('resize', updateModalFooterOffset);
+                        window.visualViewport.removeEventListener('scroll', updateModalFooterOffset);
+                    }
+                    window.removeEventListener('resize', updateModalFooterOffset);
+                    modalFooterOffset.value = 0;
+                };
+
+                watch(isBottomModalOpen, (isOpen) => {
+                    if (isOpen) {
+                        startViewportTracking();
+                        updateModalFooterHeight();
+                    } else {
+                        stopViewportTracking();
+                    }
+                });
+
+                const autoResizeTextarea = (event) => {
+                    const el = event?.target;
+                    if (!el) return;
+                    el.style.height = 'auto';
+                    el.style.height = `${el.scrollHeight}px`;
+                };
                 
                 const canSubmitFeedback = computed(() => {
                     if (!currentFeedbackGuide.value) return false;
@@ -2652,7 +4387,7 @@
                         other: '其他'
                     };
 
-                    const guideTitle = currentFeedbackGuide.value.title || currentFeedbackGuide.value.guide?.current_task || '行动指南';
+                    const guideTitle = getFeedbackGuideTitle(currentFeedbackGuide.value);
                     const guideId = currentFeedbackGuide.value.id;
                     let message = '';
                     let feedbackPayload = { guide_id: guideId };
@@ -2672,7 +4407,11 @@
 
                     messages.value.push({ role: 'user', content: message });
                     
-                    // 立即关闭弹窗，回到主聊天界面
+                    // 立即切回主聊天界面（带左右滑动动效），并关闭/重置反馈弹窗
+                    if (currentTab.value !== 'chat') {
+                        switchTab('chat');
+                        await nextTick();
+                    }
                     closeFeedbackModal();
                     
                     try {
@@ -2681,7 +4420,7 @@
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${getToken()}`
+                                ...buildAuthHeaders(),
                             },
                             body: JSON.stringify({
                                 message,
@@ -2716,7 +4455,7 @@
                         console.error('Submit feedback error:', error);
                         messages.value.push({
                             role: 'assistant',
-                            content: '抱歉，提交反馈时遇到问题，请稍后再试。'
+                            content: '抱歉，提交反馈时遇到问题，请稍后再试.'
                         });
                     } finally {
                         isFeedbackSubmitting.value = false;
@@ -2724,18 +4463,226 @@
                     }
                 };
 
+                const guideCompleted = ref(localStorage.getItem('crusheGuideCompleted') === '1');
+                const guidePrompted = ref(false);
+                const guideCompletionSent = ref(false);
+                const pendingGatedOutputs = ref(null);
+                const showGuideModal = ref(false);
+                const currentGuideStep = ref(0);
+
+                const openGuideModal = () => {
+                    currentGuideStep.value = 0;
+                    showGuideModal.value = true;
+                };
+
+                const closeGuideModal = () => {
+                    showGuideModal.value = false;
+                };
+
+                const nextGuideStep = async () => {
+                    if (currentGuideStep.value < 3) {
+                        currentGuideStep.value++;
+                    } else {
+                        // Finish
+                        closeGuideModal();
+
+                        // Mark guide as completed (persist across reloads)
+                        guideCompleted.value = true;
+                        localStorage.setItem('crusheGuideCompleted', '1');
+                        await notifyGuideCompleted();
+
+                        // Reveal gated outputs (first status report / plan / guides)
+                        if (pendingGatedOutputs.value) {
+                            const bundle = pendingGatedOutputs.value;
+                            const prev = state.value;
+
+                            // Apply to state so Plan tab can render
+                            state.value = { ...state.value, ...bundle };
+
+                            // Emit task cards now (same UX as original, but after guide)
+                            if (bundle.status_report && bundle.status_report !== prev.status_report) {
+                                pushAssistantOnce(`status_preface_${bundle.status_report}`, '这是基于你提供的信息生成的现状分析报告：');
+                                pushSystemTaskOnce(`status_${bundle.status_report}`, {
+                                    role: 'system_task',
+                                    taskType: 'status',
+                                    label: 'STATUS REPORT',
+                                    title: prev.status_report ? '现状分析已更新' : '现状分析报告已生成',
+                                    desc: '点击查看最新的关系阶段与分析报告'
+                                });
+                            }
+                            if (bundle.action_plan && bundle.action_plan !== prev.action_plan) {
+                                pushSystemTaskOnce(`plan_${bundle.action_plan}`, {
+                                    role: 'system_task',
+                                    taskType: 'strategy',
+                                    label: 'PLANNING',
+                                    title: prev.action_plan ? '情感计划已更新' : '专属情感计划已生成',
+                                    desc: '点击查看最新的情感计划'
+                                });
+                            }
+                            if (bundle.action_guides && Array.isArray(bundle.action_guides)) {
+                                const prevGuides = prev.action_guides || [];
+                                if (bundle.action_guides.length > prevGuides.length) {
+                                    pushSystemTaskOnce(`guide_count_${bundle.action_guides.length}`, {
+                                        role: 'system_task',
+                                        taskType: 'plan',
+                                        label: 'ACTION GUIDE',
+                                        title: '新的行动指南已生成',
+                                        desc: '点击查看最新的行动指南'
+                                    });
+                                }
+                            }
+
+                            pendingGatedOutputs.value = null;
+                            // Bring user to the report
+                            switchTab('plan');
+                            await scrollToBottom();
+                        }
+                    }
+                };
+
+                const prevGuideStep = () => {
+                    if (currentGuideStep.value > 0) {
+                        currentGuideStep.value--;
+                    }
+                };
+
+                const handleOnboardingStart = async (msgItem) => {
+                    // Disable the button
+                    if (msgItem) {
+                        msgItem.onboardingButtonDisabled = true;
+                    }
+
+                    // 1. Reply bubble
+                    messages.value.push({ 
+                        role: 'assistant', 
+                        content: '知己知彼，百战百胜！接下来我需要了解你们双方的一些基础信息' 
+                    });
+                    await scrollToBottom();
+
+                    // 2. Set up local inquiry card data
+                    const onboardingQuestions = [
+                        { 
+                            id: "ob_user_name", 
+                            question: "怎么称呼你？", 
+                            type: "text", 
+                            placeholder: "你的昵称",
+                            is_required: true 
+                        },
+                        { 
+                            id: "ob_crush_name", 
+                            question: "对方怎么称呼？", 
+                            type: "text", 
+                            placeholder: "Ta的昵称/代号",
+                            is_required: true 
+                        },
+                        { 
+                            id: "ob_user_age", 
+                            question: "你的年龄", 
+                            type: "single_choice", 
+                            options: ["18岁以下", "18-22岁 (大学)", "23-26岁 (职场新人)", "27-30岁", "30岁以上"],
+                            is_required: true 
+                        },
+                        { 
+                            id: "ob_crush_age", 
+                            question: "对方年龄", 
+                            type: "single_choice", 
+                            options: ["18岁以下", "18-22岁 (大学)", "23-26岁 (职场新人)", "27-30岁", "30岁以上"],
+                            is_required: true 
+                        },
+                        { 
+                            id: "ob_intent", 
+                            question: "你想咨询什么？", 
+                            type: "text", 
+                            placeholder: "例如：我暗恋他很久了，想知道怎么推进关系...",
+                            description: "简单描述你的诉求，我会为你制定专属计划",
+                            is_required: true 
+                        }
+                    ];
+
+                    inquiryCard.value = {
+                        intro: "完善基础信息，开启专属攻略",
+                        questions: onboardingQuestions
+                    };
+                    
+                    // Pre-initialize answers to ensure reactivity
+                    const initialAnswers = {};
+                    onboardingQuestions.forEach(q => {
+                        if (q.type === 'multiple_choice') {
+                            initialAnswers[q.id] = [];
+                        } else {
+                            initialAnswers[q.id] = '';
+                        }
+                    });
+                    inquiryAnswers.value = initialAnswers;
+
+                    // 3. Push system task card
+                    messages.value.push({
+                        role: 'system_task',
+                        taskType: 'inquiry',
+                        label: 'ONBOARDING',
+                        title: '完善基础信息',
+                        desc: '点击填写双方档案与诉求'
+                    });
+                    await scrollToBottom();
+                };
+
+                const startOnboardingFlow = async () => {
+                    // Msg 1 (Part A)
+                    messages.value.push({
+                        role: 'assistant',
+                        content: '你好，我是你专属的Crush军师，已经帮上万名朋友解决了情感难题'
+                    });
+                    await scrollToBottom();
+
+                    // Msg 1 (Part B) - Delayed 3s
+                    setTimeout(async () => {
+                        messages.value.push({
+                            role: 'assistant',
+                            content: '无论是制定追人计划、感情困扰解惑还是情绪宣泄，我都在这里听你说~'
+                        });
+                        await scrollToBottom();
+                        
+                        // Msg 2 (Button) - Delayed another 3s
+                        setTimeout(async () => {
+                            messages.value.push({
+                                role: 'assistant',
+                                content: '准备好了吗？让我们正式开启情感攻略吧！',
+                                showOnboardingButton: true
+                            });
+                            await scrollToBottom();
+                        }, 3000);
+                    }, 3000);
+                };
+
                 onMounted(async () => {
                     await checkAuth();
                     await loadUserHistory();
+                    
+                    // If no messages, start onboarding
+                    if (messages.value.length === 0) {
+                        startOnboardingFlow();
+                    }
+
+                    // Click anywhere outside user menu to close it (does not block underlying clicks)
+                    document.addEventListener('click', handleDocumentClick, true);
+                });
+
+                onBeforeUnmount(() => {
+                    document.removeEventListener('click', handleDocumentClick, true);
+                    stopViewportTracking();
                 });
 
                 // --- DEBUG: Mock Assessment (Removed for production) ---
                 // window.testAssessment = ... 
 
                 return {
+                    
                     // Auth
                     currentUser,
                     showLogoutConfirm,
+                    showUserMenu,
+                    toggleUserMenu,
+                    closeUserMenu,
                     handleLogout,
                     confirmLogout,
                     cancelLogout,
@@ -2748,12 +4695,52 @@
                     showFeedbackModal,
                     showDebug,
                     showContext,
+                    inquiryFooterRef,
+                    feedbackFooterRef,
+                    modalFooterOffset,
+                    modalContentPaddingBottom,
                     toggleDebug: () => showDebug.value = !showDebug.value,
                     toggleContext,
                     toggleStatusDrawer,
                     togglePlanDrawer,
                     closeAllOverlays,
                     handleTaskClick,
+                    handleOnboardingStart,
+                    getTaskCardTitle,
+                    getTaskCardSectionLabel,
+                    getTaskCardSectionText,
+                    
+                    // New Image Upload & Chat
+                    generalFileInput,
+                    triggerGeneralImageUpload,
+                    handleGeneralImageSelect,
+                    sendMessageAndSwitch,
+
+                    // Tab Navigation
+                    currentTab,
+                    currentPlanTab,
+                    switchTab,
+                    switchPlanTab,
+                    onTabTouchStart,
+                    onTabTouchMove,
+                    onTabTouchEnd,
+                    // Plan UI
+                    selectedGuideIndex,
+                    selectedGuide,
+                    selectedGuideContent,
+                    selectedGuideHeadline,
+                    selectedGuideContentDisplay,
+                    planHeadline,
+                    planDetailExpanded,
+                    selectGuide,
+
+                    // Guide Carousel
+                    showGuideModal,
+                    currentGuideStep,
+                    openGuideModal,
+                    closeGuideModal,
+                    nextGuideStep,
+                    prevGuideStep,
 
                     // Chat
                     inputMessage,
@@ -2779,6 +4766,7 @@
                     inquiryCard,
                     inquiryAnswers,
                     canSubmitInquiry,
+                    autoResizeTextarea,
                     toggleMultiChoice,
                     submitInquiry,
                     
@@ -2800,12 +4788,16 @@
                     
                     // Feedback
                     currentFeedbackGuide,
+                    feedbackGuideTitle,
                     feedbackForm,
                     feedbackQuestion,
                     feedbackStatus,
                     isFeedbackSubmitting,
                     isFeedbackFollowup,
                     canGiveFeedback,
+                    showPlanFeedbackFab,
+                    getGuideStatusLabel,
+                    getGuideStatusClass,
                     openFeedbackModal,
                     closeFeedbackModal,
                     canSubmitFeedback,
