@@ -74,6 +74,42 @@ class TestWorkflowIntegration:
     
     # 原先的 “resume_point/pending_questions” 两阶段恢复机制已移除（改为 interrupt/resume 协议）
 
+    def test_workflow_interrupt_then_resume(self):
+        from langgraph.checkpoint.memory import MemorySaver
+        from langgraph.types import Command
+
+        from graph.workflow import compile_workflow
+
+        checkpointer = MemorySaver()
+        app = compile_workflow(checkpointer=checkpointer)
+        config = {"configurable": {"thread_id": "test_workflow_interrupt_resume"}, "checkpointer": checkpointer}
+
+        state = create_initial_state(
+            "[[TEST_INTERRUPT]] 请调用 ask_human 并立刻 interrupt，等待用户回答。",
+            onboarding_completed=True,
+            route_to="main_agent",
+        )
+        state["inquiry_card"] = None
+        state["pending_responses"] = []
+        state["last_response_for_continuity"] = None
+
+        out1 = app.invoke(state, config=config)
+        assert "__interrupt__" in out1
+        interrupts = out1.get("__interrupt__") or []
+        first = interrupts[0]
+        payload = first.get("value") if isinstance(first, dict) else getattr(first, "value", None)
+        assert isinstance(payload, dict)
+        assert payload.get("type") == "inquiry_card"
+        assert isinstance(payload.get("questions"), list) and payload["questions"]
+        assert payload["questions"][0].get("id") == "q1"
+
+        resume_payload = {"answers": {"q1": "A"}}
+        out2 = app.invoke(Command(resume=resume_payload), config=config)
+        assert "__interrupt__" not in out2
+        assert out2.get("inquiry_answers") == resume_payload
+        pending = out2.get("pending_responses") or []
+        assert isinstance(pending, list)
+        assert any(isinstance(r, dict) and r.get("content") for r in pending)
 
 
 

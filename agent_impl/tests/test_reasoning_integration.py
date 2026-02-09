@@ -118,6 +118,14 @@ def test_message_builder_preserves_reasoning():
     return True
 
 
+def test_convert_message_to_dict_preserves_reasoning():
+    from graph.state import convert_message_to_dict
+
+    msg = AIMessage(content="x", additional_kwargs={"reasoning_content": "rc"})
+    msg_dict = convert_message_to_dict(msg)
+    assert extract_reasoning_content(msg_dict) == "rc"
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("DeepSeek Reasoning 模式集成测试")
