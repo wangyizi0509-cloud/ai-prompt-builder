@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from langchain_core.tools import StructuredTool
@@ -18,7 +19,7 @@ def _ask_human(inquiry_card: dict[str, Any]) -> dict:
     payload = build_inquiry_interrupt_payload(inquiry_card=inquiry_card)
     answers = interrupt(payload)
     return ok(
-        output="",
+        output=json.dumps({"answers": answers}, ensure_ascii=False),
         state_patch={
             "inquiry_card": payload,
             "inquiry_answers": answers,
@@ -32,4 +33,3 @@ ask_human = StructuredTool.from_function(
     description="向用户提问并等待回答（使用 interrupt）。输入为 inquiry_card。",
     args_schema=AskHumanInput,
 )
-
