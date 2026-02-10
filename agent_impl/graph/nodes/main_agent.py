@@ -25,8 +25,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 from langchain.agents import create_agent
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, interrupt
 
 from agents.tooling.patch import ToolResult, merge_patches, merge_state_patch
@@ -46,16 +47,63 @@ class _SubagentToolInput(BaseModel):
 _CURRENT_RUN_CONFIG: contextvars.ContextVar[dict | None] = contextvars.ContextVar("current_run_config", default=None)
 
 
+def _ensure_tool_call_integrity(messages: list[BaseMessage]) -> list[BaseMessage]:
+    if not messages:
+        return []
+    out: list[BaseMessage] = []
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        if isinstance(msg, ToolMessage):
+            i += 1
+            continue
+        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+            tool_calls = getattr(msg, "tool_calls", None) or []
+            expected_ids: list[str] = []
+            for tc in tool_calls:
+                if isinstance(tc, dict):
+                    tc_id = tc.get("id")
+                    if tc_id:
+                        expected_ids.append(str(tc_id))
+            if not expected_ids:
+                out.append(msg)
+                i += 1
+                continue
+            block: list[BaseMessage] = [msg]
+            remaining = set(expected_ids)
+            j = i + 1
+            while j < len(messages) and isinstance(messages[j], ToolMessage):
+                tm = messages[j]
+                tc_id = str(getattr(tm, "tool_call_id", "") or "")
+                if tc_id in remaining:
+                    remaining.remove(tc_id)
+                    block.append(tm)
+                    j += 1
+                    if not remaining:
+                        break
+                    continue
+                break
+            if not remaining:
+                out.extend(block)
+                i = j
+                continue
+            i += 1
+            continue
+        out.append(msg)
+        i += 1
+    return out
+
+
 def _truncate_messages(messages: list[BaseMessage], *, max_total: int = 25) -> list[BaseMessage]:
     if max_total <= 0:
         return list(messages)
     if len(messages) <= max_total:
-        return list(messages)
+        return _ensure_tool_call_integrity(list(messages))
     head = list(messages[:3])
     tail_budget = max_total - len(head)
     if tail_budget <= 0:
-        return list(messages[-max_total:])
-    return head + list(messages[-tail_budget:])
+        return _ensure_tool_call_integrity(list(messages[-max_total:]))
+    return _ensure_tool_call_integrity(head + list(messages[-tail_budget:]))
 
 
 def _tool_output_to_content(result: Any) -> str:
@@ -152,12 +200,16 @@ def _run_langchain_supervisor(
     tools: list[BaseTool],
     initial_messages: list[BaseMessage],
     max_rounds: int,
-    config: dict | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     patches: list[dict] = []
     wrapped_tools = _wrap_tools_for_patch_collection(list(tools or []), patches)
 
-    agent_graph = create_agent(model=llm, tools=wrapped_tools, system_prompt=None, name="tool_loop_agent")
+    checkpointer = None
+    if config:
+        checkpointer = config.get("checkpointer")
+
+    agent_graph = create_agent(model=llm, tools=wrapped_tools, system_prompt=None, name="tool_loop_agent", checkpointer=checkpointer)
 
     rounds = max(1, int(max_rounds or 1))
     recursion_limit = max(25, rounds * 4 + 10)
@@ -187,7 +239,7 @@ def _call_subagent(
     role: str,
     instruction: str,
     state_getter,
-    config: dict | None = None,
+    config: RunnableConfig | None = None,
 ) -> ToolResult:
     role = (role or "").strip().lower()
     tools = build_all_tools_for_agent(role, state_getter=state_getter)
@@ -324,7 +376,7 @@ def _build_all_tools(state_getter) -> list[BaseTool]:
     return unique
 
 
-def main_agent_node(state: AgentState, config: dict | None = None) -> dict[str, Any]:
+def main_agent_node(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
     working_state: dict[str, Any] = dict(state or {})
 
     def state_getter() -> dict:

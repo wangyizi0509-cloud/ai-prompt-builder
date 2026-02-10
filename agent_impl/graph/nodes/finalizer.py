@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 import os
 import logging
 
+from langchain_core.runnables import RunnableConfig
 from graph.state import sync_new_messages_to_fullstore
 from graph.archive_manager import (
     check_layer3_compression_needed,
@@ -223,7 +224,7 @@ def _consume_maintenance_queue_inline(state: dict, queue: list[dict]) -> dict:
     return updates
 
 
-def post_turn_finalize_node(state: dict) -> dict:
+def post_turn_finalize_node(state: dict, config: RunnableConfig | None = None) -> dict:
     """
     每轮结束的 Finalizer：
     1) 同步 messages → layer3_memory.all_messages（全量存储）

@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
 
 from config import get_llm
@@ -281,7 +282,7 @@ def _strip_preliminary_assessment_from_json(content: str) -> str:
         return content
 
 
-def onboarding_agent_node(state: dict) -> dict:
+def onboarding_agent_node(state: dict, config: RunnableConfig | None = None) -> dict:
     """
     Onboarding 节点：
     - 调用 LLM 生成下一问或直接输出 handoff

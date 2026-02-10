@@ -7,6 +7,7 @@ import re
 import uuid
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
 from graph.state import AgentState
 from utils.reasoning_content import clear_reasoning_content
 
@@ -25,7 +26,7 @@ SMALL_TALK_PATTERNS = [
 ]
 
 
-def router_node(state: AgentState) -> dict[str, Any]:
+def router_node(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
     """
     前置路由节点
     

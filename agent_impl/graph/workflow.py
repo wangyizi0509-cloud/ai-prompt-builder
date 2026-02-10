@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 
 from graph.nodes.finalizer import post_turn_finalize_node
@@ -30,7 +31,7 @@ MAX_NODE_STEPS_PER_TURN = 18
 
 
 def _wrap_step_counter(node_name: str, fn):
-    def _wrapped(state: AgentState, config: dict | None = None) -> dict:
+    def _wrapped(state: AgentState, config: RunnableConfig | None = None) -> dict:
         try:
             out = fn(state, config) or {}
         except TypeError:
