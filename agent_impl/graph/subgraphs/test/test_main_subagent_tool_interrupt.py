@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import os
+
+os.environ["LLM_PROVIDER"] = "mock"
+
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command
+from langchain_core.runnables import RunnableConfig
 
 from graph.nodes.main_agent import _CURRENT_RUN_CONFIG, _build_all_tools
 
@@ -29,7 +34,7 @@ def test_call_status_agent_tool_interrupt_then_resume():
     tools = _build_all_tools(lambda: state)
     status_tool = _pick_tool(tools, "call_status_agent")
 
-    def node(s: dict, config: dict | None = None) -> dict:
+    def node(s: dict, config: RunnableConfig | None = None) -> dict:
         cfg = dict(config or {})
         cfg["checkpointer"] = checkpointer
         token = _CURRENT_RUN_CONFIG.set(cfg)
@@ -72,7 +77,7 @@ def test_call_plan_agent_tool_interrupt_then_resume():
     tools = _build_all_tools(lambda: state)
     plan_tool = _pick_tool(tools, "call_plan_agent")
 
-    def node(s: dict, config: dict | None = None) -> dict:
+    def node(s: dict, config: RunnableConfig | None = None) -> dict:
         cfg = dict(config or {})
         cfg["checkpointer"] = checkpointer
         token = _CURRENT_RUN_CONFIG.set(cfg)
@@ -113,7 +118,7 @@ def test_call_guide_agent_tool_interrupt_then_resume():
     tools = _build_all_tools(lambda: state)
     guide_tool = _pick_tool(tools, "call_guide_agent")
 
-    def node(s: dict, config: dict | None = None) -> dict:
+    def node(s: dict, config: RunnableConfig | None = None) -> dict:
         cfg = dict(config or {})
         cfg["checkpointer"] = checkpointer
         token = _CURRENT_RUN_CONFIG.set(cfg)
@@ -137,4 +142,3 @@ def test_call_guide_agent_tool_interrupt_then_resume():
     tool_result = out2["tool_result"]
     assert tool_result["ok"] is True
     assert tool_result["state_patch"]["inquiry_answers"] == resume_payload
-

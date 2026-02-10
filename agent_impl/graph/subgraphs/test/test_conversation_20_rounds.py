@@ -142,16 +142,29 @@ def handle_interrupt(app, config, result: dict) -> dict:
             print(f"  ⚠️  中断 payload 中没有 questions: {list(interrupt_payload.keys())}")
             resume_payload = {"answers": {}}
         else:
-            questions = interrupt_payload["questions"]
+            raw_questions = interrupt_payload["questions"]
+            if isinstance(raw_questions, dict):
+                questions = list(raw_questions.values())
+            elif isinstance(raw_questions, list):
+                questions = list(raw_questions)
+            else:
+                questions = []
             print(f"  检测到 {len(questions)} 个问题:")
             
             answers = {}
             
             for i, q in enumerate(questions):
-                q_id = q.get("id", f"question_{i+1}")
-                q_text = q.get("question", "")
-                q_type = q.get("type", "text")
+                if isinstance(q, str):
+                    q = {"id": f"question_{i+1}", "type": "text", "question": q, "options": []}
+                elif not isinstance(q, dict):
+                    q = {"id": f"question_{i+1}", "type": "text", "question": str(q), "options": []}
+
+                q_id = str(q.get("id") or f"question_{i+1}")
+                q_text = str(q.get("question") or "")
+                q_type = str(q.get("type") or "text")
                 options = q.get("options", [])
+                if not isinstance(options, list):
+                    options = []
                 
                 print(f"    [{i+1}] {q_text[:60]}...")
                 print(f"        ID: {q_id}, 类型: {q_type}")

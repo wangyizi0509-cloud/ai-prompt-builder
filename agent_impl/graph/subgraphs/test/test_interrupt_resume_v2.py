@@ -7,6 +7,8 @@
 import os
 import sys
 
+os.environ["LLM_PROVIDER"] = "mock"
+
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
@@ -48,31 +50,8 @@ def test_subgraph_interrupt_resume():
         "private_messages": [],
     }
     
-    with patch("graph.subgraphs.status._shared_llm") as mock_llm:
-        mock_response = AIMessage(
-            content="需要更多信息",
-            tool_calls=[
-                {
-                    "id": "test_tool_call_1",
-                    "name": "ask_human",
-                    "args": {
-                        "inquiry_card": {
-                            "type": "inquiry_card",
-                            "questions": [
-                                {"id": "q1", "question": "你们认识多久了？"},
-                                {"id": "q2", "question": "最近一次聊天是什么时候？"}
-                            ],
-                            "intro": "请回答以下问题",
-                            "reasoning": "需要补充信息"
-                        }
-                    }
-                }
-            ]
-        )
-        mock_llm.invoke.return_value = mock_response
-        mock_llm.bind_tools.return_value = mock_llm
-        
-        result = subgraph.invoke(sub_input, config=config)
+    sub_input["task_spec"]["instruction"] = "[[TEST_INTERRUPT]]"
+    result = subgraph.invoke(sub_input, config=config)
     
     print(f"\n返回结果键: {list(result.keys())}")
     
@@ -99,20 +78,13 @@ def test_subgraph_interrupt_resume():
             }
             print(f"恢复 payload: {resume_payload}")
             
-            with patch("graph.subgraphs.status._shared_llm") as mock_llm_resume:
-                mock_response_resume = AIMessage(
-                    content="根据你的回答，我已完成现状分析",
-                    tool_calls=[]
-                )
-                mock_llm_resume.invoke.return_value = mock_response_resume
-                mock_llm_resume.bind_tools.return_value = mock_llm_resume
-                
-                resumed_result = subgraph.invoke(Command(resume=resume_payload), config=config)
+            resumed_result = subgraph.invoke(Command(resume=resume_payload), config=config)
             
             print(f"\n恢复后返回结果键: {list(resumed_result.keys())}")
             
             if "state_patch" in resumed_result:
                 print(f"\n✓ state_patch 存在")
+                assert resumed_result["state_patch"]["inquiry_answers"] == resume_payload
                 if "final" in resumed_result:
                     print(f"  最终回复: {resumed_result['final']}")
             
