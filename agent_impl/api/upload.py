@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
 from typing import Literal, Optional
+import logging
 from auth_utils import get_optional_user
 
 ScreenshotType = Literal[
@@ -11,6 +12,7 @@ ScreenshotType = Literal[
 ]
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/upload-screenshot")
@@ -24,7 +26,7 @@ async def upload_screenshot(
     """
     上传截图并转换为文本
     """
-    print(f"📷 收到截图上传: type={screenshot_type}, session={session_id}")
+    logger.info("收到截图上传: type=%s, session=%s", screenshot_type, session_id)
     
     try:
         image_bytes = await file.read()
@@ -47,10 +49,10 @@ async def upload_screenshot(
     )
     
     if not upload_result['success']:
-        print(f"⚠️ 图片上传 Supabase 失败: {upload_result.get('error')}")
+        logger.warning("图片上传 Supabase 失败: %s", upload_result.get("error"))
         # 继续 OCR 处理，但不中断流程
     else:
-        print(f"✅ 图片已存储到 Supabase: {upload_result.get('url')}")
+        logger.info("图片已存储到 Supabase: %s", upload_result.get("url"))
 
     # 2. 调用多模态模型处理 (OCR)
     processor = get_image_processor()
@@ -65,7 +67,6 @@ async def upload_screenshot(
         result['image_url'] = upload_result['url']
         result['storage_path'] = upload_result['path']
     
-    print(f"📷 处理结果: success={result['success']}")
+    logger.info("图片处理完成: success=%s", result.get("success"))
     
     return result
-

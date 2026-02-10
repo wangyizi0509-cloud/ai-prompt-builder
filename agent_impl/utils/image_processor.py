@@ -13,10 +13,12 @@
 import os
 import base64
 import httpx
+import logging
 from typing import Literal, Optional
 from dotenv import load_dotenv
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 # 截图类型定义
 ScreenshotType = Literal[
@@ -44,7 +46,7 @@ def load_screenshot_prompt(screenshot_type: str) -> str:
             
         return "请分析这张截图并提取关键信息。"
     except Exception as e:
-        print(f"Error loading prompt for {screenshot_type}: {e}")
+        logger.exception("Error loading prompt for %s", screenshot_type)
         return "请分析这张截图并提取关键信息。"
 
 
@@ -61,7 +63,7 @@ class ImageProcessor:
         self.model = os.getenv("DOUBAO_ENDPOINT_ID")
         
         if not self.api_key or not self.model:
-            print("⚠️ 警告: DOUBAO_API_KEY 或 DOUBAO_ENDPOINT_ID 未配置，图片处理功能将不可用")
+            logger.warning("DOUBAO_API_KEY 或 DOUBAO_ENDPOINT_ID 未配置，图片处理功能将不可用")
     
     def _encode_image_to_base64(self, image_bytes: bytes) -> str:
         """将图片字节转为 base64"""

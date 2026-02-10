@@ -1,5 +1,6 @@
 import json
 import uuid
+import logging
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
@@ -9,6 +10,7 @@ from typing import Literal, Optional, Any, Union
 
 router = APIRouter(prefix="/api")
 security = HTTPBearer(auto_error=False)
+logger = logging.getLogger(__name__)
 
 
 class FeedbackModeInput(BaseModel):
@@ -343,8 +345,12 @@ async def chat_stream(
     """
     流式聊天接口 - 实时查看 Agent 执行过程（通过 SDK）
     """
-    print(f"[Stream SDK] Received message from session {request.session_id}: {request.message}")
-    print(f"[Stream SDK] Stream mode: {request.stream_mode}")
+    logger.info(
+        "[Stream SDK] Received message: session=%s, message_len=%s",
+        request.session_id,
+        len(request.message or ""),
+    )
+    logger.info("[Stream SDK] Stream mode: %s", request.stream_mode)
     
     from api.sdk_client import (
         ensure_thread_exists,
@@ -372,12 +378,12 @@ async def chat_stream(
         base_state = get_thread_state(thread_id)
 
         if base_state is None:
-            print("[Stream SDK] Creating new session (checkpointer empty)")
+            logger.info("[Stream SDK] Creating new session (checkpointer empty)")
             current_message_id = str(uuid.uuid4())
             state = create_initial_state(request.message, current_message_id=current_message_id)
             state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
         else:
-            print("[Stream SDK] Restoring existing session (checkpointer)")
+            logger.info("[Stream SDK] Restoring existing session (checkpointer)")
             state = dict(base_state)
             current_message_id = str(uuid.uuid4())
             state["user_message"] = request.message
@@ -413,8 +419,7 @@ async def chat_stream(
                 
             yield "data: [DONE]\n\n"
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            logger.exception("Stream generation failed")
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
     return StreamingResponse(generate_stream(), media_type="text/event-stream")

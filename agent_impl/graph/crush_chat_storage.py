@@ -15,6 +15,7 @@ import json
 from typing import Optional, Any
 from datetime import datetime
 import uuid
+import logging
 
 from graph.context_types import (
     CrushChatMetadata,
@@ -22,6 +23,9 @@ from graph.context_types import (
     CrushChatStorage,
 )
 from config import get_llm
+
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -296,10 +300,10 @@ class CrushChatManager:
                     emotional_turns=parsed.get("emotional_turns", []),
                     main_topics=parsed.get("main_topics", []),
                 )
-                print(f"[CrushChat] Updated summary: {len(self.summary.get('key_events', []))} events")
+                logger.info("Updated summary: %s events", len(self.summary.get("key_events", [])))
         
         except Exception as e:
-            print(f"[CrushChat] Failed to update summary: {e}")
+            logger.exception("Failed to update summary")
     
     def get_summary(self) -> CrushChatSummary:
         """获取 L2 结构化摘要"""

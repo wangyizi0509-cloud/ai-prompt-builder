@@ -5,14 +5,19 @@ LLM 配置模块
 
 import json
 import os
+import logging
 from typing import Any, Optional
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_deepseek import ChatDeepSeek
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 
 # 加载环境变量
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class ChatDeepSeekReasoning(ChatDeepSeek):
@@ -45,7 +50,11 @@ class ChatDeepSeekReasoning(ChatDeepSeek):
                         reasoning_map[i] = reasoning_content
                         # 调试输出
                         if os.getenv("DEBUG_REASONING", "false").lower() == "true":
-                            print(f"[DEBUG] Found reasoning_content at index {i}: {reasoning_content[:50]}...")
+                            logger.debug(
+                                "Found reasoning_content at index %s (len=%s)",
+                                i,
+                                len(reasoning_content),
+                            )
         
         # 将 reasoning_content 注入到 payload 中
         injected_count = 0
@@ -55,16 +64,21 @@ class ChatDeepSeekReasoning(ChatDeepSeek):
                     message["reasoning_content"] = reasoning_map[i]
                     injected_count += 1
                     if os.getenv("DEBUG_REASONING", "false").lower() == "true":
-                        print(f"[DEBUG] Injected reasoning_content to message {i}")
+                        logger.debug("Injected reasoning_content to message %s", i)
                 if message.get("tool_calls") and "reasoning_content" not in message:
                     message["reasoning_content"] = ""
                     injected_count += 1
         
         if os.getenv("DEBUG_REASONING", "false").lower() == "true":
-            print(f"[DEBUG] Total reasoning_content injected: {injected_count}")
-            print(f"[DEBUG] Total messages in payload: {len(payload.get('messages', []))}")
+            logger.debug("Total reasoning_content injected: %s", injected_count)
+            logger.debug("Total messages in payload: %s", len(payload.get("messages", [])))
             for i, msg in enumerate(payload.get('messages', [])):
-                print(f"[DEBUG] Message {i}: role={msg.get('role')}, has_reasoning={'reasoning_content' in msg}")
+                logger.debug(
+                    "Message %s: role=%s, has_reasoning=%s",
+                    i,
+                    msg.get("role"),
+                    "reasoning_content" in msg,
+                )
         
         return payload
 
@@ -135,13 +149,18 @@ def get_llm(temperature: float = 0.7, model: Optional[str] = None, use_tools: bo
         raise ValueError(f"不支持的 LLM Provider: {provider}")
 
 
-class MockLLM:
+class MockLLM(BaseChatModel):
     """轻量 Mock LLM，用于纯逻辑测试。"""
 
     def __init__(self):
+        super().__init__()
         self._tool_names: set[str] = set()
         self._interrupt_tool_call_id = "tc_mock_ask_human"
         self._status_tool_call_id = "tc_mock_call_status"
+
+    @property
+    def _llm_type(self) -> str:
+        return "mock_llm"
 
     def _has_tool_observation(self, messages, *, tool_call_id: str) -> bool:
         for m in messages or []:
@@ -163,7 +182,7 @@ class MockLLM:
         self._tool_names = names
         return self
 
-    def invoke(self, messages):
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
         last_user_text = ""
         for m in reversed(messages or []):
             content = getattr(m, "content", None)
@@ -181,7 +200,7 @@ class MockLLM:
             and ("[[TEST_CALL_STATUS_INTERRUPT]]" in last_user_text)
             and ("call_status_agent" in self._tool_names)
         ):
-            return AIMessage(
+            msg = AIMessage(
                 content="",
                 tool_calls=[
                     {
@@ -192,6 +211,7 @@ class MockLLM:
                     }
                 ],
             )
+            return ChatResult(generations=[ChatGeneration(message=msg)])
 
         already_has_tool_result = self._has_tool_observation(messages, tool_call_id=self._interrupt_tool_call_id)
         if (
@@ -213,7 +233,7 @@ class MockLLM:
                     }
                 ],
             }
-            return AIMessage(
+            msg = AIMessage(
                 content="",
                 tool_calls=[
                     {
@@ -224,6 +244,7 @@ class MockLLM:
                     }
                 ],
             )
+            return ChatResult(generations=[ChatGeneration(message=msg)])
 
         payload = {
             "task_id": "mock_task",
@@ -241,7 +262,8 @@ class MockLLM:
             "guide_content": "mock_guide_content",
             "guide_status_updates": [],
         }
-        return AIMessage(content=json.dumps(payload, ensure_ascii=False))
+        msg = AIMessage(content=json.dumps(payload, ensure_ascii=False))
+        return ChatResult(generations=[ChatGeneration(message=msg)])
 
 
 # 导出默认 LLM 实例

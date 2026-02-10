@@ -1,15 +1,19 @@
 import os
 import importlib
+import logging
 from fastapi import APIRouter
+
+
+logger = logging.getLogger(__name__)
 
 
 def _load_router(module_name: str, env_flag: str | None = None):
     if env_flag and os.getenv(env_flag, "0") == "1":
-        print(f"Skipping {module_name} router via {env_flag}=1", flush=True)
+        logger.info("Skipping %s router via %s=1", module_name, env_flag)
         return None
-    print(f"Loading {module_name} router...", flush=True)
+    logger.info("Loading %s router...", module_name)
     module = importlib.import_module(f"{__name__}.{module_name}")
-    print(f"Loaded {module_name} router", flush=True)
+    logger.info("Loaded %s router", module_name)
     return module.router
 
 

@@ -41,9 +41,9 @@ from api.sdk_client import (
     ensure_thread_exists,
 )
 
-print("Importing API routers...", flush=True)
+logger.info("Importing API routers...")
 from api import api_router
-print("API routers loaded", flush=True)
+logger.info("API routers loaded")
 app.include_router(api_router)
 
 

@@ -6,6 +6,7 @@ LangGraph Studio 兼容服务器
 import os
 import sys
 from pathlib import Path
+import logging
 
 # 添加当前目录到路径
 sys.path.insert(0, str(Path(__file__).parent))
@@ -15,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from graph.workflow import get_workflow
 
 app = FastAPI(title="LangGraph Studio Server")
+logger = logging.getLogger(__name__)
 
 # 允许 CORS（Studio 需要跨域访问）
 app.add_middleware(
@@ -138,8 +140,7 @@ async def api_health():
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 2024))
-    print(f"🚀 启动 LangGraph Studio 服务器...")
-    print(f"📡 API: http://localhost:{port}")
-    print(f"🌐 Studio: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:{port}")
+    logger.info("启动 LangGraph Studio 服务器")
+    logger.info("API: http://localhost:%s", port)
+    logger.info("Studio: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:%s", port)
     uvicorn.run(app, host="0.0.0.0", port=port)
-

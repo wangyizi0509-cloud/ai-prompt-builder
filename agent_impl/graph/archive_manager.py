@@ -131,11 +131,15 @@ def check_layer3_compression_needed(state: "AgentState") -> bool:
     # [DEBUG] 详细日志输出
     excess_turns = max(0, current_turns - threshold)
     should_trigger = current_turns > threshold and excess_turns % batch_size == 0
-    print(f"[Archive] check_layer3_compression_needed: "
-          f"workspace_messages={len(workspace_messages)}, "
-          f"user_turns={current_turns}, "
-          f"threshold={threshold}, batch_size={batch_size}, "
-          f"excess={excess_turns}, result={should_trigger}")
+    logger.debug(
+        "check_layer3_compression_needed: workspace_messages=%s, user_turns=%s, threshold=%s, batch_size=%s, excess=%s, result=%s",
+        len(workspace_messages),
+        current_turns,
+        threshold,
+        batch_size,
+        excess_turns,
+        should_trigger,
+    )
     
     if current_turns <= threshold:
         return False
@@ -220,7 +224,7 @@ def compress_layer3(state: "AgentState") -> dict:
     
     # 检查是否已经在处理中（防止重复触发）
     if is_layer_processing(layer3_memory):
-        print("[Archive] Layer 3 is already processing, skipping")
+        logger.info("Layer 3 is already processing, skipping")
         return {}
     
     # 1. 设置处理状态，保存降级数据快照
@@ -235,78 +239,89 @@ def compress_layer3(state: "AgentState") -> dict:
         fallback_data=fallback_data,
     )
     
-    print(f"[Archive] Layer 3 compression started, processing {len(to_compress)} messages")
+    logger.info("Layer 3 compression started, processing %s messages", len(to_compress))
     
     # 获取 Layer 1 的用户上下文
     existing_context = layer1_memory.get("full_data", create_empty_user_context())
     
     try:
         # 2. 调用整理 Agent 处理对话归档（这里会调用 LLM）
-        print(f"[Archive] Calling archive_conversation_batch with {len(to_compress)} messages")
+        logger.debug("Calling archive_conversation_batch with %s messages", len(to_compress))
         result = archive_conversation_batch(to_compress, existing_context, layer2_memory)
-        print(f"[Archive] archive_conversation_batch returned keys: {list(result.keys()) if isinstance(result, dict) else type(result)}")
+        logger.debug(
+            "archive_conversation_batch returned: %s",
+            list(result.keys()) if isinstance(result, dict) else type(result),
+        )
         
         # 3. 创建对话摘要
         conv_archive = result.get("conversation_archive", {})
-        print(f"[Archive] conversation_archive type: {type(conv_archive)}")
+        logger.debug("conversation_archive type: %s", type(conv_archive))
         if isinstance(conv_archive, list):
             conv_archive = conv_archive[0] if conv_archive else {}
         if not isinstance(conv_archive, dict):
-            print(f"[Archive] Unexpected conversation_archive type: {type(conv_archive)}")
+            logger.warning("Unexpected conversation_archive type: %s", type(conv_archive))
             conv_archive = {}
         turn_count = conv_archive.get("turn_count", len(to_compress))
         key_topics = conv_archive.get("key_topics", [])
-        print(f"[Archive] Creating summary with turn_count={turn_count}, key_topics type={type(key_topics)}")
+        logger.debug("Creating summary with turn_count=%s, key_topics type=%s", turn_count, type(key_topics))
         new_summary = create_conversation_summary(
             summary=conv_archive.get("summary", ""),
             topics=", ".join(key_topics) if isinstance(key_topics, list) else str(key_topics),
             turn_range=f"1-{turn_count}",
         )
-        print(f"[Archive] Summary created successfully")
+        logger.debug("Summary created successfully")
         
         # 4. 通过存储策略路由到 Layer 3 并写入摘要
         decision = _storage_router.route({"type": "conversation_summary", "payload": conv_archive})
         max_summaries = LAYER3_ARCHIVE_CONFIG["max_summaries"]
         if decision.get("target_layer") != "layer3":
-            print("[Archive] StorageRouter returned non-layer3 target, fallback to layer3")
+            logger.warning("StorageRouter returned non-layer3 target, fallback to layer3")
         updated_layer3 = StorageProcessor.append_conversation_summary(
             layer3_memory,
             new_summary,
             max_summaries=max_summaries,
             total_turns_delta=len(to_compress),
         )
-        print(f"[Archive] Layer3 updated with new summary")
+        logger.debug("Layer3 updated with new summary")
         
         # 更新 Layer 1 长期记忆（如有提取的信息）
         updated_context = result.get("updated_context", existing_context)
-        print(f"[Archive] updated_context type: {type(updated_context)}")
+        logger.debug("updated_context type: %s", type(updated_context))
         updated_layer1 = StorageProcessor.save_layer1(
             updated_context,
             layer1_memory,
         )
-        print(f"[Archive] Layer1 saved")
+        logger.debug("Layer1 saved")
 
         # 5. 写入动态情报
         updated_layer2 = layer2_memory
         dynamic_intels = result.get("dynamic_intels", [])
-        print(f"[Archive] dynamic_intels type: {type(dynamic_intels)}, count: {len(dynamic_intels) if isinstance(dynamic_intels, list) else 'N/A'}")
+        logger.debug(
+            "dynamic_intels type: %s, count: %s",
+            type(dynamic_intels),
+            len(dynamic_intels) if isinstance(dynamic_intels, list) else "N/A",
+        )
         # [FIX] 确保 dynamic_intels 是列表，并且每个元素是 dict
         if not isinstance(dynamic_intels, list):
             dynamic_intels = []
         for intel in dynamic_intels:
             if not isinstance(intel, dict):
-                print(f"[Archive] WARNING: Skipping invalid intel type: {type(intel)}")
+                logger.warning("Skipping invalid intel type: %s", type(intel))
                 continue
             updated_layer2 = StorageProcessor.upsert_dynamic_intel(
                 updated_layer2,
                 intel,
             )
         
-        print(f"[Archive] Layer 3 compressed: {len(to_compress)} messages -> summary, kept {len(to_keep)} messages")
+        logger.info(
+            "Layer 3 compressed: %s messages -> summary, kept %s messages",
+            len(to_compress),
+            len(to_keep),
+        )
         
     except Exception as e:
         # 压缩失败，清除处理状态但不更新数据
-        print(f"[Archive] Layer 3 compression failed: {e}")
+        logger.exception("Layer 3 compression failed")
         layer3_memory = finish_layer_processing(layer3_memory, increment_version=False)
         return {
             "layer3_memory": layer3_memory,
@@ -389,7 +404,7 @@ def compress_task_reasoning(state: "AgentState") -> dict:
     
     # 检查是否已经在处理中
     if is_layer_processing(layer3_memory):
-        print("[Archive] Layer 3 is processing, skipping reasoning compression")
+        logger.info("Layer 3 is processing, skipping reasoning compression")
         return {}
         
     # 设置处理状态
@@ -443,7 +458,11 @@ def compress_task_reasoning(state: "AgentState") -> dict:
             target_task["reasoning"] = to_keep_items
             updated_registry[agent_name][task_idx] = target_task
             
-            print(f"[Archive] Compressed task reasoning for {task_id}: {len(to_compress_items)} items -> summary")
+            logger.info(
+                "Compressed task reasoning for %s: %s items -> summary",
+                task_id,
+                len(to_compress_items),
+            )
 
         # 更新 Layer 3
         updated_layer3 = Layer3Memory(
@@ -460,7 +479,7 @@ def compress_task_reasoning(state: "AgentState") -> dict:
         return {"layer3_memory": updated_layer3}
         
     except Exception as e:
-        print(f"[Archive] Task reasoning compression failed: {e}")
+        logger.exception("Task reasoning compression failed")
         layer3_memory = finish_layer_processing(layer3_memory, increment_version=False)
         return {"layer3_memory": layer3_memory}
 
@@ -508,7 +527,7 @@ def archive_guide_to_layer2(
     # 更新 Layer 2 长期记忆中的指南列表
     decision = _storage_router.route({"type": "action_guide", "payload": guide})
     if decision.get("target_layer") != "layer2":
-        print("[Archive] StorageRouter returned non-layer2 target, fallback to layer2")
+        logger.warning("StorageRouter returned non-layer2 target, fallback to layer2")
     updated_layer2 = StorageProcessor.upsert_completed_guide(
         layer2_memory,
         guide,
@@ -563,7 +582,7 @@ def archive_status_to_layer2(
     # 更新 Layer 2 长期记忆中的报告列表
     decision = _storage_router.route({"type": "status_report", "payload": old_report})
     if decision.get("target_layer") != "layer2":
-        print("[Archive] StorageRouter returned non-layer2 target, fallback to layer2")
+        logger.warning("StorageRouter returned non-layer2 target, fallback to layer2")
     updated_layer2 = StorageProcessor.upsert_status_report(
         layer2_memory,
         old_report,
@@ -617,7 +636,7 @@ def archive_plan_to_layer2(
 
     decision = _storage_router.route({"type": "action_plan", "payload": old_plan})
     if decision.get("target_layer") != "layer2":
-        print("[Archive] StorageRouter returned non-layer2 target, fallback to layer2")
+        logger.warning("StorageRouter returned non-layer2 target, fallback to layer2")
 
     updated_layer2 = StorageProcessor.upsert_action_plan(
         layer2_memory,
@@ -709,7 +728,7 @@ def refine_on_onboarding_complete(state: "AgentState") -> dict:
         conv_archive = conv_archive[0] if conv_archive else {}
     if not isinstance(conv_archive, dict):
         if conv_archive:
-            print(f"[Archive] Unexpected conversation_archive type: {type(conv_archive)}")
+            logger.warning("Unexpected conversation_archive type: %s", type(conv_archive))
         conv_archive = {}
     if conv_archive:
         turn_count = conv_archive.get("turn_count", len(messages))
