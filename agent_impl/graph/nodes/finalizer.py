@@ -14,7 +14,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 import os
+import logging
 
+from langchain_core.runnables import RunnableConfig
 from graph.state import sync_new_messages_to_fullstore
 from graph.archive_manager import (
     check_layer3_compression_needed,
@@ -26,6 +28,9 @@ from graph.archive_manager import (
     archive_status_to_layer2,
     archive_plan_to_layer2,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -117,9 +122,9 @@ def _consume_maintenance_queue_inline(state: dict, queue: list[dict]) -> dict:
             elif task_type == "layer3_compress":
                 # [DEBUG] 检查压缩输入状态
                 workspace_msgs = working_state.get("messages", []) or []
-                print(f"[Finalizer] layer3_compress: workspace_messages={len(workspace_msgs)}")
+                logger.info(f"layer3_compress: workspace_messages={len(workspace_msgs)}")
                 task_updates = compress_layer3(working_state)
-                print(f"[Finalizer] layer3_compress returned: {list(task_updates.keys()) if task_updates else 'empty'}")
+                logger.info(f"layer3_compress returned: {list(task_updates.keys()) if task_updates else 'empty'}")
 
             elif task_type == "task_reasoning_compress":
                 task_updates = compress_task_reasoning(working_state)
@@ -129,17 +134,12 @@ def _consume_maintenance_queue_inline(state: dict, queue: list[dict]) -> dict:
                 guide_id = payload.get("guide_id")
                 if guide_id:
                     guide_obj = None
-                    for g in working_state.get("action_guides", []) or []:
+                    layer2_memory = working_state.get("layer2_memory") or {}
+                    guides2 = layer2_memory.get("action_guides", []) if isinstance(layer2_memory, dict) else []
+                    for g in guides2 or []:
                         if isinstance(g, dict) and g.get("id") == guide_id:
                             guide_obj = g
                             break
-                    if not guide_obj:
-                        layer2_memory = working_state.get("layer2_memory") or {}
-                        guides2 = layer2_memory.get("action_guides", []) if isinstance(layer2_memory, dict) else []
-                        for g in guides2 or []:
-                            if isinstance(g, dict) and g.get("id") == guide_id:
-                                guide_obj = g
-                                break
                     if guide_obj:
                         task_updates = archive_guide_to_layer2(guide_obj, working_state)
                         flags = dict(flags)
@@ -224,7 +224,7 @@ def _consume_maintenance_queue_inline(state: dict, queue: list[dict]) -> dict:
     return updates
 
 
-def post_turn_finalize_node(state: dict) -> dict:
+def post_turn_finalize_node(state: dict, config: RunnableConfig | None = None) -> dict:
     """
     每轮结束的 Finalizer：
     1) 同步 messages → layer3_memory.all_messages（全量存储）
@@ -235,7 +235,7 @@ def post_turn_finalize_node(state: dict) -> dict:
     
     # [DEBUG] 验证 finalizer 是否被调用
     queue_before = len(_get_queue(state))
-    print(f"[Finalizer] post_turn_finalize called, queue_before={queue_before}, onboarding_completed={state.get('onboarding_completed')}")
+    logger.info(f"post_turn_finalize called, queue_before={queue_before}, onboarding_completed={state.get('onboarding_completed')}")
     
     updates: Dict[str, Any] = {}
 
@@ -269,12 +269,12 @@ def post_turn_finalize_node(state: dict) -> dict:
     batch_size = LAYER3_ARCHIVE_CONFIG.get("compression_batch_size", 1)
     excess = user_turns - threshold if user_turns > threshold else 0
     should_compress = excess > 0 and excess % batch_size == 0
-    print(f"[Finalizer] Compression check: workspace_messages={len(workspace_msgs)}, user_turns={user_turns}, threshold={threshold}, batch_size={batch_size}, excess={excess}, should_compress={should_compress}")
+    logger.info(f"Compression check: workspace_messages={len(workspace_msgs)}, user_turns={user_turns}, threshold={threshold}, batch_size={batch_size}, excess={excess}, should_compress={should_compress}")
     
     if check_layer3_compression_needed(working_state):
         if not _queue_has(queue, "layer3_compress", "layer3_compress"):
             _enqueue(queue, task_type="layer3_compress", task_key="layer3_compress")
-            print(f"[Finalizer] Enqueued layer3_compress task")
+            logger.info(f"Enqueued layer3_compress task")
 
     # 2.3 任务思考过程压缩（Layer3 task_registry）
     tasks_to_compress = check_task_reasoning_compression_needed(working_state)
@@ -290,7 +290,7 @@ def post_turn_finalize_node(state: dict) -> dict:
 
     layer2_memory = working_state.get("layer2_memory") or {}
     guides_source = layer2_memory.get("action_guides") if isinstance(layer2_memory, dict) else None
-    guides = guides_source if isinstance(guides_source, list) and guides_source else (working_state.get("action_guides", []) or [])
+    guides = guides_source if isinstance(guides_source, list) else []
 
     for g in guides:
         if not isinstance(g, dict):
@@ -367,7 +367,7 @@ def post_turn_finalize_node(state: dict) -> dict:
     })
     
     if is_studio and queue:
-        print(f"[Finalizer] Studio mode detected, consuming {len(queue)} maintenance tasks inline")
+        logger.info(f"Studio mode detected, consuming {len(queue)} maintenance tasks inline")
         inline_updates = _consume_maintenance_queue_inline(working_state, queue)
         if inline_updates:
             updates.update(inline_updates)
@@ -400,5 +400,4 @@ def post_turn_finalize_node(state: dict) -> dict:
         })
 
     return updates
-
 

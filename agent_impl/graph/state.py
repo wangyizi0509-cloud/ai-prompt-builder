@@ -9,7 +9,7 @@ AgentState 状态定义
 - v3.1: 将模型推理 (Rolling Scratchpad) 移入 Layer 3，增加滚动摘要
 """
 
-from typing import Literal, Optional, Annotated
+from typing import Literal, Optional, Annotated, Any
 from typing_extensions import TypedDict
 from datetime import datetime
 import uuid
@@ -37,18 +37,12 @@ from graph.context_types import (
     ConversationSummary,
     # 其他
     CrushChatStorage,
-    AgentTaskRegistry,
     ReportCounter,
     TaskState,
-    # 向后兼容
-    HistoryArchive,
     # 工厂函数
-    create_empty_user_context,
     create_empty_layer1_memory,
     create_empty_layer2_memory,
     create_empty_layer3_memory,
-    create_empty_history_archive,
-    create_empty_task_registry,
     create_empty_report_counter,
 )
 
@@ -80,64 +74,6 @@ class FeedbackCompression(TypedDict, total=False):
 # 保留原有类型（向后兼容）
 # ============================================================
 
-class UserProfile(TypedDict, total=False):
-    """
-    用户情报（旧版，保留向后兼容）
-    
-    @deprecated: 请使用 UserContext（3×3 矩阵）替代
-    """
-    name: str
-    age: int
-    gender: str
-    occupation: str
-    crush_info: str  # Crush 基本信息
-    relationship_context: str  # 关系背景
-    known_facts: list[str]  # 已知事实列表
-
-
-class StatusReport(TypedDict, total=False):
-    """
-    现状分析报告（旧版）
-    
-    @deprecated: 请使用 StatusReportItem 替代
-    """
-    stage: str  # L1-L4 或 T1-T3
-    stage_description: str  # 阶段描述
-    acr_analysis: dict  # A/C/R 三维分析
-    key_issues: list[str]  # 核心问题
-    risk_points: list[str]  # 风险点
-    summary: str  # 总结
-    report_content: str  # Markdown 格式的完整报告
-
-
-class ActionPlan(TypedDict, total=False):
-    """
-    行动规划（战略层）- 旧版
-    
-    @deprecated: 请使用 ActionPlanItem 替代
-    """
-    goal: str  # 阶段性目标
-    strategy: str  # 核心策略方向
-    phases: list[dict]  # 分阶段计划
-    key_principles: list[str]  # 关键原则
-    summary: str  # 总结
-
-
-class ActionGuide(TypedDict, total=False):
-    """
-    行动指南（战术层）- 旧版单个指南
-    
-    @deprecated: 请使用 ActionGuideItem 列表替代
-    """
-    current_task: str  # 当前任务
-    steps: list[str]  # 具体步骤
-    talking_points: list[str]  # 话术要点
-    dos: list[str]  # 该做的
-    donts: list[str]  # 不该做的
-    next_milestone: str  # 下一个里程碑
-    guide_content: str  # Markdown 格式的完整指南
-
-
 # ============================================================
 # AgentState - 核心状态对象
 # ============================================================
@@ -161,17 +97,9 @@ class AgentState(TypedDict, total=False):
     
     # === Layer 1: 静态情报（分层长期记忆）===
     layer1_memory: Layer1Memory  # Layer 1 长期记忆（全量 + 提取配置）
-    # 向后兼容字段
-    user_context: UserContext    # @deprecated: 直接访问，请使用 layer1_memory.full_data
-    user_profile: UserProfile    # @deprecated: 旧版，保留向后兼容
     
     # === Layer 2: 工作上下文（分层长期记忆）===
     layer2_memory: Layer2Memory  # Layer 2 长期记忆（全量 + 提取配置）
-    # 向后兼容字段
-    status_report: Optional[StatusReport]         # @deprecated: 请使用 layer2_memory
-    action_plan: Optional[ActionPlan]             # @deprecated: 请使用 layer2_memory
-    action_guides: list[ActionGuideItem]          # @deprecated: 请使用 layer2_memory
-    action_guide: Optional[ActionGuide]           # @deprecated: 旧版单个指南
     
     # === Layer 3: 对话历史与推理（分层长期记忆）===
     layer3_memory: Layer3Memory  # Layer 3 长期记忆（全量 + 提取配置）
@@ -179,14 +107,8 @@ class AgentState(TypedDict, total=False):
     # 但实际的长期存储和提取逻辑由 layer3_memory 管理
     messages: Annotated[list, add_messages]
     
-    # === 向后兼容：旧的 Layer 4 历史存档 ===
-    history_archive: HistoryArchive  # @deprecated: 请使用各层的 memory
-    
     # === Crush 聊天记录存储 ===
     crush_chat_storage: Optional[CrushChatStorage]
-    
-    # === 任务级思考过程管理 (Rolling Scratchpad) ===
-    task_registry: AgentTaskRegistry  # @deprecated: 移入 layer3_memory.task_registry，保留此字段仅为向后兼容
     
     # === 报告编号追踪 ===
     report_counter: ReportCounter
@@ -210,8 +132,8 @@ class AgentState(TypedDict, total=False):
     
     # === Agent 输出 ===
     pending_responses: list[dict]
-    pending_questions: list[str]
     inquiry_card: Optional[dict]
+    inquiry_answers: Optional[Any]
     # Onboarding: 局势初判卡（前端可直接渲染）
     preliminary_assessment: Optional[dict]
     
@@ -233,62 +155,16 @@ class AgentState(TypedDict, total=False):
     # === 路由控制 ===
     should_continue: bool
     route_to: str
-
-    # === Agent 执行状态 ===
-    current_agent: Optional[str]
-    agent_resume_point: Optional[str]
-    _tool_caller: Optional[str]
-    # 最新一次工具输出（用于二阶段 Prompt 注入）
-    _last_tool_outputs: list
-    _last_tool_content: Optional[str]
-    # 工具触发的状态机切换信息
-    _handoff_target: Optional[str]
-    _handoff_instruction: Optional[str]
-    # Submit 工具执行结果（用于路由判断）
-    _submit_result: Optional[dict]
-    # 两阶段工具强制执行标记
-    _pending_action: Optional[str]
-    # 回复技能（consult_answer/emotion_support）完成标记，用于路由直接结束
-    _reply_skill_complete: Optional[bool]
-    # 思考模式：当前轮次的 reasoning_content 缓存（工具调用链中回传用）
-    _reasoning_content_cache: Optional[str]
+    
+    runtime: dict
+    tool_patch_log: list[dict]
     collected_info: dict
-    # 指令（Main Agent 给专家的 Brief）
-    instruction: Optional[str]
     # Onboarding 状态
     onboarding_completed: bool
     onboarding_turn_count: int
     onboarding_max_turns: int
     onboarding_handoff: Optional[dict]
     last_onboarding_question: Optional[str]
-    pending_crushe_guide: bool
-    question_count: int
-    max_questions: int
-
-    # === 提问节流（vNext）：同一 Agent 连续提问轮次控制 ===
-    # 规则：同一 agent 连续 ask_user 不超过 max_question_streak；一旦中间发生非提问动作（如出报告/路由到其它 agent/结束本轮但不在提问暂停态），立即清零。
-    question_streak_agent: Optional[str]        # 当前连续提问的 agent（main_agent/status_agent/plan_agent/guide_agent）
-    question_streak_count: int                 # 当前连续提问轮次（仅对 question_streak_agent 生效）
-    max_question_streak: int                   # 同一 agent 连续提问的最大轮次（默认 3）
-    
-    # === 提问模式（渐进式披露）===
-    # ask_mode=False 时：ask 工具只能设置为 enable（进入提问模式）
-    # ask_mode=True 时：ask 工具变为完整的提问 schema，强制模型调用
-    ask_mode: bool                              # 提问模式状态，默认 False
-    ask_mode_tool_message_id: Optional[str]     # Phase 1 的 ToolMessage ID，用于后续简化
-    
-    # === 解答模式（渐进式披露）===
-    # consult_mode=False 时：consult_answer 工具只能设置为 enable（进入解答模式）
-    # consult_mode=True 时：consult_answer 工具变为 complete 版本，模型输出 content + tool_call(complete)
-    consult_mode: bool                              # 解答模式状态，默认 False
-    consult_mode_tool_message_id: Optional[str]     # Phase 1 的 ToolMessage ID，用于后续简化
-    
-    # === 情感陪伴模式（渐进式披露）===
-    # emotion_mode=False 时：emotion_support 工具只能设置为 enable（进入陪伴模式）
-    # emotion_mode=True 时：emotion_support 工具变为 complete 版本，模型输出 content + tool_call(complete)
-    emotion_mode: bool                              # 情感陪伴模式状态，默认 False
-    emotion_mode_tool_message_id: Optional[str]     # Phase 1 的 ToolMessage ID，用于后续简化
-    
     # === 循环控制 ===
     _iteration_count: int
 
@@ -332,74 +208,33 @@ def create_initial_state(user_message: str, **overrides) -> AgentState:
         
         # Layer 1: 静态情报
         layer1_memory=layer1,
-        user_context=layer1["full_data"],  # 向后兼容
-        user_profile={},
         
         # Layer 2: 工作上下文
         layer2_memory=layer2,
-        status_report=None,
-        action_plan=None,
-        action_guides=[],
-        action_guide=None,
         preliminary_assessment=None,
         
         # Layer 3: 对话历史与推理
         layer3_memory=layer3,
         
-        # 向后兼容
-        history_archive=create_empty_history_archive(),
-        
         # Crush 聊天记录
         crush_chat_storage=None,
         
-        # 任务管理 - 保持空以便兼容，实际存储在 layer3_memory 中
-        task_registry=create_empty_task_registry(),
         report_counter=create_empty_report_counter(),
         
         # 流程控制
         intent_type="action_trigger",
         next_action="end_turn",
         pending_responses=[],
-        pending_questions=[],
+        runtime={},
+        tool_patch_log=[],
+        collected_info={},
         should_continue=True,
         route_to="main_agent",
-        
-        # Agent 执行状态
-        current_agent=None,
-        agent_resume_point=None,
-        _handoff_target=None,
-        _handoff_instruction=None,
-        _submit_result=None,
-        _pending_action=None,
-        _reply_skill_complete=None,
-        _reasoning_content_cache=None,
-        collected_info={},
-        instruction=None,  # Main Agent 给专家的 Brief（v3.0）
         onboarding_completed=False,  # 默认未完成，正常进入 Onboarding
         onboarding_turn_count=0,
         onboarding_max_turns=3,
         onboarding_handoff=None,
         last_onboarding_question=None,
-        pending_crushe_guide=False,
-        question_count=0,
-        max_questions=3,
-
-        # 提问节流（默认：同一 agent 连续提问最多 3 轮）
-        question_streak_agent=None,
-        question_streak_count=0,
-        max_question_streak=3,
-        
-        # 提问模式（渐进式披露）
-        ask_mode=False,
-        ask_mode_tool_message_id=None,
-        
-        # 解答模式（渐进式披露）
-        consult_mode=False,
-        consult_mode_tool_message_id=None,
-        
-        # 情感陪伴模式（渐进式披露）
-        emotion_mode=False,
-        emotion_mode_tool_message_id=None,
         
         # 循环控制
         _iteration_count=0,
@@ -431,152 +266,6 @@ def create_initial_state(user_message: str, **overrides) -> AgentState:
         state[key] = value
 
     return state
-
-
-def migrate_user_profile_to_context(old_profile: UserProfile) -> UserContext:
-    """
-    将旧的 UserProfile 迁移到新的 UserContext（3×3 矩阵）
-    
-    迁移规则：
-    - name/age/gender/occupation -> user_info.user_provide
-    - crush_info -> crush_info.user_provide
-    - relationship_context -> both_info.user_provide
-    - known_facts -> both_info.fact（客观事实）
-    
-    Args:
-        old_profile: 旧版 UserProfile
-    
-    Returns:
-        新版 UserContext
-    """
-    user_provide_parts = []
-    if old_profile.get("name"):
-        user_provide_parts.append(f"姓名：{old_profile['name']}")
-    if old_profile.get("age"):
-        user_provide_parts.append(f"年龄：{old_profile['age']}")
-    if old_profile.get("gender"):
-        user_provide_parts.append(f"性别：{old_profile['gender']}")
-    if old_profile.get("occupation"):
-        user_provide_parts.append(f"职业：{old_profile['occupation']}")
-    
-    return UserContext(
-        user_info={
-            "user_provide": "\n".join(user_provide_parts) if user_provide_parts else "",
-            "fact": "",
-            "ai_provide": "",
-        },
-        crush_info={
-            "crush_name": "",
-            "user_provide": old_profile.get("crush_info", ""),
-            "fact": "",
-            "ai_provide": "",
-        },
-        both_info={
-            "user_provide": old_profile.get("relationship_context", ""),
-            "fact": "\n".join(old_profile.get("known_facts", [])),
-            "ai_provide": "",
-        },
-    )
-
-
-def migrate_to_layered_memory(state: AgentState) -> AgentState:
-    """
-    将旧版状态迁移到新的分层长期记忆架构
-    
-    Args:
-        state: 旧版状态
-    
-    Returns:
-        迁移后的新版状态
-    """
-    # 如果已经有新版字段，直接返回
-    if state.get("layer1_memory") and state.get("layer2_memory") and state.get("layer3_memory"):
-        return state
-    
-    # 迁移 Layer 1
-    layer1 = create_empty_layer1_memory()
-    if state.get("user_context"):
-        layer1["full_data"] = state["user_context"]
-    
-    # 迁移 Layer 2
-    layer2 = create_empty_layer2_memory()
-    if state.get("status_report"):
-        from graph.context_types import create_status_report_item
-        report_item = create_status_report_item(
-            report_content=state["status_report"].get("report_content", ""),
-            report_id=state.get("report_counter", {}).get("status_report", 1),
-            stage=state["status_report"].get("stage", ""),
-            stage_description=state["status_report"].get("stage_description", ""),
-            acr_analysis=state["status_report"].get("acr_analysis", {}),
-            key_issues=state["status_report"].get("key_issues", []),
-            risk_points=state["status_report"].get("risk_points", []),
-        )
-        layer2["current_status_report"] = report_item
-    
-    if state.get("action_guides"):
-        layer2["action_guides"] = state["action_guides"]
-    
-    # 迁移 Layer 3
-    layer3 = create_empty_layer3_memory()
-    if state.get("messages"):
-        layer3["all_messages"] = list(state["messages"])
-        
-    # 迁移 TaskRegistry 到 Layer 3
-    if state.get("task_registry"):
-        layer3["task_registry"] = state.get("task_registry")
-    
-    # 迁移旧的 history_archive 到各层
-    if state.get("history_archive"):
-        archive = state["history_archive"]
-        
-        # 迁移对话归档到 Layer 3
-        if archive.get("conversation_archive"):
-            for conv in archive["conversation_archive"]:
-                summary = ConversationSummary(
-                    id=conv.get("id", ""),
-                    summary=conv.get("summary", ""),
-                    start_time=conv.get("start_time", ""),
-                    end_time=conv.get("end_time", ""),
-                    turn_count=conv.get("turn_count", 0),
-                    key_topics=conv.get("key_topics", []),
-                    extracted_info=conv.get("extracted_info", {}),
-                )
-                layer3["conversation_summaries"].append(summary)
-    
-    # 更新状态
-    state["layer1_memory"] = layer1
-    state["layer2_memory"] = layer2
-    state["layer3_memory"] = layer3
-    
-    return state
-
-
-# ============================================================
-# 辅助函数
-# ============================================================
-
-def get_active_action_guides(action_guides: list[ActionGuideItem]) -> list[ActionGuideItem]:
-    """
-    获取所有活跃的（未完成的）行动指南
-    
-    @deprecated: 请使用 context_types.get_active_action_guides(layer2_memory) 替代
-    """
-    return [
-        guide for guide in action_guides
-        if guide.get("status") in ("pending", "in_progress", "paused")
-    ]
-
-
-def get_completed_action_guides(action_guides: list[ActionGuideItem]) -> list[ActionGuideItem]:
-    """
-    获取所有已完成的行动指南
-    
-    @deprecated: 请使用 context_types.get_completed_action_guides(layer2_memory) 替代
-    """
-    return [
-        guide for guide in action_guides
-        if guide.get("status") in ("completed", "cancelled", "expired")
-    ]
 
 
 # ============================================================
@@ -624,11 +313,20 @@ def convert_message_to_dict(message) -> dict:
     """将消息转换为 dict，兼容 LangChain Message / dict"""
     if isinstance(message, dict):
         return dict(message)
+    additional_kwargs = getattr(message, "additional_kwargs", {}) or {}
+    response_metadata = getattr(message, "response_metadata", {}) or {}
+    reasoning_content = getattr(message, "reasoning_content", None)
+    if reasoning_content is None:
+        reasoning_content = additional_kwargs.get("reasoning_content")
+    if reasoning_content is None:
+        reasoning_content = response_metadata.get("reasoning_content")
     return {
         "id": getattr(message, "id", None),
         "role": getattr(message, "type", None) or getattr(message, "role", None),
         "content": getattr(message, "content", None),
-        "additional_kwargs": getattr(message, "additional_kwargs", {}),
+        "additional_kwargs": additional_kwargs,
+        "response_metadata": response_metadata,
+        "reasoning_content": reasoning_content,
         "tool_call_id": getattr(message, "tool_call_id", None),
         "name": getattr(message, "name", None),
         "tool_calls": getattr(message, "tool_calls", None),

@@ -5,6 +5,7 @@ LangGraph SDK 客户端工具
 import os
 import hashlib
 import uuid
+from typing import Any
 from langgraph_sdk import get_sync_client
 
 from utils.langgraph_config import (
@@ -106,7 +107,7 @@ def update_thread_state(thread_id: str, updates: dict):
     client.threads.update_state(thread_id, updates)
 
 
-def run_assistant(thread_id: str, input_state: dict, stream_mode: str = "values"):
+def run_assistant(thread_id: str, input_state: Any, stream_mode: str = "values"):
     """运行 assistant 并返回流式结果"""
     client = get_client()
     return client.runs.stream(

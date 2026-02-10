@@ -12,6 +12,7 @@ from graph.context_types import (
     create_action_plan_item,
     create_action_guide_item,
 )
+from graph.archive_manager import LAYER3_ARCHIVE_CONFIG
 
 
 def _has_task(queue: list[dict], task_type: str, task_key_prefix: str) -> bool:
@@ -61,22 +62,19 @@ def test_fullstore_sync_appends_new_messages():
 
 def test_enqueues_layer3_compress_at_threshold_batch_point():
     layer3 = create_empty_layer3_memory()
-    # 使用工作区 messages 触发：threshold=4，user_turns=5 => 触发压缩
+    threshold = int(LAYER3_ARCHIVE_CONFIG.get("compression_threshold", 25))
+    batch_size = int(LAYER3_ARCHIVE_CONFIG.get("compression_batch_size", 1))
+    target_turns = threshold + batch_size
     layer3["all_messages"] = []
+
+    messages = []
+    for i in range(target_turns):
+        messages.append({"role": "user", "content": f"u{i}", "id": f"u{i}"})
+        messages.append({"role": "assistant", "content": f"a{i}", "id": f"a{i}"})
 
     state = {
         "layer3_memory": layer3,
-        "messages": [
-            {"role": "user", "content": "u1", "id": "u1"},
-            {"role": "assistant", "content": "a1", "id": "a1"},
-            {"role": "user", "content": "u2", "id": "u2"},
-            {"role": "assistant", "content": "a2", "id": "a2"},
-            {"role": "user", "content": "u3", "id": "u3"},
-            {"role": "assistant", "content": "a3", "id": "a3"},
-            {"role": "user", "content": "u4", "id": "u4"},
-            {"role": "assistant", "content": "a4", "id": "a4"},
-            {"role": "user", "content": "u5", "id": "u5"},
-        ],
+        "messages": messages,
         "maintenance_queue": [],
         "maintenance_flags": {},
     }
@@ -210,5 +208,4 @@ def test_finalizer_is_idempotent_no_duplicate_queue_items():
 
     plan_tasks = [t for t in q2 if isinstance(t, dict) and t.get("type") == "archive_plan" and t.get("task_key") == f"archive_plan:{old['id']}"]
     assert len(plan_tasks) == 1
-
 

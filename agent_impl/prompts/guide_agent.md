@@ -152,9 +152,9 @@
 当且仅当 `<instruction>` 明确写了 **【行动反馈流程】** 时，你才进入反馈模式；否则你按普通“行动指南生成/更新”流程工作（不要让反馈规则干扰日常产出）。
 
 反馈模式下的总原则（保持简洁、少打字）：
-1. **优先少打字**：信息不足时，优先用 `ask` 生成 1 张问题卡（1-2 个问题，尽量选择题/多选题）。
+1. **优先少打字**：信息不足时，优先用 `ask_human(inquiry_card=...)` 生成 1 张问题卡（1-2 个问题，尽量选择题/多选题）。
 2. **信息足够就写入**：信息足够时，调用 `update_guide_status(...)` 写入 `feedback_*` 字段，并按需更新 `new_status`。
-3. **收口回主流程**：完成写入后调用 `return_to_main(reason=...)`，并在 `content` 输出一句以 **`[反馈完成]`** 开头的最短总结。
+3. **收口回主流程**：完成写入后，在 `content` 输出一句以 **`[反馈完成]`** 开头的最短总结，然后停止继续追问，让主 Agent 统一编排下一步。
 
 **多任务迭代机制**：
 一个 Plan Phase (战略阶段) 可能包含**多个**原子任务。
@@ -165,11 +165,10 @@
 请严格遵守以下输出协议：`content` 只输出自然语言；**所有结构化产出必须通过工具调用提交**。
 
 ### 情况A：需要提问
-
-当判断信息阻塞时，使用 `ask` 工具两阶段完成提问：先调用 `ask(action="enable")` 进入提问模式，再调用 `ask(questions=[...], intro=..., reasoning=...)` 输出提问卡片。
+当判断信息阻塞时，构造 `inquiry_card` 并调用 `ask_human(inquiry_card=...)` 输出提问卡片；系统会暂停等待用户回答，并在 resume 后把答案回传给你。
 
 ### 情况B：输出/更新行动指南
-推荐做法：尽量在同一轮把能确定的工具都调用完：`submit_action_guide(...)` / `update_guide_content(...)` +（如需）`update_guide_status(...)` + `return_to_main(...)`。如果信息阻塞需要用户补充，则继续走 `ask` 两阶段。
+推荐做法：尽量在同一轮把能确定的工具都调用完：`submit_action_guide(...)` / `update_guide_content(...)` +（如需）`update_guide_status(...)`。如果信息阻塞需要用户补充，则使用 `ask_human` 提问并等待恢复。
 
 你有两种提交方式，按“是否需要原地更新”来选：
 *   **新增一条指南**：调用 `submit_action_guide(...)`（会生成新的指南编号）。
@@ -189,8 +188,10 @@
 
 如果本轮既需要生成新指南，又需要更新旧指南状态：可以在同一轮里调用 `submit_action_guide`，并按需再调用一个或多个 `update_guide_status`。
 
-### ✅ 任务完成转接协议（回主 Agent）
-当你完成了本轮所有必要工具操作后（例如：已 `submit_action_guide` / `update_guide_content` 写入新版指南，且需要收尾的旧指南状态也已 `update_guide_status` 处理完），必须调用 `return_to_main(reason=...)` 把控制权交还给主 Agent，它可能会有下一步的决策。  
+### ✅ 任务完成收口（面向主 Agent 的最小总结）
+当你完成了本轮所有必要工具操作后（例如：已 `submit_action_guide` / `update_guide_content` 写入新版指南，且需要收尾的旧指南状态也已 `update_guide_status` 处理完）：
+- 在 `content` 输出一句话的“执行摘要/下一步注意事项”（不要复读指南正文）
+- 停止继续追问，让主 Agent 统一编排下一步
 
 ---
 
@@ -235,4 +236,3 @@
 ```
 
 ---
-

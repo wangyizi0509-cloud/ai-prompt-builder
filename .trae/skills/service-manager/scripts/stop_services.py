@@ -7,6 +7,7 @@ Stops LangGraph and FastAPI services running on ports 2024 and 8000
 import subprocess
 import sys
 import os
+import time
 
 
 def run_command(args, cwd=None, env=None):
@@ -21,10 +22,10 @@ def run_command(args, cwd=None, env=None):
 
 
 def get_processes_on_port(port):
-    """Get PIDs of processes using the specified port"""
+    """Get PIDs of processes listening on the specified TCP port"""
     try:
         result = subprocess.run(
-            ['lsof', '-ti', f':{port}'],
+            ['lsof', '-nP', '-iTCP:%d' % port, '-sTCP:LISTEN', '-t'],
             capture_output=True,
             text=True
         )
@@ -46,10 +47,25 @@ def stop_service(port, service_name):
     print(f"🔧 Stopping {service_name} service (PIDs: {', '.join(map(str, pids))})...")
     for pid in pids:
         try:
-            subprocess.run(['kill', '-9', str(pid)], check=True)
-            print(f"   ✓ Stopped PID {pid}")
-        except subprocess.CalledProcessError:
-            print(f"   ✗ Failed to stop PID {pid}")
+            subprocess.run(['kill', '-TERM', str(pid)], check=False)
+            print(f"   ✓ Sent SIGTERM to PID {pid}")
+        except Exception:
+            print(f"   ✗ Failed to signal PID {pid}")
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        if not get_processes_on_port(port):
+            break
+        time.sleep(0.2)
+
+    remaining = get_processes_on_port(port)
+    if remaining:
+        for pid in remaining:
+            try:
+                subprocess.run(['kill', '-KILL', str(pid)], check=False)
+                print(f"   ✓ Sent SIGKILL to PID {pid}")
+            except Exception:
+                print(f"   ✗ Failed to kill PID {pid}")
     
     return True
 

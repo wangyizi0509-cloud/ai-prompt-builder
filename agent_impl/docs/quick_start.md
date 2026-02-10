@@ -1,5 +1,15 @@
 # 🚀 快速开始调试
 
+## 方式 0: 非流式验收（推荐团队自测）
+
+一键跑“非流式 interrupt/resume + 单测回归”：
+
+```bash
+./agent_impl/verify_non_stream.sh dev
+```
+
+验收标准与覆盖范围见 docs/acceptance_non_stream.md。
+
 ## 方式 1: Streaming API（立即可用）
 
 ### 启动服务器
@@ -85,4 +95,3 @@ langgraph dev
 
 ✅ Streaming API 已配置，可以直接使用
 ⚠️  LangSmith Studio 需要配置 API Key
-

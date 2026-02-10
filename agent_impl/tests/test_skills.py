@@ -40,7 +40,10 @@ class TestSkillLoader:
     def test_load_skill_returns_content(self, skill_id):
         """指令应能成功加载且非空"""
         tool = create_all_skills_loader()
-        content = tool.invoke({"skill_id": skill_id})
-        
-        assert isinstance(content, str)
+        result = tool.invoke({"skill_id": skill_id})
+        if isinstance(result, dict) and "output" in result:
+            content = str(result.get("output") or "")
+        else:
+            content = str(result or "")
+
         assert content.strip()

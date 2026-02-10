@@ -24,6 +24,7 @@
 import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, Literal
+import logging
 
 if TYPE_CHECKING:
     from graph.state import AgentState
@@ -58,6 +59,8 @@ from graph.tools.task_tools import (
     get_active_task as get_active_task_from_list,
 )
 
+
+logger = logging.getLogger(__name__)
 
 # ============================================================
 # Token 预算常量
@@ -206,9 +209,6 @@ def _build_context_dict_payload(state: "AgentState", target_agent: str = "main_a
         # Layer 3: 对话历史
         "conversation_history": conversation_history,
         "current_task_id": current_task_id,
-
-        # Main Agent → 专家 Brief
-        "instruction": str(state.get("instruction") or ""),
     }
 
 
@@ -801,13 +801,6 @@ def _extract_current_status_report(state: "AgentState") -> str:
         current = layer2_memory.get("current_status_report")
         if current:
             return _format_status_report_item(current)
-    legacy_report = state.get("status_report")
-    if isinstance(legacy_report, str) and legacy_report.strip():
-        return legacy_report
-    if isinstance(legacy_report, dict) and legacy_report:
-        if legacy_report.get("report_content"):
-            return str(legacy_report.get("report_content") or "")
-        return _format_status_report_item(legacy_report)
     return "暂无现状分析报告"
 
 
@@ -818,11 +811,6 @@ def _extract_current_action_plan(state: "AgentState") -> str:
         current = layer2_memory.get("current_action_plan")
         if current:
             return _format_action_plan_item(current)
-    legacy_plan = state.get("action_plan")
-    if isinstance(legacy_plan, str) and legacy_plan.strip():
-        return legacy_plan
-    if isinstance(legacy_plan, dict) and legacy_plan:
-        return _format_action_plan_item(legacy_plan)
     return "暂无行动规划"
 
 
@@ -842,9 +830,6 @@ def _extract_action_guides(state: "AgentState") -> str:
         if all_guides:
             config = layer2_memory.get("extraction_config", LAYER2_DEFAULT_CONFIG)
             return _format_action_guide_items(all_guides, config)
-    legacy_guides = state.get("action_guides")
-    if isinstance(legacy_guides, list) and legacy_guides:
-        return _format_legacy_action_guides(legacy_guides)
     return "暂无行动指南"
 
 
@@ -1048,31 +1033,6 @@ def _format_action_guide_items(items: list[ActionGuideItem], config: dict | None
     return "\n\n".join(sections) if sections else "暂无行动指南"
 
 
-def _format_legacy_action_guides(items: list[dict]) -> str:
-    """格式化旧版 action_guides（兼容直接注入完整内容）"""
-    parts: list[str] = []
-    for guide_item in items:
-        if not isinstance(guide_item, dict):
-            continue
-        content = ""
-        if isinstance(guide_item.get("guide_content"), str) and guide_item.get("guide_content"):
-            content = guide_item.get("guide_content") or ""
-        else:
-            nested = guide_item.get("guide") if isinstance(guide_item.get("guide"), dict) else {}
-            if isinstance(nested.get("guide_content"), str) and nested.get("guide_content"):
-                content = nested.get("guide_content") or ""
-        if content:
-            parts.append(content)
-            continue
-        title = guide_item.get("title") or guide_item.get("id") or "未命名指南"
-        summary = guide_item.get("summary") or guide_item.get("one_liner") or ""
-        if summary:
-            parts.append(f"## {title}\n\n{summary}")
-        else:
-            parts.append(f"## {title}")
-    return "\n\n".join(parts) if parts else "暂无行动指南"
-
-
 # ============================================================
 # 辅助函数
 # ============================================================
@@ -1178,7 +1138,7 @@ def check_and_compress_if_needed(state: "AgentState") -> dict:
     )
     
     if check_layer3_compression_needed(state):
-        print(f"[ContextBuilder] Layer 3 compression triggered")
+        logger.info(f"Layer 3 compression triggered")
         return compress_layer3(state)
     
     return {}

@@ -21,6 +21,7 @@ from typing import Literal, Optional, Any
 from datetime import datetime, timedelta
 import uuid
 from pathlib import Path
+import logging
 
 from graph.context_types import (
     UserContext,
@@ -35,6 +36,8 @@ from graph.context_types import (
 from utils.message_utils import get_msg_role_and_content, count_user_turns
 from config import get_llm
 
+
+logger = logging.getLogger(__name__)
 
 # ============================================================
 # Prompt 模板加载（统一存放在 context_system/04_Prompts）
@@ -364,7 +367,7 @@ def _process_conversation(
     llm_calls = 0
     response = llm.invoke(prompt)
     llm_calls += 1
-    print(f"[OrganizeAgent] _process_conversation llm_calls={llm_calls}")
+    logger.info(f"_process_conversation llm_calls={llm_calls}")
     parsed = _parse_json_response(response.content)
     
     # 解析 Layer 1 信息（注意：新 Prompt 输出字段名是 layer1_info）
@@ -972,21 +975,21 @@ def archive_conversation_batch(
             "dynamic_intels": list[DynamicIntelItem],
         }
     """
-    print(f"[OrganizeAgent] archive_conversation_batch called with {len(messages_to_archive)} messages")
+    logger.info(f"archive_conversation_batch called with {len(messages_to_archive)} messages")
     result = organize_and_archive(
         messages_to_archive,
         "conversation",
         existing_context,
         existing_layer2_memory,
     )
-    print(f"[OrganizeAgent] organize_and_archive returned: {list(result.keys()) if isinstance(result, dict) else type(result)}")
+    logger.info(f"organize_and_archive returned: {list(result.keys()) if isinstance(result, dict) else type(result)}")
     
     extracted_info = result.get("extracted_info", {})
-    print(f"[OrganizeAgent] extracted_info type: {type(extracted_info)}")
+    logger.info(f"extracted_info type: {type(extracted_info)}")
     
     # [FIX] 确保 extracted_info 是 dict
     if not isinstance(extracted_info, dict):
-        print(f"[OrganizeAgent] WARNING: extracted_info is not dict, using empty dict")
+        logger.warning(f"WARNING: extracted_info is not dict, using empty dict")
         extracted_info = {}
     
     updated_context = merge_extracted_info_to_context(
@@ -994,11 +997,11 @@ def archive_conversation_batch(
         extracted_info,
         source_type="conversation"  # 对话压缩
     )
-    print(f"[OrganizeAgent] updated_context type: {type(updated_context)}")
+    logger.info(f"updated_context type: {type(updated_context)}")
     
     # 直接从 result 获取动态情报（不再单独调用 extract_dynamic_intel_from_messages）
     dynamic_intels = result.get("dynamic_intels", [])
-    print(f"[OrganizeAgent] dynamic_intels count: {len(dynamic_intels)}")
+    logger.info(f"dynamic_intels count: {len(dynamic_intels)}")
     
     return {
         "conversation_archive": result["summary"],

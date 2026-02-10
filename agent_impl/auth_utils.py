@@ -1,4 +1,5 @@
 import os
+import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from fastapi import HTTPException, Depends, status
@@ -6,11 +7,12 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 JWT_SECRET = os.getenv("JWT_SECRET")
 
 if JWT_SECRET and JWT_SECRET == "your-secret-key-change-this-in-production":
-    print("Warning: JWT_SECRET is using default value. Please change it in production.")
+    logger.warning("JWT_SECRET is using default value. Please change it in production.")
 
 security = HTTPBearer()
 

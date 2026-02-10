@@ -15,12 +15,14 @@ import base64
 import json
 import asyncio
 import httpx
+import logging
 from io import BytesIO
 from typing import Literal, Optional
 from dotenv import load_dotenv
 from PIL import Image
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 # 截图类型定义
 ScreenshotType = Literal[
@@ -48,7 +50,7 @@ def load_screenshot_prompt(screenshot_type: str) -> str:
             
         return "请分析这张截图并提取关键信息。"
     except Exception as e:
-        print(f"Error loading prompt for {screenshot_type}: {e}")
+        logger.exception("Error loading prompt for %s", screenshot_type)
         return "请分析这张截图并提取关键信息。"
 
 
@@ -92,9 +94,9 @@ class ImageProcessor:
         self.ocr_model = os.getenv("IMAGE_OCR_MODEL") or self.type_detect_model
         
         if not self.type_detect_api_key or not self.type_detect_model:
-            print("⚠️ 警告: 第一节点(类型识别)模型配置不完整，detect_type 可能不可用")
+            logger.warning("第一节点(类型识别)模型配置不完整，detect_type 可能不可用")
         if not self.ocr_api_key or not self.ocr_model:
-            print("⚠️ 警告: 第二节点(OCR)模型配置不完整，process_image 可能不可用")
+            logger.warning("第二节点(OCR)模型配置不完整，process_image 可能不可用")
     
     def _encode_image_to_base64(self, image_bytes: bytes) -> str:
         """将图片字节转为 base64"""
@@ -165,7 +167,7 @@ class ImageProcessor:
                 return output.getvalue()
         except Exception as e:
             # 缩图失败不阻断主流程，回退原图
-            print(f"Warn: resize for {reason} failed: {e}")
+            logger.warning("resize for %s failed: %s", reason, e)
             return image_bytes
 
     def _maybe_resize_for_type_detect(self, image_bytes: bytes) -> bytes:

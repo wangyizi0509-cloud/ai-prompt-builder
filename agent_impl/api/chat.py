@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from typing import Optional, Literal, List
+from typing import Optional, Literal, Any, Union, List
 
 router = APIRouter(prefix="/api")
 security = HTTPBearer(auto_error=False)
@@ -31,12 +31,14 @@ class ImageInfo(BaseModel):
     screenshot_type: Optional[str] = None
 
 
-class ChatRequest(BaseModel):
-    message: str
-    session_id: str
-    feedback_mode: Optional[FeedbackModeInput] = None
-    images: Optional[List[ImageInfo]] = None
 
+class ChatRequest(BaseModel):
+    message: str = ""
+    session_id: str
+    images: Optional[List[ImageInfo]] = None
+    feedback_mode: Optional[FeedbackModeInput] = None
+    resume_payload: Optional[Union[dict[str, Any], str]] = None
+    resume: Optional[bool] = None
 
 def _get_screenshot_label(screenshot_type: Optional[str]) -> str:
     labels = {
@@ -63,6 +65,7 @@ def _build_user_message_with_images(request: ChatRequest) -> str:
             if request.message:
                 final_message += f"\n\n---\n\n用户补充说明：{request.message}"
     return final_message
+
 
 
 async def get_optional_user_dep(
@@ -298,6 +301,17 @@ def _run_maintenance_tasks_sdk(session_id: str, thread_id: str) -> None:
     if any_changes:
         update_thread_state(thread_id, {"maintenance_queue": updated_queue})
 
+def _extract_inquiry_card_from_interrupt(final_state: dict) -> dict | None:
+    interrupts = final_state.get("__interrupt__")
+    if not isinstance(interrupts, list) or not interrupts:
+        return None
+    first = interrupts[0]
+    if isinstance(first, dict):
+        value = first.get("value")
+    else:
+        value = getattr(first, "value", None)
+    return value if isinstance(value, dict) else None
+
 
 @router.post("/chat")
 async def chat(
@@ -305,8 +319,18 @@ async def chat(
     background_tasks: BackgroundTasks,
     current_user=Depends(get_optional_user_dep),
 ):
-    final_message = _build_user_message_with_images(request)
-    logger.info(f"Received message from session {request.session_id}: {final_message[:50]}...")
+    is_resume = bool(request.resume_payload) or bool(request.resume)
+    has_images = bool(request.images)
+    if not is_resume and not (request.message or "").strip() and not has_images:
+        raise HTTPException(status_code=400, detail="message is required")
+    if is_resume and request.resume_payload is None:
+        raise HTTPException(status_code=400, detail="resume_payload is required when resume is true")
+
+    final_message = _build_user_message_with_images(request) if not is_resume else ""
+    message_preview = (final_message or "").strip()[:50] if not is_resume else ""
+    logger.info(
+        f"Received message from session {request.session_id}: {message_preview if not is_resume else '[resume]'}..."
+    )
 
     from api.sdk_client import (
         ensure_thread_exists,
@@ -318,26 +342,32 @@ async def chat(
     
     user_id = current_user['user_id'] if current_user else None
     thread_id = await ensure_thread_exists(request.session_id, user_id)
-    
-    base_state = get_thread_state(thread_id)
-    
-    if base_state is None:
-        logger.info(f"Creating new session for thread {thread_id} (checkpointer empty)")
-        current_message_id = str(uuid.uuid4())
-        state = create_initial_state(final_message, current_message_id=current_message_id)
-        state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
+
+    input_payload: Any
+    if is_resume:
+        from langgraph.types import Command
+        input_payload = Command(resume=request.resume_payload)
     else:
-        state = dict(base_state)
-        current_message_id = str(uuid.uuid4())
-        state["user_message"] = final_message
-        state["current_message_id"] = current_message_id
-        state["_iteration_count"] = 0
-        state["debug_log"] = []
-        state["inquiry_card"] = None
-        state["pending_questions"] = []
-        state["pending_responses"] = []
-        state["last_response_for_continuity"] = None
-        state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
+        base_state = get_thread_state(thread_id)
+
+        if base_state is None:
+            logger.info(f"Creating new session for thread {thread_id} (checkpointer empty)")
+            current_message_id = str(uuid.uuid4())
+            state = create_initial_state(final_message, current_message_id=current_message_id)
+            state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
+        else:
+            state = dict(base_state)
+            current_message_id = str(uuid.uuid4())
+            state["user_message"] = final_message
+            state["current_message_id"] = current_message_id
+            state["_iteration_count"] = 0
+            state["debug_log"] = []
+            state["inquiry_card"] = None
+            state["pending_questions"] = []
+            state["pending_responses"] = []
+            state["last_response_for_continuity"] = None
+            state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
+        input_payload = state
 
     try:
         logger.debug(f"Invoking workflow via SDK for thread {thread_id}...")
@@ -349,19 +379,27 @@ async def chat(
             data={
                 "session_id": request.session_id,
                 "thread_id": thread_id,
-                "message_preview": final_message[:100],
+                "message_preview": (final_message or request.message or "")[:100],
                 "use_stream": False,
                 "user_id": user_id,
+                "is_resume": is_resume,
             },
         )
         
         chunks = []
-        for chunk in run_assistant(thread_id, state, stream_mode="values"):
+        for chunk in run_assistant(thread_id, input_payload, stream_mode="values"):
             chunks.append(chunk)
         
         final_state = chunks[-1].data if chunks else {}
+        if not isinstance(final_state, dict):
+            final_state = {}
+        final_state = dict(final_state)
+        inquiry_card = _extract_inquiry_card_from_interrupt(final_state)
+        if inquiry_card is not None:
+            final_state["inquiry_card"] = inquiry_card
         
-        background_tasks.add_task(_run_maintenance_tasks_sdk, request.session_id, thread_id)
+        if inquiry_card is None:
+            background_tasks.add_task(_run_maintenance_tasks_sdk, request.session_id, thread_id)
         
         pending_responses = final_state.get("pending_responses", [])
         feedback_prefill = final_state.get("feedback_prefill")
@@ -373,24 +411,7 @@ async def chat(
         if pending_responses:
             combined_response = "\n\n".join([r["content"] for r in pending_responses if r.get("content")])
         else:
-            combined_response = ""
-            
-        # Fallback: 如果 pending_responses 为空，尝试从 messages 中提取最后一条 assistant 消息
-        if not combined_response:
-            messages = final_state.get("messages", [])
-            if messages:
-                last_msg = messages[-1]
-                # 检查是否是 assistant 消息且有内容
-                role = last_msg.get("role") or (last_msg.get("type") if last_msg.get("type") == "ai" else "")
-                content = last_msg.get("content")
-                if (role == "assistant" or role == "ai") and content:
-                    combined_response = content
-                    # 同时构造一个临时的 pending_response 以便前端渲染
-                    pending_responses = [{
-                        "from": "main_agent",
-                        "content": content,
-                        "phase": "immediate"
-                    }]
+            combined_response = "我需要你先回答几个问题，我会根据你的答案继续。" if inquiry_card is not None else ""
         
         _append_debug_log(
             run_id="sdk-version",
@@ -412,7 +433,7 @@ async def chat(
         # 进而引发 response 体积膨胀、性能劣化，甚至 /threads/{id}/state 400。
         # 对话历史的持久化由 LangGraph + post_turn_finalize_node 负责（layer3_memory.all_messages）。
         
-        if feedback_prefill:
+        if feedback_prefill and inquiry_card is None:
             try:
                 update_thread_state(thread_id, {"feedback_prefill": None})
             except Exception:

@@ -8,11 +8,12 @@ Onboarding 子图：用于首次信息收集。
 
 from langgraph.graph import StateGraph, START, END
 
+from langchain_core.runnables import RunnableConfig
 from graph.state import AgentState, convert_message_to_dict, ensure_message_id, get_message_id
 from onboarding.onboarding_agent import onboarding_agent_node
 
 
-def _normalize_onboarding_input(state: AgentState) -> dict:
+def _normalize_onboarding_input(state: AgentState, config: RunnableConfig | None = None) -> dict:
     """
     统一 Onboarding 子图入口的输入格式：
     - messages 统一为 dict + 标准角色

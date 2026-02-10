@@ -12,10 +12,6 @@ v3.1 更新：
 from .state import (
     AgentState,
     create_initial_state,
-    migrate_user_profile_to_context,
-    migrate_to_layered_memory,
-    get_active_action_guides,
-    get_completed_action_guides,
 )
 from .context_types import (
     # Layer 1 - 静态情报（原子记忆结构）

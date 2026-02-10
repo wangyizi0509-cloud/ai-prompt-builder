@@ -144,7 +144,7 @@ class DelegateToGuideInput(DelegateInstructionInput):
 class DelegateForFeedbackInput(BaseModel):
     """发起行动反馈模式（用于打开反馈弹窗）"""
     guide_id: str = Field(description="指南唯一 ID（ActionGuideItem.id）")
-    prefilled_status: Literal["success", "partial", "failed", "abandoned", "other"] | None = Field(
+    prefilled_status: Literal["success", "partial", "failed", "abandoned", "other", "completed"] | None = Field(
         default=None,
         description="预填完成状态（可选）",
     )

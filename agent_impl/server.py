@@ -41,9 +41,9 @@ from api.sdk_client import (
     ensure_thread_exists,
 )
 
-print("Importing API routers...", flush=True)
+logger.info("Importing API routers...")
 from api import api_router
-print("API routers loaded", flush=True)
+logger.info("API routers loaded")
 app.include_router(api_router)
 
 
@@ -70,13 +70,25 @@ else:
 if __name__ == "__main__":
     logger.info("Starting server on http://0.0.0.0:8000")
     debug_mode = os.getenv("DEBUG_MODE", "0") == "1"
-    # Some sandboxed environments disallow file watching syscalls required by reload.
-    # Allow disabling reload explicitly while still keeping DEBUG_MODE=1 (local LangGraph).
-    reload_enabled = os.getenv("UVICORN_RELOAD", "1") == "1"
-    if debug_mode and reload_enabled:
-        logger.info("DEBUG_MODE=1: Running with auto-reload enabled")
-        uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    if debug_mode:
+        reload_enabled = os.getenv("UVICORN_RELOAD", "1") != "0"
+        if reload_enabled:
+            logger.info("DEBUG_MODE=1: Running with auto-reload enabled")
+            uvicorn.run(
+                "server:app",
+                host="0.0.0.0",
+                port=8000,
+                reload=True,
+                reload_excludes=[
+                    "logs/*",
+                    "logs/**",
+                    ".cursor/*",
+                    ".cursor/**",
+                    "*.log",
+                ],
+            )
+        else:
+            logger.info("DEBUG_MODE=1: Running without auto-reload (UVICORN_RELOAD=0)")
+            uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
     else:
-        if debug_mode and not reload_enabled:
-            logger.info("DEBUG_MODE=1: Auto-reload disabled via UVICORN_RELOAD=0")
         uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)

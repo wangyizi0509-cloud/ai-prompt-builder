@@ -72,43 +72,80 @@ pytest tests/test_specific_file.py
 
 ## 架构设计
 
-### 编排器-工作器模式
+### LangChain Supervisor + Subgraphs 子 Agent 架构
 
-系统使用中央 **主智能体（Main Agent）** 协调专业子智能体：
+系统采用 **LangChain Supervisor 模式**，主智能体（Main Agent）作为中央协调器，通过工具调用协调专业子智能体（plan/status/guide）。为了解决子 agent 在 interrupt/resume 场景下的“私有过程态持久化”问题，子 agent 以 **LangGraph Subgraph** 形式实现（不同 schema + 私有 history），由主 agent 在 tool 内 invoke 子图并透传 config，共享同一 thread 的 checkpointer。
 
-- **状态智能体 (Status Agent)**: 分析当前情感状况
-- **计划智能体 (Plan Agent)**: 创建可执行计划
-- **指导智能体 (Guide Agent)**: 提供分步指导
-- **调度器 (Dispatcher)**: 将任务路由到合适的技能
+#### 主智能体（Supervisor）
+
+- **Main Agent**: LangChain Agent，负责意图识别、选择是否调用子 agent、汇总结果并更新 state
+- 位于 `graph/nodes/main_agent.py`，内部使用工具循环执行所有工具调用，并在每次调用时透传 `config`（包含 `configurable.thread_id` 等）以支持子图中断恢复
+
+#### 子智能体（Subagents）
+
+子 agent 以 **Subgraph** 形式实现，并作为 **tool** 被主 agent 调用：
+
+- `call_status_agent(...)`: 分析当前情感状况
+- `call_plan_agent(...)`: 创建可执行计划
+- `call_guide_agent(...)`: 提供分步指导
+
+实现位于 `graph/subgraphs/`：
+- `graph/subgraphs/status.py`
+- `graph/subgraphs/plan.py`
+- `graph/subgraphs/guide.py`
+
+子图状态模型要点：
+- `private_messages`: 子 agent 私有对话/工具痕迹，仅用于 interrupt/resume 与调试，子图结束后清理
+- `state_patch`: 子图最终产出的对 ParentState 的增量更新，主 agent 只 merge 该 patch，不回传过程态
 
 ### LangGraph 工作流
 
 位于 `agent_impl/graph/` 目录：
-- `workflow.py`: 主 StateGraph 编排和路由逻辑
-- `state.py`: TypedDict 状态定义（消息、用户信息、上下文等）
-- `nodes/`: 各个节点实现
-  - `router.py`: 处理输入路由和状态恢复（HTTP 兼容）
-  - `main_agent.py`: 中央决策枢纽
-  - `status_agent.py`, `plan_agent.py`, `guide_agent.py`: 专业智能体
+- `workflow.py`: 主 StateGraph 编排，编译入口支持 `checkpointer` 参数
+- `state.py`: TypedDict 状态定义
+- `nodes/`: 节点实现
+  - `router.py`: 输入路由、风控、闲聊处理、消息归一化
+  - `main_agent.py`: LangChain Supervisor（内置工具循环）
   - `finalizer.py`: 对话轮次最终化和响应准备
+- `subgraphs/`: 子 agent 子图实现（status/plan/guide）
+- `onboarding/`: Onboarding 子图（独立 StateGraph）
 
-### 人机协作系统
+**主图节点**：`router` → `onboarding`（可选） → `main_agent` → `post_turn_finalize`
 
-系统**不使用** LangGraph 原生的 `interrupt()`。为了更好地兼容 HTTP API，采用**基于状态恢复的模式（Router Resume）**：
+### 人机协作系统（interrupt/resume）
 
-1. 需要暂停时，节点把“要继续的 Agent + 继续点（resume point）”写入状态（如 `current_agent` / `agent_resume_point`）
-2. 本轮直接结束，等待用户下一条输入
-3. 下一轮路由节点检测到上述标记，直接回到对应 Agent 继续执行
+系统使用 LangGraph 原生的 `interrupt()` 机制：
 
-这样既保持 HTTP 的无状态特性，又能通过 Checkpointer 实现跨会话持久化。
+1. 需要用户输入时，工具（如 `ask_human`）调用 `interrupt(inquiry_card)`
+2. Graph 暂停，`__interrupt__` 作为结果返回
+3. 下一次请求用 `Command(resume=...)` 恢复执行
+
+位于 `agents/tooling/interrupts.py` 和 `graph/tools/ask_human.py`。
+
+子图中断恢复要点：
+- 子图内部通过工具（如 `ask_human`）触发中断，checkpoint 会写入同一 `thread_id`
+- 主 agent 的 `call_*_agent` 工具会把子图的 `__interrupt__` payload 透传为外层 `interrupt(payload)`，并在 resume 后用 `Command(resume=...)` 继续 invoke 子图
+
+### 统一工具返回契约（ToolResult）
+
+所有会修改 state 的工具统一返回 `ToolResult`：
+
+```python
+class ToolResult(TypedDict):
+    ok: bool
+    output: str          # 给模型看的 observation
+    state_patch: dict    # 对 AgentState 的增量更新
+```
+
+工具执行后，`state_patch` 由 agent wrapper 合并到 state。位于 `agents/tooling/patch.py`。
 
 ### 技能系统
 
-技能位于 `agent_impl/skills/` 目录，是动态加载的能力：
-- `base.py`: 技能实现的 BaseSkill 基类
-- `tool.py`: 由 LLM 调用的技能加载机制
+技能位于 `agent_impl/skills/` 目录：
+- `base.py`: BaseSkill 基类
+- `tool.py`: `load_skill(skill_id)` 工具实现
 
-技能通过 ToolNode 基于智能体决策渐进式加载，而非在初始化时静态定义。
+**渐进式披露**：默认只在 prompt 中注入技能元数据；模型需要时调用 `load_skill` 获取完整指令。
 
 ### 上下文架构
 
@@ -122,9 +159,9 @@ pytest tests/test_specific_file.py
 
 ### 状态持久化
 
-- **Dev/Up/Cloud（推荐路径）**：当通过 `langgraph dev` / `langgraph up` / LangGraph Cloud 运行时，**对话状态与持久化由 LangGraph CLI/平台负责**。因此 `agent_impl/agent.py` 中不会显式传入 checkpointer（否则可能报错）。
-- **Local Mode（仅调试）**：`agent_impl/server_local.py` 显式使用 `MemorySaver()`，只在内存中保存状态，进程退出即丢失。
-- **存储策略相关代码**：`agent_impl/graph/storage_strategy.py` 与 `agent_impl/graph/crush_chat_storage.py`
+- **Dev/Up/Cloud（推荐路径）**：当通过 `langgraph dev` / `langgraph up` / LangGraph Cloud 运行时，**对话状态与持久化由 LangGraph CLI/平台负责**。
+- **Local Mode（仅调试）**：`agent_impl/server_local.py` 显式使用 `MemorySaver()`，只在内存中保存状态；本地模式会把 `checkpointer` 放入 invoke 的 `config`，以便主 agent 在调用子图时复用同一个 checkpointer。
+- **编译入口**：`compile_workflow(checkpointer=...)` 支持传入 checkpointer 以启用 interrupt/resume。
 
 生产模式下状态可在服务器重启后保留，实现真正的跨会话对话。
 
@@ -193,9 +230,14 @@ git push origin feature/your-feature
 ## 入口文件
 
 - `agent_impl/server.py`: FastAPI 服务器（生产）
-- `agent_impl/server_local.py`: 本地开发服务器
-- `agent_impl/agent.py`: LangGraph 智能体定义（CLI/Studio）
-- `agent_impl/main.py`: 直接 CLI 接口
+- `agent_impl/server_local.py`: 本地开发服务器（MemorySaver）
+- `agent_impl/graph/workflow.py`: LangGraph 工作流定义，`compile_workflow()` 为编译入口
+
+## Agents 子系统
+
+- `agent_impl/agents/`: LangChain Agents 实现
+  - `tooling/`: 工具基础设施（patch 合并、context 构建、interrupt）
+  - `tools/all_tools.py`: 按角色组装工具集合
 
 ## 测试用户
 
@@ -211,6 +253,8 @@ git push origin feature/your-feature
 - `agent_impl/docs/skill_demo.md`: 技能系统演示
 - `agent_impl/docs/debug_guide.md`: 调试流程
 - `agent_impl/docs/multi_ai_collaboration_sop.md`: AI 协作指南
+- `agent_impl/docs/langchain_agent_refactor_plan.md`: LangChain Agents 重构方案
+- `agent_impl/docs/langchain_agent_refactor_tasks_breakdown.md`: 重构任务拆解与测试清单
 
 ## 技能框架
 
@@ -231,6 +275,16 @@ git push origin feature/your-feature
 - FastAPI: 端口 8000
 
 检查命令: `lsof -i :PORT` 或 `ps aux | grep langgraph`
+
+### 重构后变化
+
+**主图节点**：从原来的 `router/main_agent/status_agent/plan_agent/guide_agent/skill_tools/finalizer` 简化为 `router/onboarding/main_agent/post_turn_finalize`。
+
+**状态字段**：删除了 `current_agent/agent_resume_point/ask_mode/consult_mode/emotion_mode` 等旧控制字段，改用 `runtime/tool_patch_log`。
+
+**人机交互**：从 Router-Resume 模式迁移到 LangGraph 原生 `interrupt()`，API 层支持 `Command(resume=...)` 恢复执行。
+
+**工具契约**：所有工具统一返回 `ToolResult`（含 `state_patch`），不再依赖 `skill_tools` 节点集中写回。
 
 ## 测试账号生成（Supabase）
 

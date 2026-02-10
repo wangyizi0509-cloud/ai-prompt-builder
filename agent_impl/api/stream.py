@@ -1,14 +1,16 @@
 import json
 import uuid
+import logging
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from typing import Literal, Optional
+from typing import Literal, Optional, Any, Union
 
 router = APIRouter(prefix="/api")
 security = HTTPBearer(auto_error=False)
+logger = logging.getLogger(__name__)
 
 
 class FeedbackModeInput(BaseModel):
@@ -18,10 +20,12 @@ class FeedbackModeInput(BaseModel):
 
 
 class StreamChatRequest(BaseModel):
-    message: str
+    message: str = ""
     session_id: str
     stream_mode: Literal["values", "updates", "messages", "debug"] = "updates"
     feedback_mode: Optional[FeedbackModeInput] = None
+    resume_payload: Optional[Union[dict[str, Any], str]] = None
+    resume: Optional[bool] = None
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -259,6 +263,78 @@ def _run_maintenance_tasks_sdk(session_id: str, thread_id: str) -> None:
     if any_changes:
         update_thread_state(thread_id, {"maintenance_queue": updated_queue})
 
+def _extract_inquiry_card_from_interrupt(final_state: dict) -> dict | None:
+    interrupts = final_state.get("__interrupt__")
+    if not isinstance(interrupts, list) or not interrupts:
+        return None
+    first = interrupts[0]
+    if isinstance(first, dict):
+        value = first.get("value")
+    else:
+        value = getattr(first, "value", None)
+    return value if isinstance(value, dict) else None
+
+
+def _extract_inquiry_card_from_any(value: Any) -> dict | None:
+    if not isinstance(value, (dict, list, tuple)):
+        return None
+    if isinstance(value, dict):
+        card = _extract_inquiry_card_from_interrupt(value)
+        if card is not None:
+            return card
+        for v in value.values():
+            found = _extract_inquiry_card_from_any(v)
+            if found is not None:
+                return found
+        return None
+    for v in value:
+        found = _extract_inquiry_card_from_any(v)
+        if found is not None:
+            return found
+    return None
+
+
+def _jsonable(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump()
+        return _jsonable(dumped)
+    as_dict = getattr(value, "dict", None)
+    if callable(as_dict):
+        dumped = as_dict()
+        return _jsonable(dumped)
+    as_dict = getattr(value, "dict", None)
+    if isinstance(as_dict, dict):
+        return _jsonable(as_dict)
+    try:
+        return _jsonable(vars(value))
+    except Exception:
+        return str(value)
+
+
+def _dump_stream_chunk(chunk: Any) -> dict[str, Any]:
+    if isinstance(chunk, dict):
+        return _jsonable(chunk)
+    model_dump = getattr(chunk, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump()
+        return _jsonable(dumped) if isinstance(dumped, dict) else {"value": _jsonable(dumped)}
+    as_dict = getattr(chunk, "dict", None)
+    if callable(as_dict):
+        dumped = as_dict()
+        return _jsonable(dumped) if isinstance(dumped, dict) else {"value": _jsonable(dumped)}
+    try:
+        dumped = vars(chunk)
+        return _jsonable(dumped) if isinstance(dumped, dict) else {"value": _jsonable(dumped)}
+    except Exception:
+        return {"value": str(chunk)}
+
 
 @router.post("/chat/stream")
 async def chat_stream(
@@ -269,8 +345,12 @@ async def chat_stream(
     """
     流式聊天接口 - 实时查看 Agent 执行过程（通过 SDK）
     """
-    print(f"[Stream SDK] Received message from session {request.session_id}: {request.message}")
-    print(f"[Stream SDK] Stream mode: {request.stream_mode}")
+    logger.info(
+        "[Stream SDK] Received message: session=%s, message_len=%s",
+        request.session_id,
+        len(request.message or ""),
+    )
+    logger.info("[Stream SDK] Stream mode: %s", request.stream_mode)
     
     from api.sdk_client import (
         ensure_thread_exists,
@@ -281,42 +361,65 @@ async def chat_stream(
     
     user_id = current_user['user_id'] if current_user else None
     thread_id = await ensure_thread_exists(request.session_id, user_id)
-    base_state = get_thread_state(thread_id)
-    
-    if base_state is None:
-        print("[Stream SDK] Creating new session (checkpointer empty)")
-        current_message_id = str(uuid.uuid4())
-        state = create_initial_state(request.message, current_message_id=current_message_id)
-        state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
+
+    is_resume = bool(request.resume_payload) or bool(request.resume)
+    if not is_resume and not (request.message or "").strip():
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="message is required")
+    if is_resume and request.resume_payload is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="resume_payload is required when resume is true")
+
+    input_payload: Any
+    if is_resume:
+        from langgraph.types import Command
+        input_payload = Command(resume=request.resume_payload)
     else:
-        print("[Stream SDK] Restoring existing session (checkpointer)")
-        state = dict(base_state)
-        current_message_id = str(uuid.uuid4())
-        state["user_message"] = request.message
-        state["current_message_id"] = current_message_id
-        state["debug_log"] = []
-        state["inquiry_card"] = None
-        state["pending_questions"] = []
-        state["pending_responses"] = []
-        state["last_response_for_continuity"] = None
-        state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
+        base_state = get_thread_state(thread_id)
+
+        if base_state is None:
+            logger.info("[Stream SDK] Creating new session (checkpointer empty)")
+            current_message_id = str(uuid.uuid4())
+            state = create_initial_state(request.message, current_message_id=current_message_id)
+            state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
+        else:
+            logger.info("[Stream SDK] Restoring existing session (checkpointer)")
+            state = dict(base_state)
+            current_message_id = str(uuid.uuid4())
+            state["user_message"] = request.message
+            state["current_message_id"] = current_message_id
+            state["debug_log"] = []
+            state["inquiry_card"] = None
+            state["pending_questions"] = []
+            state["pending_responses"] = []
+            state["last_response_for_continuity"] = None
+            state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
+        input_payload = state
     
     async def generate_stream():
         """生成流式响应"""
         final_state = None
+        interrupt_sent = False
         try:
-            for chunk in run_assistant(thread_id, state, stream_mode=request.stream_mode):
-                final_state = chunk.data
-                yield f"data: {json.dumps(chunk.dict(), ensure_ascii=False)}\n\n"
+            for chunk in run_assistant(thread_id, input_payload, stream_mode=request.stream_mode):
+                final_state = getattr(chunk, "data", None)
+                if final_state is None and isinstance(chunk, dict):
+                    final_state = chunk.get("data")
+                yield f"data: {json.dumps(_dump_stream_chunk(chunk), ensure_ascii=False)}\n\n"
+
+                if not interrupt_sent and isinstance(final_state, dict):
+                    inquiry_card = _extract_inquiry_card_from_any(final_state)
+                    if inquiry_card is not None:
+                        interrupt_sent = True
+                        yield f"data: {json.dumps({'type': 'interrupt', 'inquiry_card': inquiry_card}, ensure_ascii=False)}\n\n"
             
             # 后台运行维护任务
-            if final_state:
+            if not interrupt_sent:
                 background_tasks.add_task(_run_maintenance_tasks_sdk, request.session_id, thread_id)
                 
             yield "data: [DONE]\n\n"
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            logger.exception("Stream generation failed")
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
     return StreamingResponse(generate_stream(), media_type="text/event-stream")

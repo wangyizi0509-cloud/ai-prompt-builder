@@ -41,7 +41,8 @@ sleep 5
 
 echo "🚀 启动 FastAPI 服务 (连接到 http://localhost:$PORT)..."
 # 强制环境变量以确保连接到正确的端口
-export DEBUG_MODE=1
+export DEBUG_MODE="${DEBUG_MODE:-1}"
+export UVICORN_RELOAD="${UVICORN_RELOAD:-1}"
 export LANGGRAPH_LOCAL_URL="http://127.0.0.1:$PORT"
 if [ -n "$RUN_PREFIX" ]; then
   $RUN_PREFIX python server.py &
