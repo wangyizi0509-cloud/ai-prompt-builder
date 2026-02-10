@@ -3769,14 +3769,21 @@
                     userMessage.imageProcessingStatus = userMessage.images.every((img) => img.status === 'done') ? 'done' : 'error';
                 };
 
-                const sendMessageToBackend = async (userMessage) => {
+                const sendMessageToBackend = async (userMessage, options = {}) => {
                     try {
-                        const requestBody = {
-                            message: userMessage.content || '',
-                            session_id: sessionId.value
-                        };
+                        const resumePayload = options?.resumePayload;
+                        const requestBody = resumePayload
+                            ? {
+                                  message: '',
+                                  session_id: sessionId.value,
+                                  resume_payload: resumePayload,
+                              }
+                            : {
+                                  message: userMessage.content || '',
+                                  session_id: sessionId.value,
+                              };
 
-                        if (userMessage.images && userMessage.images.length > 0) {
+                        if (!resumePayload && userMessage.images && userMessage.images.length > 0) {
                             requestBody.images = userMessage.images
                                 .filter((img) => img.status === 'done')
                                 .map((img) => ({
@@ -4455,6 +4462,7 @@
                         }
 
                         const backendAnswerParts = [];
+                        const answersForResume = {};
                         for (const q of questions) {
                             const answer = snapshotAnswers[q.id];
                             if (answer === undefined || answer === '') continue;
@@ -4468,6 +4476,7 @@
                                     }
                                 }
                                 backendAnswerParts.push(`${q.question}：${selectedLabels.join('、')}`);
+                                answersForResume[q.id] = Array.isArray(answer) ? answer : [];
                             } else if (q.type === 'single_choice' && q.options) {
                                 let selectedLabel = answer;
                                 for (const opt of q.options) {
@@ -4477,6 +4486,7 @@
                                     }
                                 }
                                 backendAnswerParts.push(`${q.question}：${selectedLabel}`);
+                                answersForResume[q.id] = answer;
                             } else if (isScreenshotType(q.type)) {
                                 const screenshotItems = getScreenshotItemsFromAnswer(answer);
                                 if (!screenshotItems.length) continue;
@@ -4503,10 +4513,13 @@
                                 }
 
                                 backendAnswerParts.push(`【${getScreenshotLabel(q.type)}分析结果】\n${ocrBlocks.join('\n\n')}`);
+                                answersForResume[q.id] = ocrBlocks.join('\n\n');
                             } else if (q.type === 'free_input_question' || q.type === 'text') {
                                 backendAnswerParts.push(`${q.question}：${answer}`);
+                                answersForResume[q.id] = answer;
                             } else {
                                 backendAnswerParts.push(`${q.question}：${answer}`);
+                                answersForResume[q.id] = answer;
                             }
                         }
 
@@ -4516,7 +4529,7 @@
                             role: 'user',
                             content: finalAnswerForBackend,
                         };
-                        await sendMessageToBackend(backendUserMessage);
+                        await sendMessageToBackend(backendUserMessage, { resumePayload: { answers: answersForResume } });
                     } catch (error) {
                         console.error('Submit inquiry error:', error);
                         isLoading.value = false;
