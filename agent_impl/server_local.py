@@ -165,7 +165,7 @@ async def chat_stream(request: ChatRequest):
         "user_id": request.user_id or "anonymous",
     }
     
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {"configurable": {"thread_id": thread_id}, "checkpointer": checkpointer}
     
     async def generate():
         try:

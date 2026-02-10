@@ -47,6 +47,15 @@ class _SubagentToolInput(BaseModel):
 _CURRENT_RUN_CONFIG: contextvars.ContextVar[dict | None] = contextvars.ContextVar("current_run_config", default=None)
 
 
+def _require_checkpointer(config: dict | None) -> Any:
+    if not config:
+        raise RuntimeError("Missing runtime config; checkpointer is required for interrupt/resume.")
+    checkpointer = config.get("checkpointer")
+    if checkpointer is None:
+        raise RuntimeError("Missing checkpointer in runtime config; subgraph interrupt/resume requires a persistent checkpointer.")
+    return checkpointer
+
+
 def _ensure_tool_call_integrity(messages: list[BaseMessage]) -> list[BaseMessage]:
     if not messages:
         return []
@@ -205,9 +214,9 @@ def _run_langchain_supervisor(
     patches: list[dict] = []
     wrapped_tools = _wrap_tools_for_patch_collection(list(tools or []), patches)
 
-    checkpointer = None
-    if config:
-        checkpointer = config.get("checkpointer")
+    checkpointer = config.get("checkpointer") if config else None
+    if config is not None and checkpointer is None:
+        raise RuntimeError("Missing checkpointer in runtime config; tool-loop interrupt/resume requires a persistent checkpointer.")
 
     agent_graph = create_agent(model=llm, tools=wrapped_tools, system_prompt=None, name="tool_loop_agent", checkpointer=checkpointer)
 
@@ -270,7 +279,7 @@ def _build_all_tools(state_getter) -> list[BaseTool]:
 
     def _status_tool(instruction: str) -> ToolResult:
         cfg = _current_config()
-        checkpointer = cfg.get("checkpointer")
+        checkpointer = _require_checkpointer(cfg)
         subgraph = get_status_subgraph(checkpointer=checkpointer)
         parent_state = state_getter()
         sub_in = {
@@ -295,7 +304,7 @@ def _build_all_tools(state_getter) -> list[BaseTool]:
 
     def _plan_tool(instruction: str) -> ToolResult:
         cfg = _current_config()
-        checkpointer = cfg.get("checkpointer")
+        checkpointer = _require_checkpointer(cfg)
         subgraph = get_plan_subgraph(checkpointer=checkpointer)
         parent_state = state_getter()
         sub_in = {
@@ -320,7 +329,7 @@ def _build_all_tools(state_getter) -> list[BaseTool]:
 
     def _guide_tool(instruction: str) -> ToolResult:
         cfg = _current_config()
-        checkpointer = cfg.get("checkpointer")
+        checkpointer = _require_checkpointer(cfg)
         subgraph = get_guide_subgraph(checkpointer=checkpointer)
         parent_state = state_getter()
         sub_in = {
