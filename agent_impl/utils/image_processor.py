@@ -15,8 +15,10 @@ import base64
 import json
 import asyncio
 import httpx
+from io import BytesIO
 from typing import Literal, Optional
 from dotenv import load_dotenv
+from PIL import Image
 
 load_dotenv()
 
@@ -63,9 +65,36 @@ class ImageProcessor:
         self.model = os.getenv("DOUBAO_ENDPOINT_ID")
         self.timeout_seconds = float(os.getenv("DOUBAO_TIMEOUT_SECONDS", "60"))
         self.max_retries = int(os.getenv("DOUBAO_MAX_RETRIES", "2"))
+        self.type_detect_max_tokens = int(os.getenv("IMAGE_TYPE_DETECT_MAX_TOKENS", "80"))
+        self.type_detect_max_edge = int(os.getenv("IMAGE_TYPE_DETECT_MAX_EDGE", "1024"))
+        self.ocr_max_edge = int(os.getenv("IMAGE_OCR_MAX_EDGE", "3000"))
+        self.ocr_max_tokens = int(os.getenv("IMAGE_OCR_MAX_TOKENS", "2000"))
+        self.disable_reasoning_output = os.getenv("IMAGE_DISABLE_REASONING_OUTPUT", "true").lower() == "true"
+        self._http_client: Optional[httpx.AsyncClient] = None
+
+        # 图片类型识别（第一路由节点）可单独配置模型与鉴权
+        self.type_detect_api_key = os.getenv("IMAGE_TYPE_DETECT_API_KEY")
+        self.type_detect_base_url = os.getenv(
+            "IMAGE_TYPE_DETECT_BASE_URL",
+            "https://open.bigmodel.cn/api/paas/v4"
+        )
+        self.type_detect_model = os.getenv("IMAGE_TYPE_DETECT_MODEL", "GLM-4.6V-FlashX")
+
+        # 未单独配置时，回退到既有 OCR 模型配置
+        if not self.type_detect_api_key:
+            self.type_detect_api_key = self.api_key
+            self.type_detect_base_url = self.base_url
+            self.type_detect_model = self.model
+
+        # 图片 OCR（第二路由节点）支持独立配置；未配置时默认跟随第一节点
+        self.ocr_api_key = os.getenv("IMAGE_OCR_API_KEY") or self.type_detect_api_key
+        self.ocr_base_url = os.getenv("IMAGE_OCR_BASE_URL") or self.type_detect_base_url
+        self.ocr_model = os.getenv("IMAGE_OCR_MODEL") or self.type_detect_model
         
-        if not self.api_key or not self.model:
-            print("⚠️ 警告: DOUBAO_API_KEY 或 DOUBAO_ENDPOINT_ID 未配置，图片处理功能将不可用")
+        if not self.type_detect_api_key or not self.type_detect_model:
+            print("⚠️ 警告: 第一节点(类型识别)模型配置不完整，detect_type 可能不可用")
+        if not self.ocr_api_key or not self.ocr_model:
+            print("⚠️ 警告: 第二节点(OCR)模型配置不完整，process_image 可能不可用")
     
     def _encode_image_to_base64(self, image_bytes: bytes) -> str:
         """将图片字节转为 base64"""
@@ -91,10 +120,109 @@ class ImageProcessor:
         base64_image = self._encode_image_to_base64(image_bytes)
         return f"data:{mime_type};base64,{base64_image}"
 
-    async def _post_chat_completion(self, payload: dict) -> dict:
-        """调用豆包接口，包含基础重试，规避瞬时连接抖动。"""
+    def _maybe_resize_image(self, image_bytes: bytes, max_edge: int, reason: str) -> bytes:
+        """按最长边阈值缩图；阈值 <= 0 时关闭。"""
+        if max_edge <= 0:
+            return image_bytes
+
+        try:
+            with Image.open(BytesIO(image_bytes)) as img:
+                width, height = img.size
+                longest = max(width, height)
+                if longest <= max_edge:
+                    return image_bytes
+
+                scale = max_edge / float(longest)
+                new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+                resample = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+                resized = img.resize(new_size, resample)
+
+                image_format = (img.format or "JPEG").upper()
+                output = BytesIO()
+                save_image = resized
+                save_kwargs: dict = {}
+
+                if image_format in {"JPEG", "JPG"}:
+                    if resized.mode not in {"RGB", "L"}:
+                        save_image = resized.convert("RGB")
+                    image_format = "JPEG"
+                    save_kwargs = {"quality": 85, "optimize": True}
+                elif image_format == "PNG":
+                    image_format = "PNG"
+                    save_kwargs = {"optimize": True}
+                elif image_format == "WEBP":
+                    if resized.mode not in {"RGB", "L"}:
+                        save_image = resized.convert("RGB")
+                    image_format = "WEBP"
+                    save_kwargs = {"quality": 85}
+                else:
+                    if resized.mode not in {"RGB", "L"}:
+                        save_image = resized.convert("RGB")
+                    image_format = "JPEG"
+                    save_kwargs = {"quality": 85, "optimize": True}
+
+                save_image.save(output, format=image_format, **save_kwargs)
+                return output.getvalue()
+        except Exception as e:
+            # 缩图失败不阻断主流程，回退原图
+            print(f"Warn: resize for {reason} failed: {e}")
+            return image_bytes
+
+    def _maybe_resize_for_type_detect(self, image_bytes: bytes) -> bytes:
+        """类型识别前缩图，减少传输体积与视觉推理开销。"""
+        return self._maybe_resize_image(
+            image_bytes=image_bytes,
+            max_edge=self.type_detect_max_edge,
+            reason="type detect",
+        )
+
+    def _maybe_resize_for_ocr(self, image_bytes: bytes) -> bytes:
+        """OCR 前仅对超大图缩图，平衡延迟与识别质量。"""
+        return self._maybe_resize_image(
+            image_bytes=image_bytes,
+            max_edge=self.ocr_max_edge,
+            reason="ocr",
+        )
+
+    def _get_http_client(self) -> httpx.AsyncClient:
+        """复用 AsyncClient，避免每次请求都重新建连。"""
+        if self._http_client is None or self._http_client.is_closed:
+            timeout = httpx.Timeout(
+                timeout=self.timeout_seconds,
+                connect=min(10.0, self.timeout_seconds),
+            )
+            limits = httpx.Limits(
+                max_keepalive_connections=20,
+                max_connections=50,
+                keepalive_expiry=30.0,
+            )
+            self._http_client = httpx.AsyncClient(timeout=timeout, limits=limits)
+        return self._http_client
+
+    def _apply_generation_controls(self, payload: dict) -> dict:
+        """统一注入生成控制参数（默认关闭 reasoning_content 输出）。"""
+        out = dict(payload)
+        if self.disable_reasoning_output:
+            out["thinking"] = {"type": "disabled"}
+        return out
+
+    async def _post_chat_completion(
+        self,
+        payload: dict,
+        *,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ) -> dict:
+        """调用多模态接口，包含基础重试，规避瞬时连接抖动。"""
+        request_api_key = api_key or self.api_key
+        request_base_url = (base_url or self.base_url or "").rstrip("/")
+        if not request_api_key:
+            raise ValueError("API Key 未配置")
+        if not request_base_url:
+            raise ValueError("BASE URL 未配置")
+
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {request_api_key}",
             "Content-Type": "application/json",
         }
         retryable_status_codes = {408, 429, 500, 502, 503, 504}
@@ -103,12 +231,12 @@ class ImageProcessor:
         last_exc: Exception | None = None
         for attempt in range(1, max_attempts + 1):
             try:
-                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                    response = await client.post(
-                        f"{self.base_url}/chat/completions",
-                        json=payload,
-                        headers=headers,
-                    )
+                client = self._get_http_client()
+                response = await client.post(
+                    f"{request_base_url}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                )
                 if response.status_code in retryable_status_codes and attempt < max_attempts:
                     await asyncio.sleep(min(1.5, 0.4 * attempt))
                     continue
@@ -202,21 +330,22 @@ class ImageProcessor:
         }
         valid_confidence = {"high", "medium", "low"}
 
-        if not self.api_key:
+        if not self.type_detect_api_key:
             return {
                 "success": False,
                 "screenshot_type": default_type,
                 "confidence": "low",
                 "reason": None,
-                "error": "豆包 API Key 未配置",
+                "error": "图片类型识别 API Key 未配置",
             }
 
         try:
             prompt = load_screenshot_prompt("type_detection")
-            image_data_url = self._build_image_data_url(image_bytes)
+            resized_bytes = self._maybe_resize_for_type_detect(image_bytes)
+            image_data_url = self._build_image_data_url(resized_bytes)
 
             payload = {
-                "model": self.model,
+                "model": self.type_detect_model,
                 "messages": [
                     {
                         "role": "user",
@@ -231,9 +360,14 @@ class ImageProcessor:
                         ],
                     }
                 ],
-                "max_tokens": 500,
+                "max_tokens": self.type_detect_max_tokens,
+                "temperature": 0,
             }
-            result = await self._post_chat_completion(payload)
+            result = await self._post_chat_completion(
+                self._apply_generation_controls(payload),
+                api_key=self.type_detect_api_key,
+                base_url=self.type_detect_base_url,
+            )
 
             choices = result.get("choices")
             if not choices or not isinstance(choices, list):
@@ -305,12 +439,12 @@ class ImageProcessor:
                 "error": str | None
             }
         """
-        if not self.api_key:
+        if not self.ocr_api_key:
             return {
                 "success": False,
                 "text": "",
                 "screenshot_type": screenshot_type,
-                "error": "豆包 API Key 未配置"
+                "error": "第二节点 OCR API Key 未配置"
             }
         
         try:
@@ -320,11 +454,12 @@ class ImageProcessor:
                 base_prompt = f"{base_prompt}\n\n【用户补充说明】\n{additional_context}"
             
             # 构建请求
-            image_data_url = self._build_image_data_url(image_bytes)
+            resized_bytes = self._maybe_resize_for_ocr(image_bytes)
+            image_data_url = self._build_image_data_url(resized_bytes)
             
             # 豆包 Vision API 兼容 OpenAI 格式
             payload = {
-                "model": self.model,
+                "model": self.ocr_model,
                 "messages": [
                     {
                         "role": "user",
@@ -342,9 +477,13 @@ class ImageProcessor:
                         ]
                     }
                 ],
-                "max_tokens": 2000
+                "max_tokens": self.ocr_max_tokens
             }
-            result = await self._post_chat_completion(payload)
+            result = await self._post_chat_completion(
+                self._apply_generation_controls(payload),
+                api_key=self.ocr_api_key,
+                base_url=self.ocr_base_url,
+            )
             
             # 提取文本
             choices = result.get("choices")

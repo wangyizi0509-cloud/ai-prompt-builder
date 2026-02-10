@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from io import BytesIO
 
+from PIL import Image
 from utils.image_processor import ImageProcessor
 
 
@@ -27,6 +29,12 @@ def _build_processor() -> ImageProcessor:
     processor = ImageProcessor()
     processor.api_key = "test_api_key"
     processor.model = "test_model"
+    processor.type_detect_api_key = "test_api_key"
+    processor.type_detect_model = "test_type_detect_model"
+    processor.type_detect_base_url = "https://example.com/v1"
+    processor.ocr_api_key = "test_api_key"
+    processor.ocr_model = "test_ocr_model"
+    processor.ocr_base_url = "https://example.com/v1"
     return processor
 
 
@@ -44,7 +52,8 @@ def test_detect_type_uses_detected_mime(monkeypatch):
     png_bytes = base64.b64decode(_PNG_B64)
     captured: dict = {}
 
-    async def _fake_post(payload: dict):
+    async def _fake_post(payload: dict, **kwargs):
+        _ = kwargs
         captured["payload"] = payload
         return {
             "choices": [
@@ -72,7 +81,8 @@ def test_process_image_uses_detected_mime(monkeypatch):
     jpeg_bytes = base64.b64decode(_JPEG_B64)
     captured: dict = {}
 
-    async def _fake_post(payload: dict):
+    async def _fake_post(payload: dict, **kwargs):
+        _ = kwargs
         captured["payload"] = payload
         return {
             "choices": [
@@ -98,3 +108,39 @@ def test_process_image_uses_detected_mime(monkeypatch):
     assert image_url.startswith("data:image/jpeg;base64,")
     assert result["success"] is True
     assert result["text"] == "mock ocr content"
+
+
+def test_process_image_resizes_only_super_large_image(monkeypatch):
+    processor = _build_processor()
+    processor.ocr_max_edge = 1200
+    captured: dict = {}
+
+    img = Image.new("RGB", (3000, 1000), color=(255, 255, 255))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    large_png_bytes = buf.getvalue()
+
+    async def _fake_post(payload: dict, **kwargs):
+        _ = kwargs
+        captured["payload"] = payload
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(processor, "_post_chat_completion", _fake_post)
+    result = asyncio.run(
+        processor.process_image(
+            image_bytes=large_png_bytes,
+            screenshot_type="universal_screenshot_analysis",
+        )
+    )
+
+    image_url = captured["payload"]["messages"][0]["content"][1]["image_url"]["url"]
+    assert image_url.startswith("data:image/png;base64,")
+
+    encoded = image_url.split(",", 1)[1]
+    resized_bytes = base64.b64decode(encoded)
+    with Image.open(BytesIO(resized_bytes)) as resized_img:
+        assert max(resized_img.size) == 1200
+        assert resized_img.size == (1200, 400)
+
+    assert result["success"] is True
+    assert result["text"] == "ok"
