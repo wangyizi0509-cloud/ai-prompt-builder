@@ -21,9 +21,6 @@ from langchain_core.messages import (
 )
 
 from graph.context_builder import build_context_dict
-from graph.tools.ask_tool import ASK_MODE_SIMPLE
-from graph.tools.consult_answer_tool import CONSULT_MODE_SIMPLE
-from graph.tools.emotion_support_tool import EMOTION_MODE_SIMPLE
 from utils.prompt_loader import load_prompt
 from utils.message_utils import get_msg_role_and_content
 
@@ -227,10 +224,6 @@ def build_conversation_history(
     - 跳过 Virtual Ack 消息（固定文本的 AIMessage）
     - 保留真实对话：HumanMessage / AIMessage / ToolMessage
     
-    动态简化规则（渐进式披露）：
-    - 当 ask_mode=False 且存在 ask_mode_tool_message_id 时，
-      将 Phase 1 的详细策略 ToolMessage 简化为简短版本
-    
     Args:
         state: AgentState 状态对象
         max_turns: 最大保留轮次（按用户消息计数）
@@ -241,24 +234,6 @@ def build_conversation_history(
     messages = state.get("messages", [])
     if not messages:
         return []
-    
-    # 获取 ask_mode 相关状态（用于动态简化）
-    ask_mode = state.get("ask_mode", False)
-    ask_mode_tool_message_id = state.get("ask_mode_tool_message_id")
-    # 只有当 ask_mode=False 且有 tool_message_id 时才需要简化
-    should_simplify_ask_tool_msg = (not ask_mode) and bool(ask_mode_tool_message_id)
-    
-    # 获取 consult_mode 相关状态（用于动态简化）
-    consult_mode = state.get("consult_mode", False)
-    consult_mode_tool_message_id = state.get("consult_mode_tool_message_id")
-    # 只有当 consult_mode=False 且有 tool_message_id 时才需要简化
-    should_simplify_consult_tool_msg = (not consult_mode) and bool(consult_mode_tool_message_id)
-    
-    # 获取 emotion_mode 相关状态（用于动态简化）
-    emotion_mode = state.get("emotion_mode", False)
-    emotion_mode_tool_message_id = state.get("emotion_mode_tool_message_id")
-    # 只有当 emotion_mode=False 且有 tool_message_id 时才需要简化
-    should_simplify_emotion_tool_msg = (not emotion_mode) and bool(emotion_mode_tool_message_id)
     
     # 预计算工具调用映射（用于 tool message 关联）
     tool_call_map: dict[str, dict] = {}
@@ -311,9 +286,9 @@ def build_conversation_history(
             tool_calls = getattr(msg, "tool_calls", None)
         
         if content is None or content == "":
-            if not tool_calls:
+            if role != "tool" and not tool_calls:
                 continue
-            content = ""
+            content = "" if content is None else content
         
         # 跳过 Context Injection 消息
         if _is_context_injection(role, content):
@@ -329,51 +304,24 @@ def build_conversation_history(
             tool_call_id = _get_tool_call_id(msg)
             msg_id = _get_message_id(msg)
             
-            # 1. load_skill 输出压缩（除当前轮次外）
+            # 1. load_skill 输出压缩
             if tool_name == "load_skill":
-                is_current_tool_turn = bool(state.get("_tool_caller")) and (i == last_tool_idx)
-                if not is_current_tool_turn:
-                    skill_id = ""
-                    tc = tool_call_map.get(tool_call_id or "", {})
-                    if isinstance(tc, dict):
-                        args = tc.get("args") or {}
-                        skill_id = str(args.get("skill_id") or "")
-                    content = f"[已加载 {skill_id} skill]" if skill_id else "[已加载 skill 指令]"
-            
-            # 2. ask 工具 Phase 1 ToolMessage 动态简化
-            # 当 ask_mode=False 时，将详细策略简化为简短版本
-            elif tool_name == "ask" and should_simplify_ask_tool_msg:
-                if msg_id and msg_id == ask_mode_tool_message_id:
-                    # 简化为简短版本，去掉详细策略
-                    content = ASK_MODE_SIMPLE
-            
-            # 3. consult_answer 工具 Phase 1 ToolMessage 动态简化
-            # 当 consult_mode=False 时，将详细策略简化为简短版本
-            elif tool_name == "consult_answer" and should_simplify_consult_tool_msg:
-                if msg_id and msg_id == consult_mode_tool_message_id:
-                    # 简化为简短版本，去掉详细策略
-                    content = CONSULT_MODE_SIMPLE
-            
-            # 4. emotion_support 工具 Phase 1 ToolMessage 动态简化
-            # 当 emotion_mode=False 时，将详细策略简化为简短版本
-            elif tool_name == "emotion_support" and should_simplify_emotion_tool_msg:
-                if msg_id and msg_id == emotion_mode_tool_message_id:
-                    # 简化为简短版本，去掉详细策略
-                    content = EMOTION_MODE_SIMPLE
+                skill_id = ""
+                tc = tool_call_map.get(tool_call_id or "", {})
+                if isinstance(tc, dict):
+                    args = tc.get("args") or {}
+                    skill_id = str(args.get("skill_id") or "")
+                content = f"[已加载 {skill_id} skill]" if skill_id else "[已加载 skill 指令]"
+            else:
+                if isinstance(content, str) and len(content) > 500:
+                    content = f"[工具 {tool_name} 输出已省略]"
 
         # AIMessage 中的 submit_* tool_calls.args 压缩（仅历史消息）
         if role in ("assistant", "ai") and tool_calls:
-            is_current_tool_turn = bool(state.get("_tool_caller")) and bool(last_tool_call_id)
-            if is_current_tool_turn:
-                is_current_tool_turn = any(
-                    isinstance(tc, dict) and str(tc.get("id") or "") == last_tool_call_id
-                    for tc in tool_calls
-                )
-            if not is_current_tool_turn:
-                tool_calls = _compress_submit_tool_calls(tool_calls)
-                if isinstance(msg, dict):
-                    msg = dict(msg)
-                    msg["tool_calls"] = tool_calls
+            tool_calls = _compress_submit_tool_calls(tool_calls)
+            if isinstance(msg, dict):
+                msg = dict(msg)
+                msg["tool_calls"] = tool_calls
 
         # 转换为标准 Message 类型
         base_message = _convert_to_base_message(msg, role, content)
@@ -381,7 +329,8 @@ def build_conversation_history(
             filtered_messages.append(base_message)
     
     # 应用滑动窗口：保留最近 N 轮用户消息及其响应
-    return _apply_sliding_window(filtered_messages, max_turns)
+    windowed = _apply_sliding_window(filtered_messages, max_turns)
+    return _ensure_tool_call_integrity(windowed)
 
 
 # ============================================================
@@ -500,12 +449,16 @@ def _convert_to_base_message(
             reasoning_content = msg.get("reasoning_content")
             if reasoning_content is None:
                 reasoning_content = (msg.get("additional_kwargs") or {}).get("reasoning_content")
+            if reasoning_content is None:
+                reasoning_content = (msg.get("response_metadata") or {}).get("reasoning_content")
         else:
             tool_calls = getattr(msg, "tool_calls", None)
             name = getattr(msg, "name", None)
             reasoning_content = getattr(msg, "reasoning_content", None)
             if reasoning_content is None:
                 reasoning_content = (getattr(msg, "additional_kwargs", {}) or {}).get("reasoning_content")
+            if reasoning_content is None:
+                reasoning_content = (getattr(msg, "response_metadata", {}) or {}).get("reasoning_content")
         
         additional_kwargs = {"reasoning_content": reasoning_content} if reasoning_content else None
         if tool_calls:
@@ -574,6 +527,53 @@ def _apply_sliding_window(
                 break
     
     return messages[start_idx:]
+
+
+def _ensure_tool_call_integrity(messages: list[BaseMessage]) -> list[BaseMessage]:
+    if not messages:
+        return []
+    out: list[BaseMessage] = []
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        if isinstance(msg, ToolMessage):
+            i += 1
+            continue
+        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+            tool_calls = getattr(msg, "tool_calls", None) or []
+            expected_ids = []
+            for tc in tool_calls:
+                if isinstance(tc, dict):
+                    tc_id = tc.get("id")
+                    if tc_id:
+                        expected_ids.append(str(tc_id))
+            if not expected_ids:
+                out.append(msg)
+                i += 1
+                continue
+            block: list[BaseMessage] = [msg]
+            remaining = set(expected_ids)
+            j = i + 1
+            while j < len(messages) and isinstance(messages[j], ToolMessage):
+                tm = messages[j]
+                tc_id = str(getattr(tm, "tool_call_id", "") or "")
+                if tc_id in remaining:
+                    remaining.remove(tc_id)
+                    block.append(tm)
+                    j += 1
+                    if not remaining:
+                        break
+                    continue
+                break
+            if not remaining:
+                out.extend(block)
+                i = j
+                continue
+            i += 1
+            continue
+        out.append(msg)
+        i += 1
+    return out
 
 
 def _build_feedback_compression_ranges(messages: list, compressions: list) -> list[dict]:

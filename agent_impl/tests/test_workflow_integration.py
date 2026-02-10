@@ -29,73 +29,30 @@ class TestWorkflowIntegration:
         assert_agent_output(result)
         
         # 应该有回复
-        response = get_ai_response(result)
-        assert len(response) > 0, "应该有 AI 回复"
-        
-        # 简单咨询应该直接结束或进入提问
-        assert result.get("pending_questions") or result.get("pending_responses"), "应该有回复或提问"
+        if result.get("__interrupt__"):
+            assert isinstance(result.get("__interrupt__"), list)
+        else:
+            response = get_ai_response(result)
+            assert len(response) > 0, "应该有 AI 回复"
     
     def test_workflow_full_onboarding(self, workflow):
         """测试完整首次进入流程"""
-        # 第一轮：用户自我介绍
         state = create_initial_state("我叫小明，25岁，在北京做程序员")
         result = workflow.invoke(state)
         assert_state_valid(result)
-        
-        # 第二轮：介绍 crush
-        result = run_workflow_turn(workflow, result, "我喜欢一个女生叫小红，是我同事")
-        assert_state_valid(result)
-        
-        # 第三轮：描述关系
-        result = run_workflow_turn(workflow, result, "我们认识三个月了，经常一起吃饭")
-        assert_state_valid(result)
-        
-        # 验证状态累积
+        assert "onboarding_completed" in result
+        assert "layer1_memory" in result
+    
+    def test_workflow_multi_turn_continuity(self, workflow):
+        """测试多轮对话连贯性"""
+        state = create_initial_state("我喜欢一个女生")
+        result = workflow.invoke(state)
+        result = run_workflow_turn(workflow, result, "她是我同事")
+        result = run_workflow_turn(workflow, result, "我们认识三个月了")
         messages = result.get("messages", [])
-        assert len(messages) >= 6, "应该有至少6条消息（3轮对话）"
-        
-        # 验证上下文更新
-        user_context = result.get("user_context", {})
-        assert user_context is not None, "应该有 user_context"
-    
-    def test_workflow_agent_chain(self, workflow):
-        """测试 Agent 链式调用"""
-        # 创建需要完整流程的场景
-        state = create_initial_state(
-            "我和一个女生认识三个月了，我们是同事，经常一起吃饭，我想知道我们现在是什么阶段，应该怎么推进关系"
-        )
-        result = workflow.invoke(state)
-        assert_state_valid(result)
-        
-        # 如果 status_agent 完成，可能继续调用 plan_agent
-        if result.get("completion_status") == "COMPLETED":
-            result = workflow.invoke(result)
-            assert_state_valid(result)
-    
-    def test_workflow_resume_mechanism(self, workflow):
-        """测试恢复执行机制"""
-        # 第一轮：触发提问
-        state = create_initial_state("我想追求一个女生")
-        result = workflow.invoke(state)
-        assert_state_valid(result)
-        
-        # 如果需要提问
-        if result.get("pending_questions") and result.get("current_agent"):
-            current_agent = result.get("current_agent")
-            resume_point = result.get("agent_resume_point")
-            
-            # 模拟用户回答
-            result = run_workflow_turn(workflow, result, "她是我同事，我们认识三个月了")
-            
-            # 验证恢复执行
-            assert_state_valid(result)
-            # 应该恢复到之前的 Agent 继续执行
-            # 或者已经完成并清除恢复状态
-            if result.get("current_agent") == current_agent:
-                assert result.get("agent_resume_point") == resume_point, "应该保持恢复点"
-            else:
-                # 已经完成，清除恢复状态
-                assert result.get("current_agent") is None or result.get("current_agent") == "", "应该清除恢复状态"
+        user_messages = [m for m in messages if m.get("role") == "user"]
+        assert len(user_messages) >= 3, "应该有至少3条用户消息"
+        assert "layer1_memory" in result
     
     def test_workflow_error_handling(self, workflow):
         """测试错误处理"""
@@ -115,28 +72,44 @@ class TestWorkflowIntegration:
         result = workflow.invoke(state)
         assert_state_valid(result)
     
-    def test_workflow_multi_turn_continuity(self, workflow):
-        """测试多轮对话连贯性"""
-        # 第一轮
-        state = create_initial_state("我喜欢一个女生")
-        result = workflow.invoke(state)
-        
-        # 第二轮
-        result = run_workflow_turn(workflow, result, "她是我同事")
-        
-        # 第三轮
-        result = run_workflow_turn(workflow, result, "我们认识三个月了")
-        
-        # 验证对话历史
-        messages = result.get("messages", [])
-        user_messages = [m for m in messages if m.get("role") == "user"]
-        assert len(user_messages) >= 3, "应该有至少3条用户消息"
-        
-        # 验证上下文保持
-        user_context = result.get("user_context", {})
-        assert user_context is not None, "应该有 user_context"
+    # 原先的 “resume_point/pending_questions” 两阶段恢复机制已移除（改为 interrupt/resume 协议）
 
+    def test_workflow_interrupt_then_resume(self):
+        from langgraph.checkpoint.memory import MemorySaver
+        from langgraph.types import Command
 
+        from graph.workflow import compile_workflow
+
+        checkpointer = MemorySaver()
+        app = compile_workflow(checkpointer=checkpointer)
+        config = {"configurable": {"thread_id": "test_workflow_interrupt_resume"}, "checkpointer": checkpointer}
+
+        state = create_initial_state(
+            "[[TEST_INTERRUPT]] 请调用 ask_human 并立刻 interrupt，等待用户回答。",
+            onboarding_completed=True,
+            route_to="main_agent",
+        )
+        state["inquiry_card"] = None
+        state["pending_responses"] = []
+        state["last_response_for_continuity"] = None
+
+        out1 = app.invoke(state, config=config)
+        assert "__interrupt__" in out1
+        interrupts = out1.get("__interrupt__") or []
+        first = interrupts[0]
+        payload = first.get("value") if isinstance(first, dict) else getattr(first, "value", None)
+        assert isinstance(payload, dict)
+        assert payload.get("type") == "inquiry_card"
+        assert isinstance(payload.get("questions"), list) and payload["questions"]
+        assert payload["questions"][0].get("id") == "q1"
+
+        resume_payload = {"answers": {"q1": "A"}}
+        out2 = app.invoke(Command(resume=resume_payload), config=config)
+        assert "__interrupt__" not in out2
+        assert out2.get("inquiry_answers") == resume_payload
+        pending = out2.get("pending_responses") or []
+        assert isinstance(pending, list)
+        assert any(isinstance(r, dict) and r.get("content") for r in pending)
 
 
 

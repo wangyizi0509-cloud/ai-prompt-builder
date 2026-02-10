@@ -20,7 +20,10 @@ from typing import Literal, Optional
 from typing_extensions import TypedDict
 import os
 from datetime import datetime
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 # ============================================================
 # 处理状态（并发控制）
@@ -1080,6 +1083,6 @@ def check_processing_timeout(memory: dict, timeout_seconds: int = 60) -> bool:
 def clear_stale_processing(memory: dict, timeout_seconds: int = 60) -> dict:
     """清除过期的处理状态"""
     if check_processing_timeout(memory, timeout_seconds):
-        print(f"[Warning] Processing timeout detected, clearing stale status")
+        logger.warning(f"Processing timeout detected, clearing stale status")
         memory["processing_status"] = None
     return memory

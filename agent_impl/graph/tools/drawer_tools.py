@@ -10,10 +10,14 @@
 """
 
 from typing import Optional, TYPE_CHECKING
+import logging
 
 if TYPE_CHECKING:
     from graph.state import AgentState
     from graph.crush_chat_storage import CrushChatManager
+
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -372,7 +376,7 @@ def create_drawer_tools_for_langchain(
     try:
         from langchain.tools import Tool
     except ImportError:
-        print("[DrawerTools] langchain not installed, returning empty tools")
+        logger.info("langchain not installed, returning empty tools")
         return []
     
     drawer = DrawerTools(state, crush_chat_manager)

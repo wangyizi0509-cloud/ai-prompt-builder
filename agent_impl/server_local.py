@@ -114,7 +114,7 @@ async def chat(request: ChatRequest):
         "user_id": request.user_id or "anonymous",
     }
     
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {"configurable": {"thread_id": thread_id}, "checkpointer": checkpointer}
     
     try:
         result = await asyncio.to_thread(graph.invoke, input_data, config)
@@ -165,7 +165,7 @@ async def chat_stream(request: ChatRequest):
         "user_id": request.user_id or "anonymous",
     }
     
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {"configurable": {"thread_id": thread_id}, "checkpointer": checkpointer}
     
     async def generate():
         try:

@@ -8,11 +8,13 @@
 4. append_note: 追加思考笔记
 """
 
+import copy
 import json
 from typing import Optional, Callable, TYPE_CHECKING
 from datetime import datetime
 from langchain_core.tools import tool
 from graph.tools.schemas import TaskManagerInput, tool_error_response
+from agents.tooling.tool_result import error, ok
 
 if TYPE_CHECKING:
     from graph.state import AgentState
@@ -36,7 +38,7 @@ def get_task_list_for_agent(state: "AgentState", agent_name: str = "main_agent")
     """获取指定 Agent 的任务列表"""
     layer3_memory = state.get("layer3_memory", {}) or {}
     task_registry = layer3_memory.get("task_registry", {}) or {}
-    return list(task_registry.get(agent_name, []) or [])
+    return copy.deepcopy(list(task_registry.get(agent_name, []) or []))
 
 
 def get_active_task(task_list: list[dict]) -> Optional[dict]:
@@ -379,7 +381,7 @@ def create_task_tools(state_getter: Callable[[], "AgentState"], agent_name: str 
         title: str = "",
         summary: str = "",
         note: str = "",
-    ) -> str:
+    ) -> dict:
         """
         任务管理工具（统一入口，主路径）。
         用于任务状态变更的唯一主入口，支持 create / switch / complete / append_note。
@@ -391,20 +393,19 @@ def create_task_tools(state_getter: Callable[[], "AgentState"], agent_name: str 
             state_update, result = switch_task_impl(state, task_id, agent_name)
         elif action == "complete":
             if not summary:
-                return tool_error_response("complete 操作需要 summary")
+                return error(tool_error_response("complete 操作需要 summary"))
             state_update, result = complete_task_impl(state, summary, task_id or None, agent_name)
         elif action == "append_note":
             if not note:
-                return tool_error_response("append_note 操作需要 note")
+                return error(tool_error_response("append_note 操作需要 note"))
             state_update, result = append_task_note_impl(state, note, task_id or None, agent_name)
         else:
-            return tool_error_response(f"不支持的 action: {action}")
+            return error(tool_error_response(f"不支持的 action: {action}"))
 
-        if state_update:
-            for key, value in state_update.items():
-                state[key] = value
-
-        return json.dumps(result, ensure_ascii=False)
+        payload = json.dumps(result, ensure_ascii=False)
+        if bool(result.get("success")):
+            return ok(payload, state_patch=state_update)
+        return error(payload, state_patch=state_update)
 
     return [task_manager]
 

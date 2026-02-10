@@ -50,14 +50,7 @@ from .submit_tools import (
     SUBMIT_TOOL_NAMES,
 )
 
-from .ask_tool import (
-    # 新版 ask 工具（状态驱动）
-    get_ask_tool,
-    ask_enable,
-    ask_questions,
-    ASK_MODE_STRATEGY,
-    ASK_MODE_SIMPLE,
-)
+from .ask_human import ask_human
 
 from .consult_answer_tool import (
     # 解答工具（状态驱动）
@@ -113,12 +106,7 @@ __all__ = [
     "apply_submit_tool_state_update",
     "is_submit_tool",
     "SUBMIT_TOOL_NAMES",
-    # Ask 工具（状态驱动）
-    "get_ask_tool",
-    "ask_enable",
-    "ask_questions",
-    "ASK_MODE_STRATEGY",
-    "ASK_MODE_SIMPLE",
+    "ask_human",
     # Consult Answer 工具（状态驱动）
     "get_consult_tool",
     "consult_enable",

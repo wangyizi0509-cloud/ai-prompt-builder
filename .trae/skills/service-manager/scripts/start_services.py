@@ -12,10 +12,10 @@ import argparse
 
 
 def get_processes_on_port(port):
-    """Get PIDs of processes using specified port"""
+    """Get PIDs of processes listening on specified TCP port"""
     try:
         result = subprocess.run(
-            ['lsof', '-ti', f':{port}'],
+            ['lsof', '-nP', '-iTCP:%d' % port, '-sTCP:LISTEN', '-t'],
             capture_output=True,
             text=True
         )
@@ -36,11 +36,25 @@ def stop_service(port, service_name):
     print(f"🔧 Stopping existing {service_name} service (PIDs: {', '.join(map(str, pids))})...")
     for pid in pids:
         try:
-            subprocess.run(['kill', '-9', str(pid)], check=True)
-        except subprocess.CalledProcessError:
+            subprocess.run(['kill', '-TERM', str(pid)], check=False)
+        except Exception:
             pass
-    
-    time.sleep(1)
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        if not get_processes_on_port(port):
+            break
+        time.sleep(0.2)
+
+    remaining = get_processes_on_port(port)
+    if remaining:
+        for pid in remaining:
+            try:
+                subprocess.run(['kill', '-KILL', str(pid)], check=False)
+            except Exception:
+                pass
+
+    time.sleep(0.5)
     return True
 
 
@@ -89,14 +103,10 @@ def main():
     
     print(f"🚀 Starting services using agent_impl/{start_script_name}...")
     try:
-        # 使用 Popen 运行以保持在后台
-        process = subprocess.Popen(
-            ['bash', start_script],
+        subprocess.Popen(
+            ["bash", start_script],
             cwd=project_root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True,
-            bufsize=1
+            start_new_session=True,
         )
         
         print(f"✅ Services start command issued successfully! (Mode: {args.mode})")

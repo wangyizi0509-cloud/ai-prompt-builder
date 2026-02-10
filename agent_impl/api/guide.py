@@ -2,8 +2,10 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Literal, Optional
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class UpdateGuideStatusRequest(BaseModel):
@@ -31,8 +33,11 @@ async def update_guide_status(request: UpdateGuideStatusRequest):
     - 写入 v3.1 真源：layer2_memory.action_guides
     - 向后兼容：同步写回 state.action_guides
     """
-    print(
-        f"✅ [SDK] 收到指南状态更新请求: guide_id={request.guide_id}, new_status={request.new_status}, session={request.session_id}"
+    logger.info(
+        "[SDK] 收到指南状态更新请求: guide_id=%s, new_status=%s, session=%s",
+        request.guide_id,
+        request.new_status,
+        request.session_id,
     )
 
     from graph.context_types import (
@@ -126,9 +131,7 @@ async def update_guide_status(request: UpdateGuideStatusRequest):
                 if k in archive_updates:
                     state[k] = archive_updates[k]
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            print(f"⚠️ 归档失败: {str(e)}")
+            logger.exception("归档失败")
     
     update_thread_state(thread_id, state)
 

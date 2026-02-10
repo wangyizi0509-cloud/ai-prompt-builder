@@ -10,6 +10,8 @@ from typing import Callable, Optional, TYPE_CHECKING
 
 from langchain_core.tools import tool
 
+from agents.tooling.tool_result import error, ok
+
 if TYPE_CHECKING:
     from graph.state import AgentState
 
@@ -408,7 +410,7 @@ def create_context_loader(state_getter: Callable[[], "AgentState"], agent_name: 
         context_type: str,
         context_id: str,
         expire_at: str = "",
-    ) -> str:
+    ) -> dict:
         """
         上下文加载/绑定工具。
         - load: 仅查看内容，不绑定到任务（一次性使用）
@@ -420,16 +422,22 @@ def create_context_loader(state_getter: Callable[[], "AgentState"], agent_name: 
         """
         state = state_getter() or {}
         if action == "unbind":
-            _, result = _unbind_context(state, context_id, agent_name)
-            return json.dumps(result, ensure_ascii=False)
+            state_update, result = _unbind_context(state, context_id, agent_name)
+            payload = json.dumps(result, ensure_ascii=False)
+            if bool(result.get("success")):
+                return ok(payload, state_patch=state_update)
+            return error(payload, state_patch=state_update)
 
         if action == "refresh":
-            _, result = _refresh_context(state, context_id, expire_at or None, agent_name)
-            return json.dumps(result, ensure_ascii=False)
+            state_update, result = _refresh_context(state, context_id, expire_at or None, agent_name)
+            payload = json.dumps(result, ensure_ascii=False)
+            if bool(result.get("success")):
+                return ok(payload, state_patch=state_update)
+            return error(payload, state_patch=state_update)
 
         context_meta, content_md = _load_context(state, context_type, context_id)
         if not context_meta or not content_md:
-            return tool_error_response("未找到对应上下文")
+            return error(tool_error_response("未找到对应上下文"))
 
         if action == "load":
             result = {
@@ -439,7 +447,7 @@ def create_context_loader(state_getter: Callable[[], "AgentState"], agent_name: 
                 "context": context_meta,
                 "content_md": content_md,
             }
-            return json.dumps(result, ensure_ascii=False)
+            return ok(json.dumps(result, ensure_ascii=False), state_patch={})
 
         if action == "bind":
             state_update, result = _bind_context(
@@ -451,13 +459,13 @@ def create_context_loader(state_getter: Callable[[], "AgentState"], agent_name: 
                 expire_at or None,
                 agent_name,
             )
-            if state_update:
-                for key, value in state_update.items():
-                    state[key] = value
             result["content_md"] = content_md
-            return json.dumps(result, ensure_ascii=False)
+            payload = json.dumps(result, ensure_ascii=False)
+            if bool(result.get("success")):
+                return ok(payload, state_patch=state_update)
+            return error(payload, state_patch=state_update)
 
-        return tool_error_response(f"不支持的 action: {action}")
+        return error(tool_error_response(f"不支持的 action: {action}"))
 
     return context_loader
 

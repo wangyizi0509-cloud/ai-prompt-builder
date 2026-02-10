@@ -1,7 +1,10 @@
 import time
 
 import pytest
-from playwright.sync_api import expect, sync_playwright
+
+playwright = pytest.importorskip("playwright.sync_api", reason="playwright 未安装，跳过 UI 端到端测试")
+expect = playwright.expect
+sync_playwright = playwright.sync_playwright
 
 from tests.helpers.feedback_test_utils import (
     create_action_guide,

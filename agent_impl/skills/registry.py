@@ -11,9 +11,13 @@ Skill 注册表 (Skill Registry)
 
 from pathlib import Path
 from typing import Dict, List, Optional
+import logging
 
 from utils.prompt_loader import parse_frontmatter
 from skills.base import SkillMetadata
+
+
+logger = logging.getLogger(__name__)
 
 
 # Skill 定义目录路径
@@ -73,7 +77,7 @@ class SkillRegistry:
                     )
             except Exception as e:
                 # 跳过无法解析的 Skill 文件
-                print(f"Warning: 无法解析 Skill 文件 {skill_file}: {e}")
+                logger.warning("无法解析 Skill 文件 %s: %s", skill_file, e)
     
     def get_all_metadata(self) -> List[SkillMetadata]:
         """

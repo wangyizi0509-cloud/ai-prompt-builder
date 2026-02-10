@@ -8,6 +8,9 @@ import sys
 import pytest
 from pathlib import Path
 
+if not os.getenv("LLM_PROVIDER"):
+    os.environ["LLM_PROVIDER"] = "mock"
+
 # 添加 agent_impl 到 Python 路径
 AGENT_IMPL_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(AGENT_IMPL_DIR))
@@ -120,7 +123,6 @@ def run_workflow_turn(workflow, state: dict, user_message: str) -> dict:
     # 清理上一轮的临时数据
     state["debug_log"] = []
     state["inquiry_card"] = None
-    state["pending_questions"] = []
     state["pending_responses"] = []
     state["last_response_for_continuity"] = None
     
@@ -245,7 +247,9 @@ def assert_state_valid(state: dict):
     assert "user_message" in state, "状态必须包含 user_message"
     assert "messages" in state, "状态必须包含 messages"
     assert isinstance(state["messages"], list), "messages 必须是列表"
-    assert "user_context" in state, "状态必须包含 user_context"
+    assert "layer1_memory" in state, "状态必须包含 layer1_memory"
+    assert "layer2_memory" in state, "状态必须包含 layer2_memory"
+    assert "layer3_memory" in state, "状态必须包含 layer3_memory"
 
 
 def assert_agent_output(state: dict, expected_fields: list = None):

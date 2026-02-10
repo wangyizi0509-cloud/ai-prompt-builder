@@ -5,9 +5,11 @@ from supabase import create_client, Client
 from datetime import datetime
 from pathlib import Path
 import uuid
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
@@ -18,7 +20,7 @@ if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and SUPABASE_URL != "your-supabase
     try:
         supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
     except Exception as e:
-        print(f"Warning: Failed to initialize Supabase client: {e}")
+        logger.warning("Failed to initialize Supabase client: %s", e)
         supabase = None
 
 
@@ -127,7 +129,7 @@ async def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
             return response.data[0]
         return None
     except Exception as e:
-        print(f"Error fetching user: {e}")
+        logger.exception("Error fetching user")
         return None
 
 
@@ -142,7 +144,7 @@ async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
             return response.data[0]
         return None
     except Exception as e:
-        print(f"Error fetching user by email: {e}")
+        logger.exception("Error fetching user by email")
         return None
 
 
@@ -195,7 +197,7 @@ async def get_thread_by_user(user_id: str) -> Optional[Dict[str, Any]]:
             return response.data[0]
         return None
     except Exception as e:
-        print(f"Error fetching thread: {e}")
+        logger.exception("Error fetching thread")
         return None
 
 
@@ -210,7 +212,7 @@ async def get_user_by_thread(thread_id: str) -> Optional[Dict[str, Any]]:
             return response.data[0]
         return None
     except Exception as e:
-        print(f"Error fetching user by thread: {e}")
+        logger.exception("Error fetching user by thread")
         return None
 
 
@@ -290,7 +292,7 @@ async def upload_user_image(
                 'original_filename': filename
             }).execute()
         except Exception as db_err:
-            print(f"Warning: Failed to record image metadata in DB: {db_err}")
+            logger.warning("Failed to record image metadata in DB: %s", db_err)
             # 即使数据库记录失败，只要上传成功也返回成功
             
         return {
@@ -317,5 +319,5 @@ async def list_user_images_from_supabase(user_id: str, bucket_name: str = "image
         response = supabase.table('user_images').select('*').eq('user_id', user_id).execute()
         return response.data or []
     except Exception as e:
-        print(f"Error listing user images from Supabase: {e}")
+        logger.exception("Error listing user images from Supabase")
         return []

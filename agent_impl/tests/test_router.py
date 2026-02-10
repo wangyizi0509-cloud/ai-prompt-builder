@@ -64,45 +64,12 @@ class TestRouterNode:
             # 验证结果（router 只返回部分状态更新）
             assert result["route_to"] == "main_agent", f"'{message}' 应该路由到 main_agent"
             assert "debug_log" in result, "应该有调试日志"
-    
-    def test_router_resume_agent(self):
-        """测试恢复执行时的 Agent 路由"""
-        # 测试有 current_agent 的状态（应该由 workflow 处理，这里只测试 router 不干扰）
-        state = create_test_state(
-            "继续回答",
-            current_agent="status_agent",
-            agent_resume_point="continue_analysis"
-        )
-        result = router_node(state)
-        
-        # Router 应该正常处理，不干扰恢复逻辑
-        # route_to 应该由 workflow 的 route_after_router 决定
-        assert "route_to" in result, "应该有 route_to 字段"
 
-    def test_router_clears_instruction_when_not_resuming(self):
-        """v3.0: 非 resume 场景每轮开头应清空 instruction，避免跨轮次残留污染下游"""
-        state = create_test_state(
-            "新的用户消息",
-            instruction="旧的 brief 不应残留",
-            current_agent=None,
-            agent_resume_point=None,
-        )
+    def test_router_clears_runtime_each_turn(self):
+        state = create_test_state("新的用户消息")
+        state["runtime"] = {"foo": "bar"}
         result = router_node(state)
-        assert "instruction" in result, "router 应该显式清理 instruction"
-        assert result.get("instruction") is None
-
-    def test_router_keeps_instruction_when_resuming(self):
-        """v3.0: resume 场景应保留 instruction，用于子 Agent 提问后继续执行保持连贯"""
-        state = create_test_state(
-            "继续回答",
-            instruction="这是本任务的 brief，需要保留",
-            current_agent="status_agent",
-            agent_resume_point="continue_analysis",
-        )
-        result = router_node(state)
-        # resume 时不应覆盖清空（可能不返回 instruction 字段）
-        assert result.get("instruction", "KEEP") != None  # noqa: E711
-
+        assert result.get("runtime") == {}
 
 
 

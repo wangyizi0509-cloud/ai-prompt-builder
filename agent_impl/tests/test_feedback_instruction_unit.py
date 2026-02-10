@@ -1,27 +1,21 @@
 from __future__ import annotations
 
 
-def test_feedback_instruction_prefers_ask_card():
+def test_feedback_summary_tag_is_excluded_from_qa_history():
     """
-    单元测试：反馈模式动态注入的 instruction 必须明确
-    - 支持并优先使用 ask(action="enable") 进入提问卡流程
-    - 最终总结使用 [反馈完成] 标签（用于历史压缩保留）
+    单元测试：反馈追问历史抽取逻辑必须排除总结标记内容
+    - FEEDBACK_SUMMARY_TAG 用于历史压缩保留，但不应进入 qa_history
     """
-    from graph.nodes.guide_agent import _build_feedback_instruction, FEEDBACK_SUMMARY_TAG
+    from graph.tools.submit_tools import _build_feedback_qa_history, FEEDBACK_SUMMARY_TAG
 
-    state = {}
-    guide = {"title": "测试指南", "status": "in_progress"}
-    feedback_mode = {
-        "guide_id": "g_test",
-        "prefilled_status": "partial",
-        "prefilled_detail": "先做了一半，结果一般。",
-    }
+    messages = [
+        {"id": "m1", "role": "user", "content": "我来反馈一下执行情况"},
+        {"id": "m2", "role": "assistant", "content": "你做得怎么样？"},
+        {"id": "m3", "role": "user", "content": "完成一半，效果一般"},
+        {"id": "m4", "role": "assistant", "content": f"{FEEDBACK_SUMMARY_TAG} 总结：已记录反馈"},
+        {"id": "m5", "role": "assistant", "content": "下一步我们再微调"},
+    ]
 
-    instruction = _build_feedback_instruction(state, guide, feedback_mode)
-
-    assert "【行动反馈流程】" in instruction
-    assert 'ask(action="enable")' in instruction
-    assert FEEDBACK_SUMMARY_TAG in instruction
-    # 枚举约束应被明确写出，便于模型稳定填值
-    assert "success / partial / failed / abandoned / other" in instruction
-
+    qa = _build_feedback_qa_history(messages, start_message_id="m1", keep_tag=FEEDBACK_SUMMARY_TAG)
+    assert all(FEEDBACK_SUMMARY_TAG not in item.get("content", "") for item in qa)
+    assert [x["role"] for x in qa] == ["user", "ai", "user", "ai"]
