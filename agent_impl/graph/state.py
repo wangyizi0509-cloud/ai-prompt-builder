@@ -261,6 +261,7 @@ class AgentState(TypedDict, total=False):
     onboarding_max_turns: int
     onboarding_handoff: Optional[dict]
     last_onboarding_question: Optional[str]
+    pending_crushe_guide: bool
     question_count: int
     max_questions: int
 
@@ -379,6 +380,7 @@ def create_initial_state(user_message: str, **overrides) -> AgentState:
         onboarding_max_turns=3,
         onboarding_handoff=None,
         last_onboarding_question=None,
+        pending_crushe_guide=False,
         question_count=0,
         max_questions=3,
 

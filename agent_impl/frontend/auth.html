@@ -2,20 +2,25 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>登录/注册 - Crushe AI</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap');
 
         :root {
-            --primary-gradient: linear-gradient(135deg, #a855f7 0%, #8b5cf6 100%);
-            --bg-gradient: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-            --text-main: #1f2937;
+            --text-main: #111827;
             --text-secondary: #6b7280;
-            --purple-light: #f5f3ff;
-            --purple-primary: #8b5cf6;
             --border-color: #e5e7eb;
+            --bg: #ffffff;
+            --sheet-bg: #ffffff;
+            --overlay: rgba(17, 24, 39, 0.55);
+            --primary: #0b0b0b;
+            --primary-text: #ffffff;
+            --secondary: #ffffff;
+            --secondary-text: #0b0b0b;
+            --secondary-border: #e6e6e6;
+            --input-bg: #f7f7f7;
         }
 
         * {
@@ -23,176 +28,182 @@
             padding: 0;
             box-sizing: border-box;
             font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            -webkit-tap-highlight-color: transparent;
         }
 
         body {
-            background: var(--bg-gradient);
+            background: var(--bg);
+            min-height: 100vh;
+            color: var(--text-main);
+        }
+
+        #app {
+            width: 100%;
+            min-height: 100vh;
+        }
+
+        .page {
             min-height: 100vh;
             display: flex;
+            flex-direction: column;
             align-items: center;
-            justify-content: center;
-            padding: 20px;
+            justify-content: flex-start;
+            /* iOS safe-area support (notch) */
+            padding: calc(22px + env(safe-area-inset-top))
+                     calc(20px + env(safe-area-inset-right))
+                     calc(16px + env(safe-area-inset-bottom))
+                     calc(20px + env(safe-area-inset-left));
+            max-width: 520px;
+            margin: 0 auto;
         }
 
-        .container {
-            background: white;
-            border-radius: 32px;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-            width: 100%;
-            max-width: 440px;
-            overflow: hidden;
-            padding: 40px;
-            position: relative;
-        }
-
-        .logo-section {
+        .hero {
             text-align: center;
-            margin-bottom: 32px;
+            width: 100%;
+            padding-top: 6px;
         }
 
-        .logo-circle {
-            width: 80px;
-            height: 80px;
-            background: var(--primary-gradient);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto 16px;
-            box-shadow: 0 10px 20px rgba(139, 92, 246, 0.3);
+        .hero-figure {
+            width: min(232px, 62vw);
+            aspect-ratio: 1 / 1;
+            margin: 26px auto 16px;
+            position: relative;
+            display: grid;
+            place-items: center;
         }
 
-        .logo-circle svg {
-            width: 40px;
-            height: 40px;
-            fill: white;
+        .hero-figure .circle {
+            position: absolute;
+            inset: 0;
+            object-fit: contain;
+            width: 100%;
+            height: 100%;
         }
 
-        .logo-section h1 {
-            color: var(--text-main);
-            font-size: 28px;
-            font-weight: 700;
+        .hero-figure .avatar {
+            width: 86%;
+            height: 86%;
+            object-fit: contain;
+            transform: translateY(1%);
+        }
+
+        .hero h1 {
+            font-size: 36px;
+            line-height: 1.15;
+            font-weight: 800;
             letter-spacing: -0.5px;
-            margin-bottom: 4px;
+            margin-bottom: 8px;
         }
 
-        .logo-section p {
-            color: var(--text-secondary);
+        .hero p {
             font-size: 15px;
+            line-height: 1.4;
+            color: #9ca3af;
             font-weight: 500;
         }
 
-        .tabs {
+        .bottom {
+            width: 100%;
             display: flex;
-            margin-bottom: 32px;
-            border-bottom: 1px solid var(--border-color);
-            position: relative;
+            flex-direction: column;
+            gap: 14px;
+            margin-top: auto;
+            /* 让底部按钮整体再往上抬一点 */
+            padding-bottom: calc(28px + env(safe-area-inset-bottom));
         }
 
-        .tab {
-            flex: 1;
-            padding: 12px 0;
-            text-align: center;
-            cursor: pointer;
-            font-weight: 600;
+        .btn {
+            width: 70%;
+            max-width: 360px;
+            margin: 0 auto;
+            border-radius: 16px;
+            /* 按钮高度缩短 15%（主要由上下 padding 决定） */
+            padding: 16px 16px;
             font-size: 16px;
-            color: var(--text-secondary);
-            transition: all 0.3s ease;
-            position: relative;
-        }
-
-        .tab.active {
-            color: var(--purple-primary);
-        }
-
-        .tab-underline {
-            position: absolute;
-            bottom: -1px;
-            left: 0;
-            width: 50%;
-            height: 3px;
-            background: var(--purple-primary);
-            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            border-radius: 3px;
-        }
-
-        .tab-underline.register {
-            transform: translateX(100%);
-        }
-
-        .form-container {
-            min-height: 280px;
-        }
-
-        .form-group {
-            margin-bottom: 24px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: var(--text-main);
-            font-weight: 600;
-            font-size: 14px;
-        }
-
-        .form-group input {
-            width: 100%;
-            padding: 14px 18px;
-            border: 1.5px solid var(--border-color);
-            border-radius: 12px;
-            font-size: 15px;
-            background: #f9fafb;
-            transition: all 0.2s ease;
-            color: var(--text-main);
-        }
-
-        .form-group input::placeholder {
-            color: #9ca3af;
-        }
-
-        .form-group input:focus {
-            outline: none;
-            background: white;
-            border-color: var(--purple-primary);
-            box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.1);
-        }
-
-        .button {
-            width: 100%;
-            padding: 16px;
-            background: var(--primary-gradient);
-            color: white;
-            border: none;
-            border-radius: 14px;
-            font-size: 16px;
-            font-weight: 700;
+            font-weight: 800;
+            border: 1px solid transparent;
             cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 10px 15px -3px rgba(139, 92, 246, 0.3);
-            margin-top: 8px;
+            transition: transform 0.08s ease, filter 0.2s ease;
         }
 
-        .button:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 15px 25px -5px rgba(139, 92, 246, 0.4);
-            filter: brightness(1.05);
+        .btn:active:not(:disabled) {
+            transform: scale(0.99);
         }
 
-        .button:active:not(:disabled) {
-            transform: translateY(0);
+        .btn-primary {
+            background: linear-gradient(180deg, #151515 0%, #0b0b0b 100%);
+            color: var(--primary-text);
+            box-shadow: 0 14px 28px rgba(0, 0, 0, 0.18);
         }
 
-        .button:disabled {
+        .btn-secondary {
+            background: var(--secondary);
+            color: var(--secondary-text);
+            border-color: var(--secondary-border);
+            box-shadow: 0 10px 22px rgba(0, 0, 0, 0.06);
+        }
+
+        .btn:disabled {
             opacity: 0.7;
             cursor: not-allowed;
-            transform: none;
+        }
+
+        /* Bottom sheet */
+        .overlay {
+            position: fixed;
+            inset: 0;
+            background: var(--overlay);
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            padding: 0 calc(12px + env(safe-area-inset-right)) calc(0px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
+            z-index: 50;
+        }
+
+        .sheet {
+            width: 100%;
+            max-width: 520px;
+            background: var(--sheet-bg);
+            border-radius: 18px 18px 0 0;
+            padding: 18px 18px calc(18px + env(safe-area-inset-bottom));
+            transform: translateY(0);
+            animation: sheetUp 180ms ease-out;
+        }
+
+        @keyframes sheetUp {
+            from { transform: translateY(22px); opacity: 0.9; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .sheet-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+        }
+
+        .sheet-title {
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: -0.2px;
+        }
+
+        .sheet-close {
+            width: 34px;
+            height: 34px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 22px;
+            color: #111827;
+            display: grid;
+            place-items: center;
         }
 
         .message {
-            padding: 14px;
+            padding: 12px 12px;
             border-radius: 12px;
-            margin-bottom: 24px;
+            margin: 12px 0 14px;
             font-size: 14px;
             font-weight: 500;
             display: flex;
@@ -231,124 +242,144 @@
             to { transform: rotate(360deg); }
         }
 
-        .footer {
-            text-align: center;
-            margin-top: 32px;
-            color: var(--text-secondary);
-            font-size: 13px;
+        .form {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            margin-top: 6px;
         }
 
-        /* Vue Transitions */
-        .fade-enter-active, .fade-leave-active {
-            transition: opacity 0.2s ease, transform 0.2s ease;
+        .field label {
+            display: block;
+            font-size: 14px;
+            font-weight: 700;
+            color: #111827;
+            margin-bottom: 10px;
         }
-        .fade-enter-from { opacity: 0; transform: translateX(10px); }
-        .fade-leave-to { opacity: 0; transform: translateX(-10px); }
+
+        .field input {
+            width: 100%;
+            border: none;
+            outline: none;
+            background: var(--input-bg);
+            padding: 16px 16px;
+            border-radius: 14px;
+            font-size: 15px;
+            color: #111827;
+        }
+
+        .field input::placeholder {
+            color: #9ca3af;
+        }
+
+        .confirm {
+            margin-top: 10px;
+            background: var(--primary);
+            color: var(--primary-text);
+            border: none;
+            border-radius: 14px;
+            padding: 18px 16px;
+            font-size: 16px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+
+        .confirm:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        @media (max-width: 420px) {
+            .hero h1 { font-size: 34px; }
+            .hero-figure { width: min(228px, 64vw); }
+            .btn { width: 74%; }
+        }
     </style>
 </head>
 <body>
     <div id="app">
-        <div class="container">
-            <div class="logo-section">
-                <div class="logo-circle">
-                    <svg viewBox="0 0 24 24">
-                        <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
-                    </svg>
+        <div class="page">
+            <div class="hero">
+                <div class="hero-figure" aria-hidden="true">
+                    <img class="circle" src="./assets/xiaohua_circle.png" alt="">
+                    <img class="avatar" src="./assets/xiaohua_wave.png" alt="">
                 </div>
-                <h1>Crushe AI</h1>
-                <p>你的 AI 恋爱军师</p>
+                <h1>你好！ 我是小话.</h1>
+                <p>赶快登录咨询您的情感问题吧！</p>
             </div>
 
-            <div class="tabs">
-                <div 
-                    class="tab" 
-                    :class="{ active: currentTab === 'login' }"
-                    @click="currentTab = 'login'"
-                >
-                    登录
-                </div>
-                <div 
-                    class="tab" 
-                    :class="{ active: currentTab === 'register' }"
-                    @click="currentTab = 'register'"
-                >
-                    注册
-                </div>
-                <div class="tab-underline" :class="currentTab"></div>
+            <div class="bottom">
+                <button class="btn btn-primary" @click="openSheet('login')">登录</button>
+                <button class="btn btn-secondary" @click="openSheet('register')">注册</button>
             </div>
 
-            <div class="form-container">
-                <transition name="fade" mode="out-in">
-                    <div :key="currentTab">
-                        <div v-if="errorMessage" class="message error">
-                            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
-                            </svg>
-                            {{ errorMessage }}
-                        </div>
-
-                        <div v-if="successMessage" class="message success">
-                            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
-                            </svg>
-                            {{ successMessage }}
-                        </div>
-
-                        <form @submit.prevent="handleSubmit">
-                            <div class="form-group" v-if="currentTab === 'register'">
-                                <label for="username">用户名</label>
-                                <input 
-                                    type="text" 
-                                    id="username"
-                                    v-model="formData.username"
-                                    placeholder="请输入用户名"
-                                    :disabled="loading"
-                                    required
-                                >
-                            </div>
-
-                            <div class="form-group">
-                                <label for="email">邮箱</label>
-                                <input 
-                                    type="email" 
-                                    id="email"
-                                    v-model="formData.email"
-                                    placeholder="请输入邮箱"
-                                    :disabled="loading"
-                                    required
-                                >
-                            </div>
-
-                            <div class="form-group">
-                                <label for="password">密码</label>
-                                <input 
-                                    type="password" 
-                                    id="password"
-                                    v-model="formData.password"
-                                    placeholder="请输入密码"
-                                    :disabled="loading"
-                                    required
-                                >
-                            </div>
-
-                            <button 
-                                type="submit" 
-                                class="button"
-                                :disabled="loading"
-                            >
-                                <div v-if="loading" style="display: flex; justify-content: center; align-items: center; gap: 8px;">
-                                    <div class="loading-spinner"></div>
-                                    <span>处理中...</span>
-                                </div>
-                                <span v-else>{{ currentTab === 'login' ? '登录' : '注册' }}</span>
-                            </button>
-                        </form>
+            <div class="overlay" v-if="sheetOpen" @click.self="closeSheet">
+                <div class="sheet" role="dialog" aria-modal="true" :aria-label="sheetMode === 'login' ? '登录' : '注册'">
+                    <div class="sheet-header">
+                        <div class="sheet-title">{{ sheetMode === 'login' ? '登录' : '注册' }}</div>
+                        <button class="sheet-close" @click="closeSheet" aria-label="关闭">×</button>
                     </div>
-                </transition>
-            </div>
 
-            <div class="footer">
-                <p>Crushe AI &copy; 2026</p>
+                    <div v-if="errorMessage" class="message error">
+                        <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                            <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+                        </svg>
+                        {{ errorMessage }}
+                    </div>
+
+                    <div v-if="successMessage" class="message success">
+                        <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                            <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
+                        </svg>
+                        {{ successMessage }}
+                    </div>
+
+                    <form class="form" @submit.prevent="handleSubmit">
+                        <div class="field" v-if="sheetMode === 'register'">
+                            <label for="username">用户名</label>
+                            <input
+                                type="text"
+                                id="username"
+                                v-model="formData.username"
+                                placeholder="请输入用户名"
+                                :disabled="loading"
+                                required
+                            >
+                        </div>
+
+                        <div class="field">
+                            <label for="email">邮箱</label>
+                            <input
+                                type="email"
+                                id="email"
+                                v-model="formData.email"
+                                placeholder="请输入邮箱"
+                                :disabled="loading"
+                                required
+                            >
+                        </div>
+
+                        <div class="field">
+                            <label for="password">密码</label>
+                            <input
+                                type="password"
+                                id="password"
+                                v-model="formData.password"
+                                placeholder="请输入密码"
+                                :disabled="loading"
+                                required
+                            >
+                        </div>
+
+                        <button type="submit" class="confirm" :disabled="loading">
+                            <div v-if="loading" style="display: flex; justify-content: center; align-items: center; gap: 8px;">
+                                <div class="loading-spinner"></div>
+                                <span>处理中...</span>
+                            </div>
+                            <span v-else>确认</span>
+                        </button>
+                    </form>
+                </div>
             </div>
         </div>
     </div>
@@ -359,7 +390,8 @@
         createApp({
             data() {
                 return {
-                    currentTab: 'login',
+                    sheetOpen: false,
+                    sheetMode: 'login', // 'login' | 'register'
                     formData: {
                         email: '',
                         password: '',
@@ -370,31 +402,37 @@
                     successMessage: ''
                 }
             },
-            watch: {
-                currentTab() {
-                    this.clearMessages();
-                    this.formData = {
-                        email: '',
-                        password: '',
-                        username: ''
-                    };
-                }
-            },
             methods: {
                 clearMessages() {
                     this.errorMessage = '';
                     this.successMessage = '';
+                },
+                resetForm() {
+                    this.formData = { email: '', password: '', username: '' };
+                },
+                openSheet(mode) {
+                    this.clearMessages();
+                    this.loading = false;
+                    this.sheetMode = mode;
+                    this.resetForm();
+                    this.sheetOpen = true;
+                    // prevent body scroll when sheet open
+                    document.body.style.overflow = 'hidden';
+                },
+                closeSheet() {
+                    this.sheetOpen = false;
+                    document.body.style.overflow = '';
                 },
                 async handleSubmit() {
                     this.clearMessages();
                     this.loading = true;
 
                     try {
-                        const endpoint = this.currentTab === 'login' 
+                        const endpoint = this.sheetMode === 'login'
                             ? '/api/auth/login' 
                             : '/api/auth/register';
 
-                        const payload = this.currentTab === 'login'
+                        const payload = this.sheetMode === 'login'
                             ? {
                                 email: this.formData.email,
                                 password: this.formData.password
@@ -418,8 +456,10 @@
                         if (data.success) {
                             localStorage.setItem('token', data.token);
                             localStorage.setItem('user', JSON.stringify(data.user));
+                            localStorage.removeItem('session_id');
+                            localStorage.removeItem('crusheGuideCompleted');
 
-                            this.successMessage = this.currentTab === 'login' 
+                            this.successMessage = this.sheetMode === 'login'
                                 ? '登录成功，正在跳转...' 
                                 : '注册成功，正在跳转...';
 
@@ -436,6 +476,11 @@
                         this.loading = false;
                     }
                 }
+            },
+            mounted() {
+                window.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape' && this.sheetOpen) this.closeSheet();
+                });
             }
         }).mount('#app');
     </script>

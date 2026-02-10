@@ -374,6 +374,23 @@ async def chat(
             combined_response = "\n\n".join([r["content"] for r in pending_responses if r.get("content")])
         else:
             combined_response = ""
+            
+        # Fallback: 如果 pending_responses 为空，尝试从 messages 中提取最后一条 assistant 消息
+        if not combined_response:
+            messages = final_state.get("messages", [])
+            if messages:
+                last_msg = messages[-1]
+                # 检查是否是 assistant 消息且有内容
+                role = last_msg.get("role") or (last_msg.get("type") if last_msg.get("type") == "ai" else "")
+                content = last_msg.get("content")
+                if (role == "assistant" or role == "ai") and content:
+                    combined_response = content
+                    # 同时构造一个临时的 pending_response 以便前端渲染
+                    pending_responses = [{
+                        "from": "main_agent",
+                        "content": content,
+                        "phase": "immediate"
+                    }]
         
         _append_debug_log(
             run_id="sdk-version",
