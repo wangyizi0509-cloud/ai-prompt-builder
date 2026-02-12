@@ -116,9 +116,22 @@ onboarding/
 ├── onboarding_logic.md          ← 追问问题库（MAS 缺失时使用）
 ├── workflow.py                  ← LangGraph 工作流定义
 ├── state.py                     ← 状态定义（OnboardingState, OnboardingHandoff）
-└── prompts/
-    └── onboarding_agent.md      ← Onboarding Agent 的 Prompt 模板
 ```
+
+```
+prompts/
+└── onboarding_agent.md          ← Onboarding Agent 的 System Prompt（全局统一目录）
+```
+
+### Message Stack 注入说明
+
+Onboarding 与主 Agent 使用同构的消息栈输入：
+1. `SystemMessage`（`prompts/onboarding_agent.md`）
+2. `HumanMessage`（`<dossier>` 上下文）
+3. `AIMessage`（Virtual Ack）
+4. 历史消息窗口（message list）
+5. Onboarding 运行时上下文（轮次 + 参考问题）
+6. 当前用户输入
 
 ---
 

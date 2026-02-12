@@ -1,21 +1,12 @@
-"""
-Onboarding Agent: preliminary_assessment 透传单测（不触发真实 LLM）。
+"""Onboarding preliminary_assessment 透传单测（固定走 legacy fallback）。"""
 
-目的：
-- 当 needs_more=false 时，若模型输出 preliminary_assessment，应出现在：
-  1) 节点返回的顶层字段 result["preliminary_assessment"]
-  2) pending_responses[0]["preliminary_assessment"]（便于前端/调试）
-- 用户可见回复优先使用 parsed["response"]，否则降级为 recommendation
-"""
-
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from graph.state import create_initial_state
-from onboarding.onboarding_agent import onboarding_agent_node
+from onboarding import onboarding_agent as onboarding_module
 
 
-@patch("onboarding.onboarding_agent.get_llm")
-def test_onboarding_completed_includes_preliminary_assessment(mock_get_llm):
+def test_onboarding_completed_includes_preliminary_assessment(monkeypatch):
     mock_llm = MagicMock()
     mock_resp = MagicMock()
     mock_resp.content = """```json
@@ -34,14 +25,20 @@ def test_onboarding_completed_includes_preliminary_assessment(mock_get_llm):
 }
 ```"""
     mock_llm.invoke.return_value = mock_resp
-    mock_get_llm.return_value = mock_llm
+    monkeypatch.setattr(onboarding_module, "get_llm", lambda *args, **kwargs: mock_llm)
+
+    def _force_fallback(**kwargs):
+        raise RuntimeError("force legacy fallback in test")
+
+    monkeypatch.setattr(onboarding_module, "_run_onboarding_supervisor", _force_fallback)
 
     state = create_initial_state("你好")
     state["user_message"] = "你好"
 
-    result = onboarding_agent_node(state)
+    result = onboarding_module.onboarding_agent_node(state)
 
-    assert result.get("onboarding_completed") is True
+    assert result.get("onboarding_completed") is False
+    assert result.get("pending_crushe_guide") is True
     assert isinstance(result.get("preliminary_assessment"), dict)
     assert result["preliminary_assessment"]["verdict"] == "🟡迷雾"
 
@@ -49,4 +46,3 @@ def test_onboarding_completed_includes_preliminary_assessment(mock_get_llm):
     assert pending and isinstance(pending, list)
     assert "局势初判卡" in pending[0]["content"]
     assert isinstance(pending[0].get("preliminary_assessment"), dict)
-

@@ -23,7 +23,9 @@ class OnboardingState(TypedDict, total=False):
     这些字段与主状态共用，不会影响其他 Agent 的兼容性。
     """
     onboarding_completed: bool
+    pending_crushe_guide: bool
     onboarding_turn_count: int
+    onboarding_last_answer_fingerprint: Optional[str]
     onboarding_max_turns: int
     onboarding_handoff: Optional[OnboardingHandoff]
     collected_info: dict
@@ -37,10 +39,11 @@ def get_default_onboarding_config() -> dict[str, Any]:
     """
     return {
         "onboarding_completed": False,
+        "pending_crushe_guide": False,
         "onboarding_turn_count": 0,
+        "onboarding_last_answer_fingerprint": None,
         "onboarding_max_turns": 3,
         "onboarding_handoff": None,
         "collected_info": {},
         "last_onboarding_question": None,
     }
-

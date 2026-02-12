@@ -18,6 +18,10 @@ from agents.tooling.patch import merge_patches
 from agents.tools.all_tools import build_all_tools_for_agent
 from config import get_llm
 from graph.message_builder import build_messages_for_model
+from graph.runtime_config import (
+    resolve_runtime_checkpointer,
+    sanitize_nested_runtime_config,
+)
 from graph.state import convert_message_to_dict, ensure_message_id
 
 
@@ -204,9 +208,10 @@ def run_node(state: GuideSubState, config: RunnableConfig | None = None) -> dict
     patches: list[dict] = []
     wrapped_tools = _wrap_tools_for_patch_collection(list(tools or []), patches)
 
-    cfg = dict(config or {})
+    cfg = sanitize_nested_runtime_config(config)
     rounds = max(1, int(os.getenv("SUBAGENT_TOOL_MAX_ROUNDS", "8")))
     cfg["recursion_limit"] = max(25, rounds * 4 + 10)
+    checkpointer = resolve_runtime_checkpointer(config)
 
     llm = get_llm(temperature=0.7, use_tools=True)
     agent_graph = create_agent(
@@ -214,7 +219,7 @@ def run_node(state: GuideSubState, config: RunnableConfig | None = None) -> dict
         tools=wrapped_tools,
         system_prompt=None,
         name="guide_tool_loop_agent",
-        checkpointer=cfg.get("checkpointer"),
+        checkpointer=checkpointer,
     )
 
     if private_messages:

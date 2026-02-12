@@ -1085,6 +1085,133 @@
             overflow: hidden;
         }
 
+        /* Inquiry receipt (tool result display) */
+        .inquiry-receipt-row {
+            align-items: stretch;
+        }
+        .inquiry-receipt-card {
+            margin-left: auto;
+            width: min(80%, 360px);
+            background: rgba(255, 255, 255, 0.98);
+            border: 1px solid rgba(148, 163, 184, 0.38);
+            border-radius: 14px;
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+            overflow: hidden;
+            transition: box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+        .inquiry-receipt-card.highlight {
+            box-shadow: 0 0 0 2px rgba(124, 77, 255, 0.26), 0 8px 20px rgba(15, 23, 42, 0.08);
+            border-color: rgba(124, 77, 255, 0.42);
+        }
+        .inquiry-receipt-toggle {
+            width: 100%;
+            border: none;
+            background: rgba(248, 250, 252, 0.95);
+            color: rgba(15, 23, 42, 0.82);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 10px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .inquiry-receipt-toggle-text {
+            color: rgba(71, 85, 105, 0.92);
+            font-size: 12px;
+        }
+        .inquiry-receipt-status-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 700;
+            border: 1px solid rgba(148, 163, 184, 0.45);
+            color: rgba(51, 65, 85, 0.92);
+            background: rgba(241, 245, 249, 0.95);
+        }
+        .inquiry-receipt-status-badge.is-submitting {
+            border-color: rgba(217, 119, 6, 0.35);
+            color: rgba(146, 64, 14, 0.96);
+            background: rgba(255, 247, 237, 0.95);
+        }
+        .inquiry-receipt-status-badge.is-done {
+            border-color: rgba(22, 163, 74, 0.34);
+            color: rgba(21, 128, 61, 0.96);
+            background: rgba(240, 253, 244, 0.95);
+        }
+        .inquiry-receipt-status-badge.is-error {
+            border-color: rgba(220, 38, 38, 0.33);
+            color: rgba(185, 28, 28, 0.96);
+            background: rgba(254, 242, 242, 0.95);
+        }
+        .inquiry-receipt-card.is-submitting {
+            border-color: rgba(217, 119, 6, 0.34);
+        }
+        .inquiry-receipt-card.is-done {
+            border-color: rgba(22, 163, 74, 0.3);
+        }
+        .inquiry-receipt-card.is-error {
+            border-color: rgba(220, 38, 38, 0.35);
+        }
+        .inquiry-receipt-body {
+            padding: 10px 12px 12px;
+            border-top: 1px solid rgba(226, 232, 240, 0.9);
+            background: rgba(255, 255, 255, 0.96);
+        }
+        .inquiry-receipt-field {
+            border: 1px solid rgba(226, 232, 240, 0.95);
+            border-radius: 10px;
+            padding: 8px 9px;
+            background: rgba(248, 250, 252, 0.88);
+        }
+        .inquiry-receipt-field-label {
+            font-size: 11px;
+            font-weight: 700;
+            color: rgba(51, 65, 85, 0.88);
+            margin-bottom: 2px;
+        }
+        .inquiry-receipt-field-value {
+            font-size: 12px;
+            color: rgba(15, 23, 42, 0.88);
+            line-height: 1.35;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .inquiry-receipt-error {
+            font-size: 12px;
+            color: rgba(185, 28, 28, 0.96);
+            border: 1px solid rgba(252, 165, 165, 0.62);
+            background: rgba(254, 242, 242, 0.95);
+            border-radius: 8px;
+            padding: 7px 8px;
+        }
+        .inquiry-receipt-btn {
+            border: 1px solid rgba(148, 163, 184, 0.5);
+            color: rgba(51, 65, 85, 0.94);
+            background: rgba(248, 250, 252, 0.95);
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .inquiry-receipt-btn:hover {
+            background: rgba(241, 245, 249, 1);
+        }
+        .inquiry-receipt-btn.primary {
+            border-color: rgba(124, 77, 255, 0.42);
+            color: rgba(91, 33, 182, 0.96);
+            background: rgba(245, 243, 255, 0.95);
+        }
+        .inquiry-receipt-btn.primary:hover {
+            background: rgba(237, 233, 254, 1);
+        }
+
         /* Carousel Animations */
         .slide-fade-enter-active,
         .slide-fade-leave-active {
@@ -1703,8 +1830,14 @@
                         <div v-if="msg.role === 'system_task'" class="flex justify-center my-2">
                             <div 
                                 class="task-card"
-                                :class="[`type-${msg.taskType}`, msg.disabled ? 'opacity-60 pointer-events-none' : '']"
-                                @click="!msg.disabled && handleTaskClick(msg)"
+                                :class="[
+                                    `type-${msg.taskType}`,
+                                    msg.disabled && msg.taskType !== 'inquiry' ? 'opacity-60 pointer-events-none' : '',
+                                    msg.disabled && msg.taskType === 'inquiry' ? 'opacity-60' : ''
+                                ]"
+                                :data-task-key="msg.taskType === 'inquiry' ? (msg.taskKey || '') : null"
+                                :data-task-state="msg.taskType === 'inquiry' ? (msg.taskState || '') : null"
+                                @click="handleTaskClick(msg)"
                             >
                                 <div class="task-card-header">
                                     <div class="task-card-header-left">
@@ -1740,6 +1873,65 @@
                                 <div class="task-card-section">
                                     <div class="task-card-section-title">{{ getTaskCardSectionLabel(msg.taskType, 'b') }}</div>
                                     <div class="task-card-section-desc clamp-2">{{ getTaskCardSectionText(msg, 'b') }}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Inquiry Receipt Message -->
+                        <div
+                            v-else-if="msg.role === 'inquiry_receipt'"
+                            class="flex flex-col space-y-2 inquiry-receipt-row"
+                            :data-receipt-id="msg.id"
+                            :data-task-key="msg.taskKey || ''"
+                        >
+                            <div class="flex justify-end">
+                                <div class="max-w-[80%] px-4 py-3 text-sm shadow-sm chat-bubble-user">
+                                    {{ msg.summary || '已提交问卷' }}
+                                </div>
+                            </div>
+                            <div class="inquiry-receipt-card" :class="[getInquiryReceiptStatusClass(msg), msg.highlight ? 'highlight' : '']">
+                                <button class="inquiry-receipt-toggle" @click="toggleInquiryReceiptExpanded(msg.id)">
+                                    <span class="inquiry-receipt-status-badge" :class="getInquiryReceiptStatusClass(msg)">
+                                        {{ getInquiryReceiptStatusLabel(msg) }}
+                                    </span>
+                                    <span class="inquiry-receipt-toggle-text">{{ msg.expanded ? '收起详情' : '展开详情' }}</span>
+                                </button>
+                                <div v-if="msg.expanded" class="inquiry-receipt-body">
+                                    <div v-if="msg.details && msg.details.length > 0" class="space-y-2">
+                                        <div
+                                            v-for="(item, detailIdx) in msg.details"
+                                            :key="`${msg.id}_detail_${detailIdx}`"
+                                            class="inquiry-receipt-field"
+                                        >
+                                            <div class="inquiry-receipt-field-label">{{ item.label }}</div>
+                                            <div class="inquiry-receipt-field-value">{{ item.value }}</div>
+                                        </div>
+                                    </div>
+                                    <div v-if="msg.images && msg.images.length > 0" class="mt-2">
+                                        <div class="inquiry-receipt-field-label mb-1">截图预览</div>
+                                        <div class="flex flex-wrap gap-2">
+                                            <div
+                                                v-for="(img, imgIdx) in msg.images"
+                                                :key="img.id || `${msg.id}_img_${imgIdx}`"
+                                                class="relative w-16 h-16 rounded-lg overflow-hidden bg-gray-100 border border-gray-200"
+                                            >
+                                                <img :src="img.preview || img.imageUrl" class="w-full h-full object-cover">
+                                                <div v-if="img.status === 'processing'" class="absolute inset-0 bg-black/30 flex items-center justify-center">
+                                                    <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                                </div>
+                                                <div v-else-if="img.status === 'error'" class="absolute inset-0 bg-red-500/70 flex items-center justify-center">
+                                                    <span class="text-white text-[10px]">失败</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div v-if="msg.errorMessage" class="inquiry-receipt-error mt-2">
+                                        {{ msg.errorMessage }}
+                                    </div>
+                                    <div v-if="msg.status === 'error'" class="flex flex-wrap gap-2 mt-3">
+                                        <button class="inquiry-receipt-btn primary" @click="retryInquiryReceipt(msg.id)">重试提交</button>
+                                        <button class="inquiry-receipt-btn" @click="editInquiryFromReceipt(msg.id)">编辑重填</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -2015,12 +2207,12 @@
                                     <!-- Card Body -->
                                     <div class="p-3 space-y-3">
                                         <div class="text-left">
-                                            <div class="text-[10px] font-bold text-gray-800 mb-1">信息标题</div>
-                                            <div class="text-[10px] text-gray-400 truncate">请补充第一个信息标题</div>
+                                            <div class="text-[10px] font-bold text-gray-800 mb-1">补充目标</div>
+                                            <div class="text-[10px] text-gray-400 truncate">补充必要信息</div>
                                         </div>
                                         <div class="text-left">
-                                            <div class="text-[10px] font-bold text-gray-800 mb-1">信息明细</div>
-                                            <div class="text-[10px] text-gray-400 truncate">点击填写双方档案与诉求</div>
+                                            <div class="text-[10px] font-bold text-gray-800 mb-1">操作说明</div>
+                                            <div class="text-[10px] text-gray-400 truncate">点击填写补充信息，完善后我再继续分析</div>
                                         </div>
                                     </div>
                                 </div>
@@ -2234,7 +2426,7 @@
                     </div>
 
                     <div class="space-y-4 pb-4">
-                        <div v-for="(q, qIndex) in inquiryCard.questions" :key="q.id" class="bg-white rounded-xl p-4 shadow-sm">
+                        <div v-for="(q, qIndex) in inquiryCard.questions" :key="getInquiryQuestionUiKey(q, qIndex)" class="bg-white rounded-xl p-4 shadow-sm">
                             <p class="text-sm font-medium text-gray-800 mb-3">
                                 {{ qIndex + 1 }}. {{ q.question }}
                                 <span v-if="!q.is_required" class="text-gray-400 text-xs ml-1">(选填)</span>
@@ -2243,7 +2435,7 @@
                             <!-- Free Input (自由输入) -->
                             <div v-if="q.type === 'free_input_question' || q.type === 'text'">
                                 <textarea 
-                                    v-model="inquiryAnswers[q.id]"
+                                    v-model="inquiryAnswers[getInquiryQuestionUiKey(q, qIndex)]"
                                     :placeholder="q.placeholder || '请输入...'"
                                     class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none"
                                     rows="4"
@@ -2258,18 +2450,18 @@
                                     v-for="(opt, optIdx) in (q.options || [])" 
                                     :key="optIdx"
                                     class="flex items-center p-3 rounded-lg border cursor-pointer transition-all"
-                                    :class="getOptionValue(opt) === inquiryAnswers[q.id] ? 'border-violet-500 bg-violet-50' : 'border-gray-200 hover:border-violet-300'"
+                                    :class="getOptionValue(opt) === inquiryAnswers[getInquiryQuestionUiKey(q, qIndex)] ? 'border-violet-500 bg-violet-50' : 'border-gray-200 hover:border-violet-300'"
                                 >
                                     <input 
                                         type="radio" 
-                                        :name="q.id" 
+                                        :name="getInquiryQuestionUiKey(q, qIndex)" 
                                         :value="getOptionValue(opt)"
-                                        v-model="inquiryAnswers[q.id]"
+                                        v-model="inquiryAnswers[getInquiryQuestionUiKey(q, qIndex)]"
                                         class="sr-only"
                                     >
                                     <span class="w-4 h-4 rounded-full border-2 mr-3 flex items-center justify-center"
-                                        :class="getOptionValue(opt) === inquiryAnswers[q.id] ? 'border-violet-500' : 'border-gray-300'">
-                                        <span v-if="getOptionValue(opt) === inquiryAnswers[q.id]" class="w-2 h-2 rounded-full bg-violet-500"></span>
+                                        :class="getOptionValue(opt) === inquiryAnswers[getInquiryQuestionUiKey(q, qIndex)] ? 'border-violet-500' : 'border-gray-300'">
+                                        <span v-if="getOptionValue(opt) === inquiryAnswers[getInquiryQuestionUiKey(q, qIndex)]" class="w-2 h-2 rounded-full bg-violet-500"></span>
                                     </span>
                                     <span class="text-sm text-gray-700">{{ getOptionLabel(opt) }}</span>
                                 </label>
@@ -2281,18 +2473,18 @@
                                     v-for="(opt, optIdx) in (q.options || [])" 
                                     :key="optIdx"
                                     class="flex items-center p-3 rounded-lg border cursor-pointer transition-all"
-                                    :class="(inquiryAnswers[q.id] || []).includes(getOptionValue(opt)) ? 'border-violet-500 bg-violet-50' : 'border-gray-200 hover:border-violet-300'"
+                                    :class="(inquiryAnswers[getInquiryQuestionUiKey(q, qIndex)] || []).includes(getOptionValue(opt)) ? 'border-violet-500 bg-violet-50' : 'border-gray-200 hover:border-violet-300'"
                                 >
                                     <input 
                                         type="checkbox" 
                                         :value="getOptionValue(opt)"
-                                        @change="toggleMultiChoice(q.id, getOptionValue(opt))"
-                                        :checked="(inquiryAnswers[q.id] || []).includes(getOptionValue(opt))"
+                                        @change="toggleMultiChoice(getInquiryQuestionUiKey(q, qIndex), getOptionValue(opt))"
+                                        :checked="(inquiryAnswers[getInquiryQuestionUiKey(q, qIndex)] || []).includes(getOptionValue(opt))"
                                         class="sr-only"
                                     >
                                     <span class="w-4 h-4 rounded border-2 mr-3 flex items-center justify-center"
-                                        :class="(inquiryAnswers[q.id] || []).includes(getOptionValue(opt)) ? 'border-violet-500 bg-violet-500' : 'border-gray-300'">
-                                        <svg v-if="(inquiryAnswers[q.id] || []).includes(getOptionValue(opt))" class="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                        :class="(inquiryAnswers[getInquiryQuestionUiKey(q, qIndex)] || []).includes(getOptionValue(opt)) ? 'border-violet-500 bg-violet-500' : 'border-gray-300'">
+                                        <svg v-if="(inquiryAnswers[getInquiryQuestionUiKey(q, qIndex)] || []).includes(getOptionValue(opt))" class="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
                                             <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
                                         </svg>
                                     </span>
@@ -2304,39 +2496,39 @@
                             <div v-else-if="isScreenshotType(q.type)" class="space-y-3">
                                 <input 
                                     type="file" 
-                                    :ref="el => fileInputRefs[q.id] = el"
+                                    :ref="el => fileInputRefs[getInquiryQuestionUiKey(q, qIndex)] = el"
                                     accept="image/*"
                                     multiple
-                                    @change="handleFileSelect($event, q.id, q.type)"
+                                    @change="handleFileSelect($event, getInquiryQuestionUiKey(q, qIndex), q.type)"
                                     class="hidden"
                                 >
 
                                 <!-- 已选择/已上传（支持多图） -->
-                                <div v-if="getInquiryScreenshotItems(q.id).length > 0" class="border rounded-lg p-4"
-                                     :class="inquiryAnswers[q.id]?.stage === 'error' ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'">
+                                <div v-if="getInquiryScreenshotItems(getInquiryQuestionUiKey(q, qIndex)).length > 0" class="border rounded-lg p-4"
+                                     :class="inquiryAnswers[getInquiryQuestionUiKey(q, qIndex)]?.stage === 'error' ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'">
                                     <div class="flex items-start justify-between mb-3">
                                         <div class="flex items-center"
-                                             :class="inquiryAnswers[q.id]?.stage === 'error' ? 'text-red-600' : 'text-green-600'">
+                                             :class="inquiryAnswers[getInquiryQuestionUiKey(q, qIndex)]?.stage === 'error' ? 'text-red-600' : 'text-green-600'">
                                             <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
                                                 <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
                                             </svg>
-                                            <span class="text-sm font-medium">{{ getInquiryScreenshotStatusLabel(inquiryAnswers[q.id]) }}</span>
+                                            <span class="text-sm font-medium">{{ getInquiryScreenshotStatusLabel(inquiryAnswers[getInquiryQuestionUiKey(q, qIndex)]) }}</span>
                                         </div>
                                         <div class="flex items-center gap-3">
-                                            <button @click="triggerFileInput(q.id)" class="text-gray-400 hover:text-violet-500 text-xs">继续添加</button>
-                                            <button @click="clearScreenshot(q.id)" class="text-gray-400 hover:text-red-500 text-xs">清空</button>
+                                            <button @click="triggerFileInput(getInquiryQuestionUiKey(q, qIndex))" class="text-gray-400 hover:text-violet-500 text-xs">继续添加</button>
+                                            <button @click="clearScreenshot(getInquiryQuestionUiKey(q, qIndex))" class="text-gray-400 hover:text-red-500 text-xs">清空</button>
                                         </div>
                                     </div>
 
-                                    <div v-if="inquiryAnswers[q.id]?.stage === 'uploading'" class="mb-3 p-2 bg-violet-50 border border-violet-200 rounded text-center">
+                                    <div v-if="inquiryAnswers[getInquiryQuestionUiKey(q, qIndex)]?.stage === 'uploading'" class="mb-3 p-2 bg-violet-50 border border-violet-200 rounded text-center">
                                         <div class="animate-spin w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full mx-auto mb-1"></div>
                                         <p class="text-xs text-violet-600">正在分析截图...</p>
                                     </div>
 
                                     <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
                                         <div
-                                            v-for="(img, imgIdx) in getInquiryScreenshotItems(q.id)"
-                                            :key="img.id || `${q.id}_${imgIdx}`"
+                                            v-for="(img, imgIdx) in getInquiryScreenshotItems(getInquiryQuestionUiKey(q, qIndex))"
+                                            :key="img.id || `${getInquiryQuestionUiKey(q, qIndex)}_${imgIdx}`"
                                             class="relative w-full aspect-square rounded-lg overflow-hidden bg-gray-100 border border-gray-200"
                                         >
                                             <img :src="img.preview || img.imageUrl" class="w-full h-full object-cover">
@@ -2348,13 +2540,13 @@
                                             </div>
                                             <button
                                                 v-if="img.stage !== 'uploading'"
-                                                @click="removeInquiryScreenshot(q.id, img.id)"
+                                                @click="removeInquiryScreenshot(getInquiryQuestionUiKey(q, qIndex), img.id)"
                                                 class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center hover:bg-red-600"
                                             >×</button>
                                         </div>
                                     </div>
-                                    <p v-if="inquiryAnswers[q.id]?.stage === 'error'" class="text-xs text-red-600 mt-2">
-                                        {{ inquiryAnswers[q.id].error || '部分截图上传失败，可继续添加或删除后再提交' }}
+                                    <p v-if="inquiryAnswers[getInquiryQuestionUiKey(q, qIndex)]?.stage === 'error'" class="text-xs text-red-600 mt-2">
+                                        {{ inquiryAnswers[getInquiryQuestionUiKey(q, qIndex)].error || '部分截图上传失败，可继续添加或删除后再提交' }}
                                     </p>
                                 </div>
 
@@ -2362,9 +2554,9 @@
                                 <div 
                                     v-else
                                     class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-violet-400 transition-colors cursor-pointer"
-                                    @click="triggerFileInput(q.id)"
+                                    @click="triggerFileInput(getInquiryQuestionUiKey(q, qIndex))"
                                     @dragover.prevent
-                                    @drop.prevent="handleFileDrop($event, q.id, q.type)"
+                                    @drop.prevent="handleFileDrop($event, getInquiryQuestionUiKey(q, qIndex), q.type)"
                                 >
                                     <div class="text-gray-400 mb-2">
                                         <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2379,7 +2571,7 @@
                             <!-- Fallback (兜底)：未知题型按自由输入处理，避免出现“题目无输入控件”的空白态 -->
                             <div v-else>
                                 <textarea 
-                                    v-model="inquiryAnswers[q.id]"
+                                    v-model="inquiryAnswers[getInquiryQuestionUiKey(q, qIndex)]"
                                     :placeholder="q.placeholder || '请输入...'"
                                     class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none"
                                     rows="4"
@@ -2738,11 +2930,332 @@
                     messages.value.push({ role: 'assistant', content });
                 };
 
+                const getAssessmentMessageKey = (assessment) => {
+                    if (!assessment || typeof assessment !== 'object') return '';
+                    const parts = [
+                        assessment.verdict || '',
+                        assessment.evidence || '',
+                        assessment.projection || '',
+                        assessment.call_to_action || '',
+                    ];
+                    return `assessment_${parts.join('|').slice(0, 240)}`;
+                };
+
+                const pushAssessmentMessageDedup = (assessment) => {
+                    if (!assessment || typeof assessment !== 'object') return false;
+                    const key = getAssessmentMessageKey(assessment);
+                    if (!key || displayedMessageIds.value.has(key)) return false;
+                    const assessmentHtml = renderAssessmentToHTML(assessment);
+                    if (!assessmentHtml) return false;
+                    displayedMessageIds.value.add(key);
+                    messages.value.push({
+                        role: 'assistant',
+                        content: assessmentHtml,
+                        isAssessment: true
+                    });
+                    return true;
+                };
+
+                const pushPendingResponsesDedup = (pendingResponses) => {
+                    if (!Array.isArray(pendingResponses) || pendingResponses.length === 0) return false;
+                    let hasResponse = false;
+                    pendingResponses.forEach(resp => {
+                        if (!(resp && resp.content)) return;
+                        const msgKey = `${resp.from || 'assistant'}_${String(resp.content).substring(0, 50)}`;
+                        if (displayedMessageIds.value.has(msgKey)) return;
+                        displayedMessageIds.value.add(msgKey);
+                        messages.value.push({ role: 'assistant', content: resp.content });
+                        if (pushAssessmentMessageDedup(resp.preliminary_assessment)) {
+                            hasResponse = true;
+                        }
+                        hasResponse = true;
+                    });
+                    return hasResponse;
+                };
+
+                const ensureUniqueKey = (baseKey, usedKeys) => {
+                    let key = (baseKey || '').trim();
+                    if (!key) key = 'q';
+                    let deduped = key;
+                    let suffix = 2;
+                    while (usedKeys.has(deduped)) {
+                        deduped = `${key}_${suffix}`;
+                        suffix += 1;
+                    }
+                    usedKeys.add(deduped);
+                    return deduped;
+                };
+
+                const getInquiryQuestionUiKey = (question, index = 0) => {
+                    const q = question || {};
+                    const qid = typeof q._qid === 'string' ? q._qid.trim() : '';
+                    if (qid) return qid;
+                    const id = typeof q.id === 'string' ? q.id.trim() : '';
+                    if (id) return id;
+                    return `q${index + 1}`;
+                };
+
+                const getInquiryQuestionResumeKey = (question, index = 0) => {
+                    const q = question || {};
+                    const resumeId = typeof q._resumeId === 'string' ? q._resumeId.trim() : '';
+                    if (resumeId) return resumeId;
+                    const id = typeof q.id === 'string' ? q.id.trim() : '';
+                    if (id) return id;
+                    return getInquiryQuestionUiKey(q, index);
+                };
+
+                const normalizeInquiryCardForUI = (rawCard) => {
+                    if (!rawCard || !Array.isArray(rawCard.questions)) return null;
+
+                    const usedUiKeys = new Set();
+                    const usedResumeKeys = new Set();
+                    const questions = [];
+
+                    rawCard.questions.forEach((rawQuestion, idx) => {
+                        if (!rawQuestion || typeof rawQuestion !== 'object') return;
+
+                        const q = { ...rawQuestion };
+                        const rawId = typeof q.id === 'string' ? q.id.trim() : '';
+                        const fallbackId = `q${idx + 1}`;
+                        const resumeKey = ensureUniqueKey(rawId || fallbackId, usedResumeKeys);
+                        const uiKey = ensureUniqueKey(rawId || resumeKey || fallbackId, usedUiKeys);
+                        const questionText =
+                            typeof q.question === 'string' && q.question.trim()
+                                ? q.question.trim()
+                                : `问题${questions.length + 1}`;
+
+                        questions.push({
+                            ...q,
+                            question: questionText,
+                            _qid: uiKey,
+                            _resumeId: resumeKey,
+                        });
+                    });
+
+                    const normalized = {
+                        ...rawCard,
+                        questions,
+                    };
+                    return {
+                        card: normalized,
+                        key: getInquiryTaskKey(normalized),
+                    };
+                };
+
                 const getInquiryTaskKey = (card) => {
                     if (!card || !Array.isArray(card.questions)) return '';
-                    const qKeys = card.questions.map(q => q?.id || q?.question || '').join('|');
+                    const qKeys = card.questions
+                        .map((q, idx) => {
+                            const resumeKey = getInquiryQuestionResumeKey(q, idx);
+                            const uiKey = getInquiryQuestionUiKey(q, idx);
+                            const qType = typeof q?.type === 'string' ? q.type : '';
+                            const questionText = typeof q?.question === 'string' ? q.question : '';
+                            return `${resumeKey}|${uiKey}|${qType}|${questionText}`;
+                        })
+                        .join('#');
                     const intro = (card.intro || '').slice(0, 30);
                     return `inquiry_${qKeys}_${intro}`;
+                };
+
+                const deepClone = (value) => {
+                    try {
+                        return JSON.parse(JSON.stringify(value));
+                    } catch {
+                        return value;
+                    }
+                };
+
+                const findInquiryTaskCard = (taskKey) => {
+                    if (!taskKey) return null;
+                    for (let i = messages.value.length - 1; i >= 0; i--) {
+                        const msg = messages.value[i];
+                        if (msg?.role === 'system_task' && msg.taskType === 'inquiry' && msg.taskKey === taskKey) {
+                            return { msg, index: i };
+                        }
+                    }
+                    return null;
+                };
+
+                const setInquiryTaskState = (taskKey, nextState) => {
+                    const hit = findInquiryTaskCard(taskKey);
+                    if (!hit) return;
+                    hit.msg.taskState = nextState;
+                    if (nextState === 'submitting' || nextState === 'submitted') {
+                        hit.msg.disabled = true;
+                    } else {
+                        hit.msg.disabled = false;
+                    }
+                };
+
+                const findLatestInquiryReceipt = (taskKey) => {
+                    if (!taskKey) return null;
+                    for (let i = messages.value.length - 1; i >= 0; i--) {
+                        const msg = messages.value[i];
+                        if (msg?.role === 'inquiry_receipt' && msg.taskKey === taskKey) {
+                            return msg;
+                        }
+                    }
+                    return null;
+                };
+
+                const findInquiryReceiptById = (receiptId) => {
+                    if (!receiptId) return null;
+                    for (let i = messages.value.length - 1; i >= 0; i--) {
+                        const msg = messages.value[i];
+                        if (msg?.role === 'inquiry_receipt' && msg.id === receiptId) {
+                            return { msg, index: i };
+                        }
+                    }
+                    return null;
+                };
+
+                const getInquiryReceiptStatusLabel = (receipt) => {
+                    const status = receipt?.status;
+                    if (status === 'submitting') return '提交中';
+                    if (status === 'done') return '已接收';
+                    if (status === 'error') return '提交失败';
+                    return '处理中';
+                };
+
+                const getInquiryReceiptStatusClass = (receipt) => {
+                    const status = receipt?.status;
+                    if (status === 'submitting') return 'is-submitting';
+                    if (status === 'done') return 'is-done';
+                    if (status === 'error') return 'is-error';
+                    return '';
+                };
+
+                const toggleInquiryReceiptExpanded = (receiptId) => {
+                    const hit = findInquiryReceiptById(receiptId);
+                    if (!hit) return;
+                    hit.msg.expanded = !hit.msg.expanded;
+                };
+
+                const clearInquiryReceiptHighlight = () => {
+                    messages.value.forEach((msg) => {
+                        if (msg?.role === 'inquiry_receipt') {
+                            msg.highlight = false;
+                        }
+                    });
+                };
+
+                const focusInquiryReceipt = async (taskKey, forceOpen = false) => {
+                    const receipt = findLatestInquiryReceipt(taskKey);
+                    if (!receipt) return false;
+                    if (forceOpen) {
+                        receipt.expanded = true;
+                    }
+                    clearInquiryReceiptHighlight();
+                    receipt.highlight = true;
+
+                    await nextTick();
+                    const selector = `[data-receipt-id="${receipt.id}"]`;
+                    const el = document.querySelector(selector);
+                    if (el?.scrollIntoView) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                    setTimeout(() => {
+                        receipt.highlight = false;
+                    }, 1400);
+                    return true;
+                };
+
+                const updateInquiryReceiptStatus = (receiptId, status, patch = {}) => {
+                    const hit = findInquiryReceiptById(receiptId);
+                    if (!hit) return null;
+                    hit.msg.status = status;
+                    Object.assign(hit.msg, patch);
+                    return hit.msg;
+                };
+
+                const openInquiryModalForTask = (taskKey) => {
+                    if (!taskKey) return false;
+                    const draft = inquiryDraftByTaskKey.value[taskKey];
+                    const cardFromDraft = draft?.card ? deepClone(draft.card) : null;
+                    const cardFromMap = inquiryCardByTaskKey.value[taskKey] ? deepClone(inquiryCardByTaskKey.value[taskKey]) : null;
+                    const cardFromCurrent = currentInquiryCardKey.value === taskKey && inquiryCard.value
+                        ? deepClone(inquiryCard.value)
+                        : null;
+                    const nextCard = cardFromDraft || cardFromMap || cardFromCurrent;
+                    if (!nextCard) return false;
+
+                    inquiryCard.value = nextCard;
+                    currentInquiryCardKey.value = taskKey;
+                    activeInquiryTaskKey.value = taskKey;
+
+                    const draftAnswers = draft?.answers ? deepClone(draft.answers) : null;
+                    if (draftAnswers && Object.keys(draftAnswers).length > 0) {
+                        inquiryAnswers.value = draftAnswers;
+                    } else if (cardFromCurrent && currentInquiryCardKey.value === taskKey && inquiryAnswers.value && Object.keys(inquiryAnswers.value).length > 0) {
+                        inquiryAnswers.value = deepClone(inquiryAnswers.value);
+                    } else {
+                        const initialAnswers = {};
+                        for (const [qIndex, q] of (nextCard.questions || []).entries()) {
+                            const qKey = getInquiryQuestionUiKey(q, qIndex);
+                            if (q.type === 'multiple_choice') initialAnswers[qKey] = [];
+                            else if (q.type === 'scale') initialAnswers[qKey] = 5;
+                            else initialAnswers[qKey] = '';
+                        }
+                        inquiryAnswers.value = initialAnswers;
+                    }
+
+                    showInquiryModal.value = true;
+                    return true;
+                };
+
+                const buildInquiryReceiptFromSnapshot = ({ taskKey, questions, snapshotAnswers, immediateImages, summaryText, isLocalOnboardingInquiry }) => {
+                    const details = [];
+                    for (const [qIndex, q] of questions.entries()) {
+                        const qKey = getInquiryQuestionUiKey(q, qIndex);
+                        const answer = snapshotAnswers[qKey];
+                        if (answer === undefined || answer === '') continue;
+
+                        if (q.type === 'multiple_choice' && q.options) {
+                            const labels = [];
+                            for (const opt of q.options) {
+                                const optValue = getOptionValue(opt);
+                                if (Array.isArray(answer) && answer.includes(optValue)) {
+                                    labels.push(getOptionLabel(opt));
+                                }
+                            }
+                            details.push({ label: q.question || `问题${qIndex + 1}`, value: labels.join('、') || '未选择' });
+                        } else if (q.type === 'single_choice' && q.options) {
+                            let selectedLabel = answer;
+                            for (const opt of q.options) {
+                                if (getOptionValue(opt) === answer) {
+                                    selectedLabel = getOptionLabel(opt);
+                                    break;
+                                }
+                            }
+                            details.push({ label: q.question || `问题${qIndex + 1}`, value: selectedLabel || '' });
+                        } else if (isScreenshotType(q.type)) {
+                            const screenshotItems = getScreenshotItemsFromAnswer(answer);
+                            details.push({
+                                label: q.question || getScreenshotLabel(q.type),
+                                value: `已上传 ${screenshotItems.length} 张截图`,
+                            });
+                        } else {
+                            details.push({ label: q.question || `问题${qIndex + 1}`, value: String(answer || '') });
+                        }
+                    }
+
+                    const detailCount = details.length || 1;
+                    return {
+                        id: `inquiry_receipt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                        role: 'inquiry_receipt',
+                        taskKey,
+                        status: 'submitting',
+                        summary: `已提交问卷（${detailCount}项）`,
+                        content: summaryText || '',
+                        details,
+                        images: immediateImages.length > 0 ? immediateImages : [],
+                        expanded: false,
+                        highlight: false,
+                        retryCount: 0,
+                        errorMessage: '',
+                        isLocalOnboardingInquiry: Boolean(isLocalOnboardingInquiry),
+                        submitSpec: null,
+                    };
                 };
 
                 const disableLatestInquiryTask = () => {
@@ -2928,7 +3441,11 @@
 
                 // Inquiry Form State
                 const inquiryCard = ref(null);
+                const currentInquiryCardKey = ref('');
+                const activeInquiryTaskKey = ref('');
                 const inquiryAnswers = ref({});
+                const inquiryCardByTaskKey = ref({});
+                const inquiryDraftByTaskKey = ref({});
                 const fileInputRefs = ref({});  // 文件输入框引用
                 
                 // Feedback Form State
@@ -3802,16 +4319,18 @@
                             body: JSON.stringify(requestBody)
                         });
 
-                        if (!response.ok) throw new Error('Network response was not ok');
+                        if (!response.ok) {
+                            let errorText = '';
+                            try {
+                                errorText = await response.text();
+                            } catch {
+                                errorText = '';
+                            }
+                            throw new Error(errorText ? `Network response was not ok: ${response.status} - ${errorText}` : `Network response was not ok: ${response.status}`);
+                        }
                         const data = await response.json();
 
-                        if (data.pending_responses && Array.isArray(data.pending_responses) && data.pending_responses.length > 0) {
-                            data.pending_responses.forEach(resp => {
-                                if (resp && resp.content) {
-                                    messages.value.push({ role: 'assistant', content: resp.content });
-                                }
-                            });
-                        } else if (data.response) {
+                        if (!pushPendingResponsesDedup(data.pending_responses) && data.response) {
                             messages.value.push({ role: 'assistant', content: data.response });
                         }
 
@@ -3822,9 +4341,13 @@
                         if (showContext.value) {
                             await refreshContext();
                         }
+                        return { ok: true, data };
                     } catch (error) {
                         console.error('Error:', error);
-                        messages.value.push({ role: 'assistant', content: `[错误] ${error.message}` });
+                        if (!options?.silentError) {
+                            messages.value.push({ role: 'assistant', content: `[错误] ${error.message}` });
+                        }
+                        return { ok: false, error };
                     } finally {
                         isLoading.value = false;
                         await scrollToBottom();
@@ -3928,6 +4451,7 @@
                     showFeedbackModal.value = false;
                     
                     await nextTick();
+                    if (task?.disabled && task.taskType !== 'inquiry') return;
 
                     if (task.taskType === 'status') {
                         switchTab('plan');
@@ -3947,7 +4471,34 @@
                         switchTab('plan');
                         switchPlanTab('plan');
                     } else if (task.taskType === 'inquiry') {
-                        showInquiryModal.value = true;
+                        const taskKey = task.taskKey || currentInquiryCardKey.value || getInquiryTaskKey(inquiryCard.value);
+                        if (taskKey) {
+                            activeInquiryTaskKey.value = taskKey;
+                        }
+                        const taskState = task.taskState || 'new';
+                        if (taskState === 'submitted' || taskState === 'submitting') {
+                            const focused = taskKey ? await focusInquiryReceipt(taskKey, true) : false;
+                            if (!focused && taskKey) {
+                                const opened = openInquiryModalForTask(taskKey);
+                                if (!opened) showInquiryModal.value = true;
+                            }
+                            return;
+                        }
+                        if (taskState === 'failed') {
+                            if (taskKey) {
+                                const opened = openInquiryModalForTask(taskKey);
+                                if (!opened) showInquiryModal.value = true;
+                            } else {
+                                showInquiryModal.value = true;
+                            }
+                            return;
+                        }
+                        if (taskKey) {
+                            const opened = openInquiryModalForTask(taskKey);
+                            if (!opened) showInquiryModal.value = true;
+                        } else {
+                            showInquiryModal.value = true;
+                        }
                     }
                 };
 
@@ -3963,7 +4514,7 @@
 
                 const getTaskCardSectionLabel = (taskType, slot) => {
                     const map = {
-                        inquiry: { a: '信息标题', b: '信息明细' },
+                        inquiry: { a: '补充目标', b: '操作说明' },
                         status: { a: '现状分析标题', b: '现状分析内容' },
                         strategy: { a: '规划标题', b: '分析内容' },
                         plan: { a: '任务目标', b: '执行步骤' },
@@ -3994,11 +4545,8 @@
                     const type = task?.taskType;
 
                     if (type === 'inquiry') {
-                        const q0 = inquiryCard.value?.questions?.[0] || null;
-                        const title = (q0?.title || q0?.info_title || q0?.label || q0?.name || q0?.question || '').trim?.() || '';
-                        const detail = (q0?.question_detail || q0?.detail || q0?.description || q0?.question || q0?.placeholder || '').trim?.() || '';
-                        if (slot === 'a') return title || '请补充第一个信息标题';
-                        return detail || task?.desc || '点击填写信息明细';
+                        if (slot === 'a') return '补充必要信息';
+                        return '点击填写补充信息，完善后我再继续分析';
                     }
 
                     if (type === 'status') {
@@ -4150,14 +4698,6 @@
                         hasUpdates = true;
                     };
 
-                    if (pendingCrusheGuide) {
-                        if (guideCompleted.value) {
-                            notifyGuideCompleted();
-                        } else {
-                            promptGuideIfNeeded();
-                        }
-                    }
-
                     if (isFirstReportPhase && hasReadyOutputs && !guideCompleted.value) {
                         pendingGatedOutputs.value = {
                             ...(pendingGatedOutputs.value || {}),
@@ -4243,13 +4783,7 @@
 
                     // Check Preliminary Assessment
                     if (newState.preliminary_assessment && JSON.stringify(newState.preliminary_assessment) !== JSON.stringify(oldState.preliminary_assessment)) {
-                         const assessmentHtml = renderAssessmentToHTML(newState.preliminary_assessment);
-                         if (assessmentHtml) {
-                             messages.value.push({
-                                 role: 'assistant',
-                                 content: assessmentHtml,
-                                 isAssessment: true
-                             });
+                         if (pushAssessmentMessageDedup(newState.preliminary_assessment)) {
                              hasUpdates = true;
                          }
                          if (!guideCompleted.value) {
@@ -4257,33 +4791,56 @@
                          }
                     }
 
+                    if (pendingCrusheGuide) {
+                        if (guideCompleted.value) {
+                            notifyGuideCompleted();
+                        } else {
+                            promptGuideIfNeeded();
+                        }
+                    }
+
                     // Check Inquiry
-                    // If there is a NEW inquiry card (or one that hasn't been answered)
-                    if (newState.inquiry_card && newState.inquiry_card.questions && newState.inquiry_card.questions.length > 0) {
-                        // We check if this is effectively a new card or if we should just show it
-                        // For simplicity, if the backend sends one, we assume it's relevant.
-                        // We will set local inquiryCard and show a task.
-                        inquiryCard.value = newState.inquiry_card;
-                        inquiryAnswers.value = {}; // Reset answers
-                        
-                        // Default scale values
-                        for (const q of inquiryCard.value.questions) {
-                            if (q.type === 'scale') {
-                                inquiryAnswers.value[q.id] = 5;
+                    const normalizedInquiry = normalizeInquiryCardForUI(newState.inquiry_card);
+                    if (normalizedInquiry && normalizedInquiry.card.questions.length > 0) {
+                        const nextCard = normalizedInquiry.card;
+                        const nextInquiryKey = normalizedInquiry.key;
+                        const isSameInquiryCard = Boolean(nextInquiryKey) && nextInquiryKey === currentInquiryCardKey.value;
+
+                        inquiryCard.value = nextCard;
+                        currentInquiryCardKey.value = nextInquiryKey;
+                        activeInquiryTaskKey.value = nextInquiryKey || activeInquiryTaskKey.value;
+                        if (nextInquiryKey) {
+                            inquiryCardByTaskKey.value[nextInquiryKey] = deepClone(nextCard);
+                            const existingTask = findInquiryTaskCard(nextInquiryKey);
+                            if (existingTask && existingTask.msg.taskState === 'submitted') {
+                                setInquiryTaskState(nextInquiryKey, 'new');
                             }
                         }
 
-                        const inquiryKey = getInquiryTaskKey(newState.inquiry_card);
-                        pushSystemTaskOnce(inquiryKey || `inquiry_${Date.now()}`, {
-                            role: 'system_task',
-                            taskType: 'inquiry',
-                            label: 'QUESTION',
-                            title: '需要补充信息',
-                            desc: newState.inquiry_card.intro || '为了更好地制定策略，请回答几个问题'
-                        });
-                        hasUpdates = true;
+                        // 仅在真正新卡片时重置答案；同卡片重复下发时保留已填写内容（含截图）。
+                        if (!isSameInquiryCard) {
+                            inquiryAnswers.value = {};
+                            for (const [idx, q] of nextCard.questions.entries()) {
+                                if (q.type === 'scale') {
+                                    const uiKey = getInquiryQuestionUiKey(q, idx);
+                                    inquiryAnswers.value[uiKey] = 5;
+                                }
+                            }
+
+                            pushSystemTaskOnce(nextInquiryKey || `inquiry_${Date.now()}`, {
+                                role: 'system_task',
+                                taskType: 'inquiry',
+                                taskKey: nextInquiryKey || '',
+                                taskState: 'new',
+                                label: 'QUESTION',
+                                title: '需要补充信息',
+                                desc: nextCard.intro || '为了更好地制定策略，请回答几个问题'
+                            });
+                            hasUpdates = true;
+                        }
                     } else {
                         inquiryCard.value = null;
+                        currentInquiryCardKey.value = '';
                     }
 
                     // Feedback flow updates
@@ -4310,12 +4867,13 @@
 
                 const canSubmitInquiry = computed(() => {
                     if (!inquiryCard.value || !inquiryCard.value.questions) return false;
-                    return inquiryCard.value.questions.every(q => {
+                    return inquiryCard.value.questions.every((q, qIndex) => {
                         // 使用新字段 is_required，向后兼容 required
                         const isRequired = q.is_required !== undefined ? q.is_required : q.required;
                         if (!isRequired) return true;
-                        
-                        const answer = inquiryAnswers.value[q.id];
+
+                        const qKey = getInquiryQuestionUiKey(q, qIndex);
+                        const answer = inquiryAnswers.value[qKey];
                         
                         // 多选题
                         if (q.type === 'multiple_choice') {
@@ -4349,18 +4907,34 @@
                     try {
                         const card = inquiryCard.value;
                         const questions = card?.questions || [];
+                        const taskKey =
+                            currentInquiryCardKey.value ||
+                            activeInquiryTaskKey.value ||
+                            getInquiryTaskKey(card) ||
+                            `inquiry_${Date.now()}`;
+                        activeInquiryTaskKey.value = taskKey;
+                        const isLocalOnboardingInquiry = questions.length > 0 && questions.every((q, qIndex) => {
+                            const resumeKey = getInquiryQuestionResumeKey(q, qIndex);
+                            return typeof resumeKey === 'string' && resumeKey.startsWith('ob_');
+                        });
                         const snapshotAnswers = {};
-                        for (const q of questions) {
-                            snapshotAnswers[q.id] = inquiryAnswers.value[q.id];
+                        for (const [qIndex, q] of questions.entries()) {
+                            const qKey = getInquiryQuestionUiKey(q, qIndex);
+                            snapshotAnswers[qKey] = inquiryAnswers.value[qKey];
                         }
+                        inquiryDraftByTaskKey.value[taskKey] = {
+                            card: deepClone(card),
+                            answers: deepClone(snapshotAnswers),
+                        };
 
-                        // 阶段1：立即展示“伪装用户消息”（不等待 OCR）
+                        // 阶段1：立即生成回执消息（不等待 OCR）
                         const immediateAnswerParts = [];
                         const immediateImages = [];
                         const now = Date.now();
 
-                        for (const q of questions) {
-                            const answer = snapshotAnswers[q.id];
+                        for (const [qIndex, q] of questions.entries()) {
+                            const qKey = getInquiryQuestionUiKey(q, qIndex);
+                            const answer = snapshotAnswers[qKey];
                             if (answer === undefined || answer === '') continue;
                             
                             // 多选题 - 支持两种格式
@@ -4396,7 +4970,7 @@
                                     const item = screenshotItems[idx];
                                     if (!(item?.preview || item?.imageUrl)) continue;
                                     immediateImages.push({
-                                        id: `inquiry_preview_${now}_${q.id}_${idx}`,
+                                        id: `inquiry_preview_${now}_${qKey}_${idx}`,
                                         preview: item.preview || null,
                                         imageUrl: item.imageUrl || null,
                                         status: 'done',
@@ -4415,25 +4989,31 @@
                         }
 
                         const immediateContent = immediateAnswerParts.join('\n\n') || '已提交补充信息';
+                        const inquiryReceipt = buildInquiryReceiptFromSnapshot({
+                            taskKey,
+                            questions,
+                            snapshotAnswers,
+                            immediateImages,
+                            summaryText: immediateContent,
+                            isLocalOnboardingInquiry,
+                        });
 
-                        // 立即关闭弹窗并显示伪装用户消息
+                        // 立即关闭弹窗并显示回执消息
                         showInquiryModal.value = false;
                         inquiryCard.value = null;
-                        disableLatestInquiryTask();
-                        messages.value.push({
-                            role: 'user',
-                            content: immediateContent,
-                            images: immediateImages.length > 0 ? immediateImages : undefined,
-                        });
+                        currentInquiryCardKey.value = '';
+                        setInquiryTaskState(taskKey, 'submitting');
+                        messages.value.push(inquiryReceipt);
                         await scrollToBottom();
 
                         // 阶段2：后台并行 OCR，拼接最终输入后一次性发送到 /api/chat
                         isLoading.value = true;
 
                         const screenshotUploadPromises = new Map();
-                        for (const q of questions) {
+                        for (const [qIndex, q] of questions.entries()) {
                             if (!isScreenshotType(q.type)) continue;
-                            const answer = snapshotAnswers[q.id];
+                            const qKey = getInquiryQuestionUiKey(q, qIndex);
+                            const answer = snapshotAnswers[qKey];
                             const screenshotItems = getScreenshotItemsFromAnswer(answer);
                             if (screenshotItems.length > 0) {
                                 const uploadPromises = screenshotItems.map((item) => {
@@ -4457,14 +5037,16 @@
                                         screenshotType: q.type,
                                     });
                                 });
-                                screenshotUploadPromises.set(q.id, uploadPromises);
+                                screenshotUploadPromises.set(qKey, uploadPromises);
                             }
                         }
 
                         const backendAnswerParts = [];
                         const answersForResume = {};
-                        for (const q of questions) {
-                            const answer = snapshotAnswers[q.id];
+                        for (const [qIndex, q] of questions.entries()) {
+                            const qKey = getInquiryQuestionUiKey(q, qIndex);
+                            const resumeKey = getInquiryQuestionResumeKey(q, qIndex);
+                            const answer = snapshotAnswers[qKey];
                             if (answer === undefined || answer === '') continue;
 
                             if (q.type === 'multiple_choice' && q.options) {
@@ -4476,7 +5058,7 @@
                                     }
                                 }
                                 backendAnswerParts.push(`${q.question}：${selectedLabels.join('、')}`);
-                                answersForResume[q.id] = Array.isArray(answer) ? answer : [];
+                                answersForResume[resumeKey] = Array.isArray(answer) ? answer : [];
                             } else if (q.type === 'single_choice' && q.options) {
                                 let selectedLabel = answer;
                                 for (const opt of q.options) {
@@ -4486,12 +5068,12 @@
                                     }
                                 }
                                 backendAnswerParts.push(`${q.question}：${selectedLabel}`);
-                                answersForResume[q.id] = answer;
+                                answersForResume[resumeKey] = answer;
                             } else if (isScreenshotType(q.type)) {
                                 const screenshotItems = getScreenshotItemsFromAnswer(answer);
                                 if (!screenshotItems.length) continue;
 
-                                const uploadPromises = screenshotUploadPromises.get(q.id) || [];
+                                const uploadPromises = screenshotUploadPromises.get(qKey) || [];
                                 const ocrBlocks = [];
 
                                 for (let idx = 0; idx < screenshotItems.length; idx++) {
@@ -4513,31 +5095,132 @@
                                 }
 
                                 backendAnswerParts.push(`【${getScreenshotLabel(q.type)}分析结果】\n${ocrBlocks.join('\n\n')}`);
-                                answersForResume[q.id] = ocrBlocks.join('\n\n');
+                                answersForResume[resumeKey] = ocrBlocks.join('\n\n');
                             } else if (q.type === 'free_input_question' || q.type === 'text') {
                                 backendAnswerParts.push(`${q.question}：${answer}`);
-                                answersForResume[q.id] = answer;
+                                answersForResume[resumeKey] = answer;
                             } else {
                                 backendAnswerParts.push(`${q.question}：${answer}`);
-                                answersForResume[q.id] = answer;
+                                answersForResume[resumeKey] = answer;
                             }
                         }
 
                         const finalAnswerForBackend = backendAnswerParts.join('\n\n') || immediateContent;
+                        const submitSpec = {
+                            message: finalAnswerForBackend,
+                            resumePayload: isLocalOnboardingInquiry ? null : { answers: answersForResume },
+                        };
+                        updateInquiryReceiptStatus(inquiryReceipt.id, 'submitting', {
+                            submitSpec,
+                            retryCount: inquiryReceipt.retryCount || 0,
+                        });
                         const backendUserMessage = {
                             id: `inquiry_submit_${Date.now()}`,
                             role: 'user',
                             content: finalAnswerForBackend,
                         };
-                        await sendMessageToBackend(backendUserMessage, { resumePayload: { answers: answersForResume } });
+                        let submitResult;
+                        if (isLocalOnboardingInquiry) {
+                            // 本地 onboarding 引导卡并非后端 interrupt，不应走 resume。
+                            submitResult = await sendMessageToBackend(backendUserMessage, { silentError: true });
+                        } else {
+                            submitResult = await sendMessageToBackend(backendUserMessage, {
+                                resumePayload: { answers: answersForResume },
+                                silentError: true,
+                            });
+                        }
+
+                        if (submitResult?.ok) {
+                            updateInquiryReceiptStatus(inquiryReceipt.id, 'done', {
+                                errorMessage: '',
+                                submitSpec,
+                            });
+                            setInquiryTaskState(taskKey, 'submitted');
+                        } else {
+                            const errorMessage = submitResult?.error?.message || '提交失败，请稍后再试';
+                            updateInquiryReceiptStatus(inquiryReceipt.id, 'error', {
+                                errorMessage,
+                                submitSpec,
+                            });
+                            setInquiryTaskState(taskKey, 'failed');
+                            await focusInquiryReceipt(taskKey, true);
+                        }
                     } catch (error) {
                         console.error('Submit inquiry error:', error);
                         isLoading.value = false;
-                        messages.value.push({
-                            role: 'assistant',
-                            content: '抱歉，处理补充信息时遇到问题，请稍后再试。'
-                        });
+                        const taskKey =
+                            currentInquiryCardKey.value ||
+                            activeInquiryTaskKey.value ||
+                            '';
+                        if (taskKey) {
+                            setInquiryTaskState(taskKey, 'failed');
+                            const receipt = findLatestInquiryReceipt(taskKey);
+                            if (receipt) {
+                                updateInquiryReceiptStatus(receipt.id, 'error', {
+                                    errorMessage: error?.message || '处理补充信息时遇到问题，请稍后再试。',
+                                });
+                            } else {
+                                messages.value.push({
+                                    role: 'assistant',
+                                    content: '抱歉，处理补充信息时遇到问题，请稍后再试。'
+                                });
+                            }
+                        } else {
+                            messages.value.push({
+                                role: 'assistant',
+                                content: '抱歉，处理补充信息时遇到问题，请稍后再试。'
+                            });
+                        }
                         await scrollToBottom();
+                    }
+                };
+
+                const retryInquiryReceipt = async (receiptId) => {
+                    const hit = findInquiryReceiptById(receiptId);
+                    if (!hit) return;
+                    const receipt = hit.msg;
+                    if (receipt.status === 'submitting') return;
+                    const submitSpec = receipt.submitSpec;
+                    if (!submitSpec || !submitSpec.message) return;
+
+                    updateInquiryReceiptStatus(receiptId, 'submitting', {
+                        errorMessage: '',
+                        retryCount: Number(receipt.retryCount || 0) + 1,
+                    });
+                    setInquiryTaskState(receipt.taskKey, 'submitting');
+                    isLoading.value = true;
+
+                    const backendUserMessage = {
+                        id: `inquiry_retry_${Date.now()}`,
+                        role: 'user',
+                        content: submitSpec.message,
+                    };
+                    const result = await sendMessageToBackend(backendUserMessage, {
+                        resumePayload: submitSpec.resumePayload || undefined,
+                        silentError: true,
+                    });
+
+                    if (result?.ok) {
+                        updateInquiryReceiptStatus(receiptId, 'done', { errorMessage: '' });
+                        setInquiryTaskState(receipt.taskKey, 'submitted');
+                    } else {
+                        updateInquiryReceiptStatus(receiptId, 'error', {
+                            errorMessage: result?.error?.message || '重试失败，请稍后再试。',
+                        });
+                        setInquiryTaskState(receipt.taskKey, 'failed');
+                        await focusInquiryReceipt(receipt.taskKey, true);
+                    }
+                };
+
+                const editInquiryFromReceipt = (receiptId) => {
+                    const hit = findInquiryReceiptById(receiptId);
+                    if (!hit) return;
+                    const taskKey = hit.msg.taskKey;
+                    if (!taskKey) return;
+                    setInquiryTaskState(taskKey, 'failed');
+                    const opened = openInquiryModalForTask(taskKey);
+                    if (!opened) {
+                        showInquiryModal.value = true;
                     }
                 };
 
@@ -4633,15 +5316,7 @@
                                                 
                                                 // 1. 先展示最终 pending_responses（保证前端有可见回复在卡片之前）
                                                 const pending = finalState.pending_responses || [];
-                                                pending.forEach(resp => {
-                                                    if (resp?.content) {
-                                                        const msgKey = `${resp.from || 'assistant'}_${resp.content.substring(0, 50)}`;
-                                                        if (!displayedMessageIds.value.has(msgKey)) {
-                                                            displayedMessageIds.value.add(msgKey);
-                                                            messages.value.push({ role: 'assistant', content: resp.content });
-                                                        }
-                                                    }
-                                                });
+                                                pushPendingResponsesDedup(pending);
                                                 await scrollToBottom();
 
                                                 // 2. 更新 UI 状态看板 (可能会生成 System Task Card)
@@ -4673,15 +5348,7 @@
                                             if (!chunk.event) {
                                                 // 1. 先展示回复
                                                 const pending = payload.pending_responses || [];
-                                                pending.forEach(resp => {
-                                                    if (resp?.content) {
-                                                        const msgKey = `${resp.from || 'assistant'}_${resp.content.substring(0, 50)}`;
-                                                        if (!displayedMessageIds.value.has(msgKey)) {
-                                                            displayedMessageIds.value.add(msgKey);
-                                                            messages.value.push({ role: 'assistant', content: resp.content });
-                                                        }
-                                                    }
-                                                });
+                                                pushPendingResponsesDedup(pending);
                                                 await scrollToBottom();
 
                                                 // 2. 再更新状态
@@ -4719,14 +5386,9 @@
                         let hasResponse = false;
                         
                         // 统一处理响应逻辑：优先使用结构化的 pending_responses
-                        if (data.pending_responses && Array.isArray(data.pending_responses) && data.pending_responses.length > 0) {
-                            data.pending_responses.forEach(resp => {
-                                if (resp && resp.content) {
-                                    messages.value.push({ role: 'assistant', content: resp.content });
-                                    hasResponse = true;
-                                }
-                            });
-                        } 
+                        if (pushPendingResponsesDedup(data.pending_responses)) {
+                            hasResponse = true;
+                        }
                         // 如果 pending_responses 为空，但有 response 字符串（后端 Fallback），则使用它
                         else if (data.response) {
                             messages.value.push({ role: 'assistant', content: data.response });
@@ -4973,13 +5635,7 @@
                         
                         const data = await response.json();
                         
-                        if (data.pending_responses && Array.isArray(data.pending_responses) && data.pending_responses.length > 0) {
-                            data.pending_responses.forEach(resp => {
-                                if (resp && resp.content) {
-                                    messages.value.push({ role: 'assistant', content: resp.content });
-                                }
-                            });
-                        } else if (data.response) {
+                        if (!pushPendingResponsesDedup(data.pending_responses) && data.response) {
                             messages.value.push({ role: 'assistant', content: data.response });
                         }
                         
@@ -5139,18 +5795,28 @@
                         }
                     ];
 
-                    inquiryCard.value = {
+                    const onboardingCardRaw = {
                         intro: "完善基础信息，开启专属攻略",
                         questions: onboardingQuestions
                     };
+                    const normalizedOnboarding = normalizeInquiryCardForUI(onboardingCardRaw);
+                    inquiryCard.value = normalizedOnboarding?.card || onboardingCardRaw;
+                    currentInquiryCardKey.value =
+                        normalizedOnboarding?.key ||
+                        getInquiryTaskKey(inquiryCard.value);
+                    activeInquiryTaskKey.value = currentInquiryCardKey.value;
+                    if (currentInquiryCardKey.value) {
+                        inquiryCardByTaskKey.value[currentInquiryCardKey.value] = deepClone(inquiryCard.value);
+                    }
                     
                     // Pre-initialize answers to ensure reactivity
                     const initialAnswers = {};
-                    onboardingQuestions.forEach(q => {
+                    (inquiryCard.value?.questions || []).forEach((q, qIndex) => {
+                        const qKey = getInquiryQuestionUiKey(q, qIndex);
                         if (q.type === 'multiple_choice') {
-                            initialAnswers[q.id] = [];
+                            initialAnswers[qKey] = [];
                         } else {
-                            initialAnswers[q.id] = '';
+                            initialAnswers[qKey] = '';
                         }
                     });
                     inquiryAnswers.value = initialAnswers;
@@ -5159,9 +5825,12 @@
                     messages.value.push({
                         role: 'system_task',
                         taskType: 'inquiry',
+                        taskKey: currentInquiryCardKey.value || '',
+                        taskState: 'new',
+                        disabled: false,
                         label: 'ONBOARDING',
                         title: '完善基础信息',
-                        desc: '点击填写双方档案与诉求'
+                        desc: '点击填写补充信息，完善后我再继续分析'
                     });
                     await scrollToBottom();
                 };
@@ -5314,6 +5983,12 @@
                     autoResizeTextarea,
                     toggleMultiChoice,
                     submitInquiry,
+                    retryInquiryReceipt,
+                    editInquiryFromReceipt,
+                    focusInquiryReceipt,
+                    toggleInquiryReceiptExpanded,
+                    getInquiryReceiptStatusLabel,
+                    getInquiryReceiptStatusClass,
                     
                     // Screenshot Upload
                     fileInputRefs,
@@ -5333,6 +6008,7 @@
                     getOptionValue,
                     normalizeOption,
                     normalizeOptions,
+                    getInquiryQuestionUiKey,
                     
                     // Feedback
                     currentFeedbackGuide,

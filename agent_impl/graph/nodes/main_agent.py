@@ -20,7 +20,6 @@
 
 import json
 import os
-import contextvars
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -28,6 +27,7 @@ from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables.config import ensure_config
 from langgraph.types import Command, interrupt
 
 from agents.tooling.patch import ToolResult, merge_patches, merge_state_patch
@@ -36,6 +36,11 @@ from agents.tools.all_tools import build_all_tools_for_agent
 from graph.state import AgentState
 from graph.message_builder import build_messages_for_model
 from config import get_llm
+from graph.runtime_config import (
+    resolve_runtime_checkpointer,
+    sanitize_nested_runtime_config,
+    sanitize_runtime_config,
+)
 from graph.subgraphs.plan import get_plan_subgraph
 from graph.subgraphs.guide import get_guide_subgraph
 from graph.subgraphs.status import get_status_subgraph
@@ -43,18 +48,6 @@ from graph.subgraphs.status import get_status_subgraph
 
 class _SubagentToolInput(BaseModel):
     instruction: str = Field(description="对子 agent 的指令/请求")
-
-_CURRENT_RUN_CONFIG: contextvars.ContextVar[dict | None] = contextvars.ContextVar("current_run_config", default=None)
-
-
-def _require_checkpointer(config: dict | None) -> Any:
-    if not config:
-        raise RuntimeError("Missing runtime config; checkpointer is required for interrupt/resume.")
-    checkpointer = config.get("checkpointer")
-    if checkpointer is None:
-        raise RuntimeError("Missing checkpointer in runtime config; subgraph interrupt/resume requires a persistent checkpointer.")
-    return checkpointer
-
 
 def _ensure_tool_call_integrity(messages: list[BaseMessage]) -> list[BaseMessage]:
     if not messages:
@@ -183,7 +176,7 @@ def _wrap_tools_for_patch_collection(tools: list[BaseTool], patches: list[dict])
 
         def _make_wrapped(inner: BaseTool):
             def _wrapped(**kwargs):
-                result = inner.invoke(kwargs)
+                result = inner.invoke(kwargs, config=sanitize_nested_runtime_config(ensure_config()))
                 patch = _extract_state_patch(result)
                 if patch:
                     patches.append(patch)
@@ -213,25 +206,19 @@ def _run_langchain_supervisor(
 ) -> dict[str, Any]:
     patches: list[dict] = []
     wrapped_tools = _wrap_tools_for_patch_collection(list(tools or []), patches)
+    cfg = sanitize_nested_runtime_config(config)
 
-    checkpointer = config.get("checkpointer") if config else None
-    if config is not None and checkpointer is None:
-        raise RuntimeError("Missing checkpointer in runtime config; tool-loop interrupt/resume requires a persistent checkpointer.")
+    checkpointer = resolve_runtime_checkpointer(config)
 
     agent_graph = create_agent(model=llm, tools=wrapped_tools, system_prompt=None, name="tool_loop_agent", checkpointer=checkpointer)
 
     rounds = max(1, int(max_rounds or 1))
     recursion_limit = max(25, rounds * 4 + 10)
-    cfg = dict(config or {})
     cfg["recursion_limit"] = recursion_limit
-    token = _CURRENT_RUN_CONFIG.set(cfg)
-    try:
-        result = agent_graph.invoke(
-            {"messages": list(initial_messages)},
-            config=cfg,
-        )
-    finally:
-        _CURRENT_RUN_CONFIG.reset(token)
+    result = agent_graph.invoke(
+        {"messages": list(initial_messages)},
+        config=cfg,
+    )
 
     messages_out = list(result.get("messages") or [])
     final = messages_out[-1] if messages_out else AIMessage(content="")
@@ -273,14 +260,29 @@ def _call_subagent(
     return ok(output=output, state_patch=merged_patch)
 
 
-def _build_all_tools(state_getter) -> list[BaseTool]:
+def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None) -> list[BaseTool]:
     def _current_config() -> dict:
-        return _CURRENT_RUN_CONFIG.get() or {}
+        merged = sanitize_nested_runtime_config(runtime_config)
+        incoming_raw = ensure_config()
+        incoming = sanitize_nested_runtime_config(incoming_raw)
+
+        base_cfg = merged.get("configurable")
+        in_cfg = incoming.get("configurable")
+        if isinstance(base_cfg, dict) and isinstance(in_cfg, dict):
+            merged["configurable"] = {**base_cfg, **in_cfg}
+        elif isinstance(in_cfg, dict):
+            merged["configurable"] = dict(in_cfg)
+
+        checkpointer = resolve_runtime_checkpointer(incoming_raw) or resolve_runtime_checkpointer(runtime_config)
+        if checkpointer is not None:
+            merged["checkpointer"] = checkpointer
+        return merged
 
     def _status_tool(instruction: str) -> ToolResult:
         cfg = _current_config()
-        checkpointer = _require_checkpointer(cfg)
-        subgraph = get_status_subgraph(checkpointer=checkpointer)
+        checkpointer = resolve_runtime_checkpointer(cfg)
+        subgraph = get_status_subgraph(checkpointer=checkpointer) if checkpointer is not None else get_status_subgraph()
+        invoke_cfg = sanitize_nested_runtime_config(cfg)
         parent_state = state_getter()
         sub_in = {
             "task_spec": {
@@ -289,12 +291,12 @@ def _build_all_tools(state_getter) -> list[BaseTool]:
             },
             "private_messages": [],
         }
-        sub_out = subgraph.invoke(sub_in, config=cfg)
+        sub_out = subgraph.invoke(sub_in, config=invoke_cfg)
         if isinstance(sub_out, dict) and "__interrupt__" in sub_out:
             interrupts = sub_out.get("__interrupt__") or []
             payload = interrupts[0].value if interrupts else {}
             answer = interrupt(payload)
-            sub_out = subgraph.invoke(Command(resume=answer), config=cfg)
+            sub_out = subgraph.invoke(Command(resume=answer), config=invoke_cfg)
         patch = dict(sub_out.get("state_patch") or {}) if isinstance(sub_out, dict) else {}
         final = sub_out.get("final") if isinstance(sub_out, dict) else None
         text = ""
@@ -304,8 +306,9 @@ def _build_all_tools(state_getter) -> list[BaseTool]:
 
     def _plan_tool(instruction: str) -> ToolResult:
         cfg = _current_config()
-        checkpointer = _require_checkpointer(cfg)
-        subgraph = get_plan_subgraph(checkpointer=checkpointer)
+        checkpointer = resolve_runtime_checkpointer(cfg)
+        subgraph = get_plan_subgraph(checkpointer=checkpointer) if checkpointer is not None else get_plan_subgraph()
+        invoke_cfg = sanitize_nested_runtime_config(cfg)
         parent_state = state_getter()
         sub_in = {
             "task_spec": {
@@ -314,12 +317,12 @@ def _build_all_tools(state_getter) -> list[BaseTool]:
             },
             "private_messages": [],
         }
-        sub_out = subgraph.invoke(sub_in, config=cfg)
+        sub_out = subgraph.invoke(sub_in, config=invoke_cfg)
         if isinstance(sub_out, dict) and "__interrupt__" in sub_out:
             interrupts = sub_out.get("__interrupt__") or []
             payload = interrupts[0].value if interrupts else {}
             answer = interrupt(payload)
-            sub_out = subgraph.invoke(Command(resume=answer), config=cfg)
+            sub_out = subgraph.invoke(Command(resume=answer), config=invoke_cfg)
         patch = dict(sub_out.get("state_patch") or {}) if isinstance(sub_out, dict) else {}
         final = sub_out.get("final") if isinstance(sub_out, dict) else None
         text = ""
@@ -329,8 +332,9 @@ def _build_all_tools(state_getter) -> list[BaseTool]:
 
     def _guide_tool(instruction: str) -> ToolResult:
         cfg = _current_config()
-        checkpointer = _require_checkpointer(cfg)
-        subgraph = get_guide_subgraph(checkpointer=checkpointer)
+        checkpointer = resolve_runtime_checkpointer(cfg)
+        subgraph = get_guide_subgraph(checkpointer=checkpointer) if checkpointer is not None else get_guide_subgraph()
+        invoke_cfg = sanitize_nested_runtime_config(cfg)
         parent_state = state_getter()
         sub_in = {
             "task_spec": {
@@ -339,12 +343,12 @@ def _build_all_tools(state_getter) -> list[BaseTool]:
             },
             "private_messages": [],
         }
-        sub_out = subgraph.invoke(sub_in, config=cfg)
+        sub_out = subgraph.invoke(sub_in, config=invoke_cfg)
         if isinstance(sub_out, dict) and "__interrupt__" in sub_out:
             interrupts = sub_out.get("__interrupt__") or []
             payload = interrupts[0].value if interrupts else {}
             answer = interrupt(payload)
-            sub_out = subgraph.invoke(Command(resume=answer), config=cfg)
+            sub_out = subgraph.invoke(Command(resume=answer), config=invoke_cfg)
         patch = dict(sub_out.get("state_patch") or {}) if isinstance(sub_out, dict) else {}
         final = sub_out.get("final") if isinstance(sub_out, dict) else None
         text = ""
@@ -387,11 +391,15 @@ def _build_all_tools(state_getter) -> list[BaseTool]:
 
 def main_agent_node(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
     working_state: dict[str, Any] = dict(state or {})
+    runtime_cfg: dict[str, Any] = sanitize_runtime_config(config)
+    checkpointer = resolve_runtime_checkpointer(config)
+    if checkpointer is not None:
+        runtime_cfg["checkpointer"] = checkpointer
 
     def state_getter() -> dict:
         return working_state
 
-    tools = _build_all_tools(state_getter)
+    tools = _build_all_tools(state_getter, runtime_config=runtime_cfg)
     llm = get_llm(temperature=0.7, use_tools=True)
 
     initial_messages = build_messages_for_model(

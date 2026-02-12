@@ -41,7 +41,7 @@ def test_main_agent_merges_state_patches_from_tools(monkeypatch):
     )
 
     monkeypatch.setattr(main_agent_module, "get_llm", lambda *a, **k: dummy)
-    monkeypatch.setattr(main_agent_module, "_build_all_tools", lambda state_getter: [patch_tool])
+    monkeypatch.setattr(main_agent_module, "_build_all_tools", lambda state_getter, runtime_config=None: [patch_tool])
 
     state = create_test_state("hi")
     out = main_agent_module.main_agent_node(state)
@@ -69,11 +69,15 @@ def test_main_agent_calls_subagent_tools_and_merges(monkeypatch):
     )
 
     monkeypatch.setattr(main_agent_module, "get_llm", lambda *a, **k: dummy)
-    monkeypatch.setattr(
-        main_agent_module,
-        "_call_subagent",
-        lambda **kwargs: ok(output="subagent", state_patch={"layer2_memory": {"from_subagent": True}}),
+    def _status_tool(instruction: str) -> dict:
+        return ok(output="subagent", state_patch={"layer2_memory": {"from_subagent": True}})
+
+    status_tool = StructuredTool.from_function(
+        func=_status_tool,
+        name="call_status_agent",
+        description="test status tool",
     )
+    monkeypatch.setattr(main_agent_module, "_build_all_tools", lambda state_getter, runtime_config=None: [status_tool])
 
     state = create_test_state("hi")
     out = main_agent_module.main_agent_node(state)
@@ -85,7 +89,7 @@ def test_main_agent_calls_subagent_tools_and_merges(monkeypatch):
 def test_main_agent_truncates_messages_to_25_for_model(monkeypatch):
     dummy = DummyModel(responses=[AIMessage(content="ok")])
     monkeypatch.setattr(main_agent_module, "get_llm", lambda *a, **k: dummy)
-    monkeypatch.setattr(main_agent_module, "_build_all_tools", lambda state_getter: [])
+    monkeypatch.setattr(main_agent_module, "_build_all_tools", lambda state_getter, runtime_config=None: [])
 
     state = create_test_state("hi")
     state["messages"] = [{"role": "user", "content": f"m{i}"} for i in range(60)]

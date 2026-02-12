@@ -60,6 +60,7 @@ description: 当信息不足以产出可靠报告/规划/指南时，必须使�
 
 ### 字段详解
 *   **questions** (Array): 问题列表，建议 **1-3 个**，保持轻量。
+    *   **id** (string): 每题必填，且同一卡片内必须唯一。推荐 `q1`、`q2`、`q3` 或语义化 id（如 `relationship_duration`）。
     *   **options** (Array<str>): 仅 `_choice` 类题型必填。**注意：前端卡片长度有限，选项文字请精简。**
 *   **intro** (string): 展示给用户的引导话术。应自然衔接上文，说明提问目的。
 *   **reasoning** (string): 你的内部逻辑自查。确保每个问题都有明确的战术价值。
