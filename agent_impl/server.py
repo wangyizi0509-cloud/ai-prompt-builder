@@ -57,6 +57,11 @@ def _resolve_port() -> int:
         return 8000
 
 
+def _is_container_runtime() -> bool:
+    # Common container marker files/envs used by PaaS platforms.
+    return os.path.exists("/.dockerenv") or os.getenv("KUBERNETES_SERVICE_HOST") is not None
+
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
@@ -92,7 +97,11 @@ if __name__ == "__main__":
     logger.info(f"Starting server on http://0.0.0.0:{port}")
     debug_mode = os.getenv("DEBUG_MODE", "0") == "1"
     if debug_mode:
-        reload_enabled = os.getenv("UVICORN_RELOAD", "1") != "0"
+        # Keep reload opt-in only; auto-reload frequently fails on container PaaS.
+        reload_enabled = os.getenv("UVICORN_RELOAD", "0") == "1"
+        if reload_enabled and _is_container_runtime():
+            logger.warning("UVICORN_RELOAD=1 ignored in container runtime")
+            reload_enabled = False
         if reload_enabled:
             logger.info("DEBUG_MODE=1: Running with auto-reload enabled")
             uvicorn.run(

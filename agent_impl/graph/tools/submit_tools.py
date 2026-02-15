@@ -41,6 +41,32 @@ def set_submit_tools_state(state: dict | None) -> None:
     _submit_tools_state.set(state)
 
 
+class submit_tools_state_context:
+    """Context manager that sets/restores _submit_tools_state using ContextVar tokens.
+
+    Supports nesting: main_agent sets state → subgraph overrides with parent_state
+    → on exit, the outer value is restored automatically.
+
+    Usage::
+
+        with submit_tools_state_context(current_state):
+            agent_graph.invoke(...)
+    """
+
+    def __init__(self, state: dict | None) -> None:
+        self._state = state
+        self._token = None
+
+    def __enter__(self):
+        self._token = _submit_tools_state.set(self._state)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._token is not None:
+            _submit_tools_state.reset(self._token)
+        return False
+
+
 # ============================================================
 # 工具实现（纯输出，不直接写 state）
 # ============================================================
@@ -90,10 +116,7 @@ def submit_status_report(
     updated_layer2["version"] = updated_layer2.get("version", 1) + 1
     return ok(
         "已提交现状分析报告",
-        state_patch={
-            "layer2_memory": updated_layer2,
-            "_submit_result": {"type": "status_report", "report_id": 0},
-        },
+        state_patch={"layer2_memory": updated_layer2},
     )
 
 
@@ -148,10 +171,7 @@ def submit_action_plan(
     updated_layer2["version"] = updated_layer2.get("version", 1) + 1
     return ok(
         "已提交行动规划",
-        state_patch={
-            "layer2_memory": updated_layer2,
-            "_submit_result": {"type": "action_plan", "plan_id": 0},
-        },
+        state_patch={"layer2_memory": updated_layer2},
     )
 
 
@@ -213,10 +233,7 @@ def submit_action_guide(
     updated_layer2["version"] = updated_layer2.get("version", 1) + 1
     return ok(
         "已提交行动指南",
-        state_patch={
-            "layer2_memory": updated_layer2,
-            "_submit_result": {"type": "action_guide", "guide_id": 0},
-        },
+        state_patch={"layer2_memory": updated_layer2},
     )
 
 
@@ -422,12 +439,6 @@ def apply_submit_tool_state_update(state: dict, tool_name: str, tool_args: dict)
         return {
             "layer2_memory": updated_layer2,
             "report_counter": updated_counter,
-            "status_report": report_markdown,
-            "status_report_id": new_report_id,
-            "_submit_result": {
-                "type": "status_report",
-                "report_id": new_report_id,
-            },
         }
 
     if tool_name == "submit_action_plan":
@@ -472,12 +483,6 @@ def apply_submit_tool_state_update(state: dict, tool_name: str, tool_args: dict)
         return {
             "layer2_memory": updated_layer2,
             "report_counter": updated_counter,
-            "action_plan": plan_markdown,
-            "action_plan_id": new_plan_id,
-            "_submit_result": {
-                "type": "action_plan",
-                "plan_id": new_plan_id,
-            },
         }
 
     if tool_name == "submit_action_guide":
@@ -520,13 +525,6 @@ def apply_submit_tool_state_update(state: dict, tool_name: str, tool_args: dict)
         return {
             "layer2_memory": updated_layer2,
             "report_counter": updated_counter,
-            "action_guides": updated_layer2["action_guides"],
-            "action_guide": guide_markdown,
-            "_submit_result": {
-                "type": "action_guide",
-                "guide_id": new_guide_id,
-                "guide_uid": new_guide_item.get("id"),
-            },
         }
 
     if tool_name == "update_guide_status":
@@ -600,12 +598,6 @@ def apply_submit_tool_state_update(state: dict, tool_name: str, tool_args: dict)
 
         updates = {
             "layer2_memory": updated_layer2,
-            "action_guides": updated_layer2["action_guides"],
-            "_submit_result": {
-                "type": "guide_status_update",
-                "guide_uid": guide_id,
-                "new_status": new_status,
-            },
         }
 
         if feedback_summary or feedback_completion_status or feedback_completion_detail:
@@ -699,12 +691,6 @@ def apply_submit_tool_state_update(state: dict, tool_name: str, tool_args: dict)
 
         return {
             "layer2_memory": updated_layer2,
-            "action_guides": updated_layer2["action_guides"],
-            "_submit_result": {
-                "type": "guide_content_update",
-                "guide_uid": guide_id,
-                "guide_id": updated_guide_num,
-            },
         }
 
     return {}

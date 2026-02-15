@@ -71,10 +71,7 @@ class TestUpdateGuideContent:
         
         # 验证返回结果
         assert result, "应该返回状态更新"
-        assert "_submit_result" in result, "应该有 _submit_result"
-        assert result["_submit_result"]["type"] == "guide_content_update", "类型应该正确"
-        assert result["_submit_result"]["guide_uid"] == guide_uid, "guide_uid 应该正确"
-        assert result["_submit_result"]["guide_id"] == 1, "guide_id 应该正确"
+        assert "layer2_memory" in result, "应该有 layer2_memory"
         
         # 验证更新后的指南
         updated_guides = result["layer2_memory"]["action_guides"]

@@ -11,10 +11,6 @@ def setup_logger():
     """
     配置全局日志系统，输出到控制台和本地文件
     """
-    # 确保日志目录存在
-    if not os.path.exists(LOG_DIR):
-        os.makedirs(LOG_DIR)
-
     # 创建 root logger
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
@@ -35,16 +31,23 @@ def setup_logger():
     logger.addHandler(console_handler)
 
     # 2. 文件 Handler (支持自动切分，保留最近 5 个，每个最大 10MB)
-    file_handler = RotatingFileHandler(
-        LOG_FILE, 
-        maxBytes=10*1024*1024, 
-        backupCount=5,
-        encoding='utf-8'
-    )
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-
-    logger.info(f"Logging initialized. Log file: {LOG_FILE}")
+    # In some container runtimes the app directory can be read-only.
+    # Fail open: keep stdout logging available instead of crashing app startup.
+    try:
+        if not os.path.exists(LOG_DIR):
+            os.makedirs(LOG_DIR)
+        file_handler = RotatingFileHandler(
+            LOG_FILE,
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding='utf-8'
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        logger.info(f"Logging initialized. Log file: {LOG_FILE}")
+    except Exception as e:
+        logger.warning("File logging disabled: %s", e)
+        logger.info("Logging initialized with stdout only")
     return logger
 
 # 默认初始化

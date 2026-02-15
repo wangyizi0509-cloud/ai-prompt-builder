@@ -45,6 +45,7 @@ from graph.runtime_config import (
 from graph.subgraphs.plan import get_plan_subgraph
 from graph.subgraphs.guide import get_guide_subgraph
 from graph.subgraphs.status import get_status_subgraph
+from graph.tools.submit_tools import submit_tools_state_context
 
 
 class _SubagentToolInput(BaseModel):
@@ -262,19 +263,21 @@ def _call_subagent(
     llm = get_llm(temperature=0.7, use_tools=True)
 
     agent_name = {"status": "status_agent", "plan": "plan_agent", "guide": "guide_agent"}.get(role, role)
+    current_state = state_getter()
     initial_messages = build_messages_for_model(
-        state=state_getter(),
+        state=current_state,
         agent_name=agent_name,
         current_input=instruction,
     )
     initial_messages = _truncate_messages(initial_messages, max_total=25)
-    supervisor = _run_langchain_supervisor(
-        llm=llm,
-        tools=tools,
-        initial_messages=initial_messages,
-        max_rounds=int(os.getenv("SUBAGENT_TOOL_MAX_ROUNDS", "8")),
-        config=config,
-    )
+    with submit_tools_state_context(current_state):
+        supervisor = _run_langchain_supervisor(
+            llm=llm,
+            tools=tools,
+            initial_messages=initial_messages,
+            max_rounds=int(os.getenv("SUBAGENT_TOOL_MAX_ROUNDS", "8")),
+            config=config,
+        )
     merged_patch = merge_patches({}, supervisor["patches"])
     output = (supervisor["final"].content or "").strip()
     return ok(output=output, state_patch=merged_patch)
@@ -428,13 +431,14 @@ def main_agent_node(state: AgentState, config: RunnableConfig | None = None) -> 
         current_input=str(working_state.get("user_message") or ""),
     )
     initial_messages = _truncate_messages(initial_messages, max_total=25)
-    supervisor = _run_langchain_supervisor(
-        llm=llm,
-        tools=tools,
-        initial_messages=initial_messages,
-        max_rounds=int(os.getenv("MAIN_AGENT_TOOL_MAX_ROUNDS", "10")),
-        config=config,
-    )
+    with submit_tools_state_context(working_state):
+        supervisor = _run_langchain_supervisor(
+            llm=llm,
+            tools=tools,
+            initial_messages=initial_messages,
+            max_rounds=int(os.getenv("MAIN_AGENT_TOOL_MAX_ROUNDS", "10")),
+            config=config,
+        )
 
     merged_tool_patch = merge_patches({}, supervisor["patches"])
     if merged_tool_patch:
