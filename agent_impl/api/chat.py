@@ -606,6 +606,21 @@ async def chat(
             except Exception:
                 pass
 
+        # 后台持久化本轮消息到 Supabase
+        if user_id:
+            from api.conversation_persist import persist_turn_messages
+            background_tasks.add_task(
+                persist_turn_messages,
+                user_id=user_id,
+                thread_id=thread_id,
+                turn_id=current_message_id if not is_resume else (str(uuid.uuid4())),
+                user_message=final_message if not is_resume else None,
+                pending_responses=pending_responses,
+                final_state=final_state,
+                is_resume=is_resume,
+                inquiry_card=inquiry_card,
+            )
+
         # 构造标准响应
         # 优先使用 pending_responses (结构化消息)
         # 同时也填充 response 字段作为 fallback
@@ -625,15 +640,82 @@ async def chat(
 
 @router.get("/chat/history/{thread_id}")
 async def get_chat_history(thread_id: str, current_user=Depends(get_optional_user_dep)):
-    logger.info(f"get_chat_history request: thread_id={thread_id}, user={current_user['user_id'] if current_user else 'anonymous'}")
-    
-    if current_user:
-        from supabase_service.client import get_thread_by_user
-        user_thread = await get_thread_by_user(current_user['user_id'])
-        if not user_thread or user_thread['thread_id'] != thread_id:
-            logger.warning(f"Security: User {current_user['user_id']} accessing thread {thread_id} not bound to them.")
-    
+    """
+    历史消息读取接口。
+    - 登录态：强制 thread 归属校验，优先从 Supabase 读取。
+    - 未登录：返回 401。
+    """
+    if not current_user:
+        from fastapi import HTTPException as _Exc
+        raise _Exc(status_code=401, detail="Authentication required")
+
+    user_id = current_user['user_id']
+    logger.info(f"get_chat_history request: thread_id={thread_id}, user={user_id}")
+
+    # 强制 thread 归属校验
+    from supabase_service.client import get_thread_by_user
+    user_thread = await get_thread_by_user(user_id)
+    if not user_thread or user_thread['thread_id'] != thread_id:
+        logger.warning(f"Security: User {user_id} accessing thread {thread_id} not bound to them.")
+        raise HTTPException(status_code=403, detail="Thread does not belong to this user")
+
     try:
+        # 优先尝试从 Supabase 读取
+        from supabase_service.conversation import (
+            get_conversation_by_thread,
+            get_messages,
+            get_messages_count,
+            upsert_conversation,
+            backfill_from_langgraph_state,
+        )
+        from supabase_service.client import is_supabase_configured
+
+        if is_supabase_configured():
+            conv = await get_conversation_by_thread(thread_id)
+            if not conv:
+                # 尝试创建会话
+                conv = await upsert_conversation(user_id, thread_id)
+
+            if conv:
+                msg_count = await get_messages_count(conv["id"])
+                if msg_count == 0:
+                    # 从 LangGraph 回填
+                    from api.sdk_client import get_thread_state
+                    state = get_thread_state(thread_id)
+                    if state:
+                        await backfill_from_langgraph_state(conv["id"], thread_id, state)
+
+                result = await get_messages(conv["id"], limit=200)
+                messages = result.get("messages", [])
+                clean_messages = []
+                for msg in messages:
+                    role = msg.get("role", "")
+                    content = msg.get("content", "")
+                    kind = msg.get("kind", "chat_text")
+                    metadata = msg.get("metadata")
+
+                    if kind == "chat_text" and content and role in ("user", "assistant"):
+                        clean_messages.append({"role": role, "content": content, "kind": kind})
+                    elif kind in ("interrupt_inquiry", "inquiry_receipt", "system_task"):
+                        clean_messages.append({
+                            "role": role,
+                            "content": content,
+                            "kind": kind,
+                            "metadata": metadata,
+                        })
+
+                # 获取 state（用于 inquiry_card 恢复等）
+                from api.sdk_client import get_thread_state
+                state = get_thread_state(thread_id)
+
+                logger.info(f"Returning {len(clean_messages)} messages from Supabase for thread {thread_id}")
+                return {
+                    "success": True,
+                    "messages": clean_messages,
+                    "state": state,
+                }
+
+        # Fallback: 从 LangGraph 读取
         from api.sdk_client import get_thread_state
         t0 = time.perf_counter()
         state = get_thread_state(thread_id)
@@ -685,12 +767,14 @@ async def get_chat_history(thread_id: str, current_user=Depends(get_optional_use
                         cleaned_content = content
                 clean_messages.append({"role": normalized_role, "content": cleaned_content})
         
-        logger.info(f"Returning {len(clean_messages)} messages for thread {thread_id}")
+        logger.info(f"Returning {len(clean_messages)} messages (LangGraph fallback) for thread {thread_id}")
         return {
             "success": True, 
             "messages": clean_messages, 
             "state": state
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"get_chat_history failed: {e}", exc_info=True)
         return {"success": False, "error": str(e)}

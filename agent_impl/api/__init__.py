@@ -31,6 +31,7 @@ chat_router = _load_router("chat", "DISABLE_CHAT")
 stream_router = _load_router("stream", "DISABLE_STREAM")
 guide_router = _load_router("guide", "DISABLE_GUIDE")
 debug_router = _load_router("debug", "DISABLE_DEBUG")
+conversations_router = _load_router("conversations", "DISABLE_CONVERSATIONS")
 
 api_router = APIRouter()
 
@@ -46,3 +47,5 @@ if guide_router is not None:
     api_router.include_router(guide_router, prefix="/api/guide", tags=["指南"])
 if debug_router is not None:
     api_router.include_router(debug_router, prefix="/api/debug", tags=["调试"])
+if conversations_router is not None:
+    api_router.include_router(conversations_router, prefix="/api/conversations", tags=["对话"])

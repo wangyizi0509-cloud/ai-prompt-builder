@@ -2918,6 +2918,93 @@
                     try { return JSON.stringify(v, null, 2); } catch { return String(v); }
                 };
 
+                // ============ Supabase 消息格式 → 前端 UI 消息格式 ============
+                const _mapSupabaseMessageToUI = (msg) => {
+                    if (!msg) return null;
+                    const kind = msg.kind || 'chat_text';
+                    const role = msg.role || 'assistant';
+                    const content = msg.content || '';
+                    const metadata = msg.metadata || {};
+
+                    if (kind === 'chat_text') {
+                        if (!content) return null;
+                        return { role, content };
+                    }
+
+                    if (kind === 'system_task') {
+                        // 从 metadata 恢复 system_task 卡片
+                        const taskType = metadata.taskType || 'status';
+                        const taskKey = metadata.taskKey || `history_${msg.seq || msg.id}`;
+                        return {
+                            role: 'system_task',
+                            taskType,
+                            taskKey,
+                            taskState: metadata.taskState || 'done',
+                            label: metadata.label || '',
+                            title: metadata.title || '',
+                            desc: metadata.desc || content || '',
+                            disabled: true,
+                            _taskKey: taskKey,
+                        };
+                    }
+
+                    if (kind === 'interrupt_inquiry') {
+                        const card = metadata.inquiry_card;
+                        if (!card || !card.questions || !card.questions.length) return null;
+                        const taskKey = `inquiry_${msg.turn_id || msg.id}`;
+                        return {
+                            role: 'system_task',
+                            taskType: 'inquiry',
+                            taskKey,
+                            taskState: 'done',
+                            label: 'QUESTION',
+                            title: '需要补充信息',
+                            desc: card.intro || '为了更好地制定策略，请回答几个问题',
+                            disabled: true,
+                            _taskKey: taskKey,
+                            inquiryData: {
+                                intro: card.intro || '',
+                                reasoning: card.reasoning || '',
+                                questions: (card.questions || []).map(q => q.question || ''),
+                            },
+                        };
+                    }
+
+                    if (kind === 'inquiry_receipt') {
+                        const answers = metadata.answers || {};
+                        const card = metadata.inquiry_card || {};
+                        const details = [];
+                        if (card.questions && Array.isArray(card.questions)) {
+                            for (const q of card.questions) {
+                                const qid = q.id || '';
+                                const answer = answers[qid];
+                                if (answer !== undefined) {
+                                    details.push({
+                                        label: q.title || q.question || qid,
+                                        value: Array.isArray(answer) ? answer.join('、') : String(answer),
+                                    });
+                                }
+                            }
+                        }
+                        return {
+                            role: 'inquiry_receipt',
+                            id: `receipt_${msg.turn_id || msg.id}`,
+                            taskKey: `inquiry_${msg.turn_id || msg.id}`,
+                            summary: '已提交问卷',
+                            status: 'success',
+                            details,
+                            images: [],
+                            expanded: false,
+                        };
+                    }
+
+                    // 兜底：作为普通文本消息
+                    if (content) {
+                        return { role, content };
+                    }
+                    return null;
+                };
+
                 const pushSystemTaskOnce = (key, payload) => {
                     if (taskMessageIds.value.has(key)) return;
                     taskMessageIds.value.add(key);
@@ -3479,50 +3566,82 @@
                     }
 
                     try {
-                        console.log('[History] Loading user thread info...');
-                        // 1. 获取用户的 Thread ID
-                        const threadRes = await fetch('/api/auth/me/thread', {
-                            headers: { 'Authorization': `Bearer ${token}` }
-                        });
-                        const threadData = await threadRes.json();
-                        console.log('[History] Thread info response:', threadData);
-                        
-                        if (threadData.success && threadData.thread_id) {
-                            const threadId = threadData.thread_id;
-                            console.log('[History] Found thread_id:', threadId);
-                            
-                            // 设置 thread_id 和 session_id
+                        console.log('[History] Loading via conversations API...');
+                        const authHeaders = { 'Authorization': `Bearer ${token}` };
+
+                        // 1. 获取默认会话
+                        const convRes = await fetch('/api/conversations/default', { headers: authHeaders });
+                        const convData = await convRes.json();
+                        console.log('[History] Default conversation response:', convData);
+
+                        if (convData.success && convData.conversation) {
+                            const conv = convData.conversation;
+                            const threadId = conv.thread_id;
+                            const conversationId = conv.id;
+                            console.log('[History] Found conversation:', conversationId, 'thread:', threadId);
+
                             studioThreadId.value = threadId;
                             sessionId.value = threadId;
-                            
-                            // 2. 获取聊天历史
-                            console.log('[History] Fetching history for thread:', threadId);
-                            const historyRes = await fetch(`/api/chat/history/${threadId}`, {
-                                headers: { 'Authorization': `Bearer ${token}` }
-                            });
-                            const historyData = await historyRes.json();
-                            console.log('[History] Chat history response:', historyData);
-                            
-                            if (historyData.success) {
-                                // 3. 填充消息列表
-                                messages.value = historyData.messages || [];
+
+                            // 2. 并行拉取 messages 和 state
+                            const [msgRes, stateRes] = await Promise.all([
+                                fetch(`/api/conversations/${conversationId}/messages?limit=200`, { headers: authHeaders }),
+                                fetch(`/api/conversations/${conversationId}/state`, { headers: authHeaders }),
+                            ]);
+                            const msgData = await msgRes.json();
+                            const stateData = await stateRes.json();
+                            console.log('[History] Messages response:', msgData);
+                            console.log('[History] State response:', stateData);
+
+                            if (msgData.success) {
+                                // 3. 将 Supabase 消息格式转换为前端消息格式
+                                const rawMsgs = msgData.messages || [];
+                                const uiMessages = rawMsgs.map(m => _mapSupabaseMessageToUI(m)).filter(Boolean);
+                                messages.value = uiMessages;
                                 console.log('[History] Loaded messages count:', messages.value.length);
-                                
-                                // 4. 填充状态看板
-                                if (historyData.state) {
-                                    console.log('[History] Restoring dashboard state');
-                                    processStateUpdate(historyData.state, { isHistoryRestore: true });
-                                }
-                                
-                                await scrollToBottom();
-                            } else {
-                                console.error('[History] Failed to get history data:', historyData.error);
+
+                                // 恢复 taskMessageIds 避免重复
+                                uiMessages.forEach(m => {
+                                    if (m.role === 'system_task' && m._taskKey) {
+                                        taskMessageIds.value.add(m._taskKey);
+                                    }
+                                });
                             }
+
+                            // 4. 填充状态看板
+                            if (stateData.success && stateData.state) {
+                                console.log('[History] Restoring dashboard state');
+                                processStateUpdate(stateData.state, { isHistoryRestore: true });
+                            }
+
+                            await scrollToBottom();
                         } else {
-                            console.log('[History] No existing thread_id found for this user');
-                            const freshSessionId = `session_${Math.random().toString(36).slice(2, 11)}`;
-                            sessionId.value = freshSessionId;
-                            localStorage.setItem('session_id', freshSessionId);
+                            // Fallback: 尝试旧接口
+                            console.log('[History] No conversation found, trying legacy thread API...');
+                            const threadRes = await fetch('/api/auth/me/thread', { headers: authHeaders });
+                            const threadData = await threadRes.json();
+
+                            if (threadData.success && threadData.thread_id) {
+                                const threadId = threadData.thread_id;
+                                studioThreadId.value = threadId;
+                                sessionId.value = threadId;
+
+                                const historyRes = await fetch(`/api/chat/history/${threadId}`, { headers: authHeaders });
+                                const historyData = await historyRes.json();
+
+                                if (historyData.success) {
+                                    messages.value = (historyData.messages || []).map(m => _mapSupabaseMessageToUI(m) || m).filter(Boolean);
+                                    if (historyData.state) {
+                                        processStateUpdate(historyData.state, { isHistoryRestore: true });
+                                    }
+                                    await scrollToBottom();
+                                }
+                            } else {
+                                console.log('[History] No existing thread_id found for this user');
+                                const freshSessionId = `session_${Math.random().toString(36).slice(2, 11)}`;
+                                sessionId.value = freshSessionId;
+                                localStorage.setItem('session_id', freshSessionId);
+                            }
                         }
                     } catch (e) {
                         console.error('[History] Error during history restoration:', e);

@@ -515,11 +515,16 @@ async def chat_stream(
             state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
         input_payload = state
     
+    # 用于在流结束后做持久化
+    _stream_turn_id = current_message_id if not is_resume else str(uuid.uuid4())
+    _stream_user_message = request.message if not is_resume else None
+
     async def generate_stream():
         """生成流式响应"""
         final_state = None
         interrupt_sent = False
         merged_patch_keys: list[str] = []
+        detected_inquiry_card = None
         try:
             for chunk in run_assistant(thread_id, input_payload, stream_mode=request.stream_mode):
                 final_state = getattr(chunk, "data", None)
@@ -533,6 +538,7 @@ async def chat_stream(
                         inquiry_card = _extract_inquiry_card_from_any(chunk)
                     if inquiry_card is not None:
                         interrupt_sent = True
+                        detected_inquiry_card = inquiry_card
                         yield f"data: {json.dumps({'type': 'interrupt', 'inquiry_card': inquiry_card}, ensure_ascii=False)}\n\n"
 
                     tool_patch_log = final_state.get("tool_patch_log")
@@ -544,6 +550,21 @@ async def chat_stream(
             # 后台运行维护任务
             if not interrupt_sent:
                 background_tasks.add_task(_run_maintenance_tasks_sdk, request.session_id, thread_id)
+
+            # 后台持久化本轮消息到 Supabase
+            if user_id and isinstance(final_state, dict):
+                from api.conversation_persist import persist_stream_turn_messages
+                background_tasks.add_task(
+                    persist_stream_turn_messages,
+                    user_id=user_id,
+                    thread_id=thread_id,
+                    turn_id=_stream_turn_id,
+                    user_message=_stream_user_message,
+                    collected_chunks=[],
+                    final_state=final_state,
+                    is_resume=is_resume,
+                    inquiry_card=detected_inquiry_card,
+                )
 
             if isinstance(final_state, dict):
                 _append_debug_log(
