@@ -16,6 +16,7 @@ class AskHumanInput(BaseModel):
 
 
 def _ask_human(inquiry_card: dict[str, Any]) -> dict:
+    # 统一使用标准化后的 inquiry payload，确保 questions.id 可用于前端稳定映射与 resume。
     payload = build_inquiry_interrupt_payload(inquiry_card=inquiry_card)
     answers = interrupt(payload)
     return ok(

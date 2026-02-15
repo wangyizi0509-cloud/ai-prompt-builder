@@ -13,7 +13,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from graph.workflow import get_workflow
+from langgraph.checkpoint.memory import MemorySaver
+
+from graph.workflow import compile_workflow
 
 app = FastAPI(title="LangGraph Studio Server")
 logger = logging.getLogger(__name__)
@@ -27,8 +29,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 获取工作流
-workflow = get_workflow()
+# 本地 Studio 运行需要显式 checkpointer，才能支持子图 interrupt/resume。
+checkpointer = MemorySaver()
+workflow = compile_workflow(checkpointer=checkpointer)
 
 @app.get("/")
 async def root():
@@ -99,7 +102,11 @@ async def create_run(thread_id: str, input: dict):
     try:
         # 从 input 中提取实际输入
         actual_input = input.get("input", input)
-        result = workflow.invoke(actual_input)
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "checkpointer": checkpointer,
+        }
+        result = workflow.invoke(actual_input, config=config)
         import uuid
         run_id = str(uuid.uuid4())
         return {

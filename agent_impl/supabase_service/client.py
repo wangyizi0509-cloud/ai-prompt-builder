@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+LOCAL_AUTH_ENABLED = os.getenv("LOCAL_AUTH", "false").lower() == "true"
 
 supabase: Optional[Client] = None
 
@@ -22,6 +23,48 @@ if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and SUPABASE_URL != "your-supabase
     except Exception as e:
         logger.warning("Failed to initialize Supabase client: %s", e)
         supabase = None
+
+
+def _get_local_data_dir() -> Path:
+    """
+    Local auth/dev storage directory.
+    Stored under agent_impl/local_data to keep everything in-repo/workspace.
+    """
+    # .../agent_impl/supabase_service/client.py -> .../agent_impl
+    agent_root = Path(__file__).resolve().parents[1]
+    d = agent_root / "local_data"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _local_users_path() -> Path:
+    return _get_local_data_dir() / "users.json"
+
+
+def _local_user_threads_path() -> Path:
+    return _get_local_data_dir() / "user_threads.json"
+
+
+def _read_json(path: Path, default):
+    try:
+        if not path.exists():
+            return default
+        import json
+        return json.loads(path.read_text(encoding="utf-8") or "null") or default
+    except Exception:
+        return default
+
+
+def _write_json(path: Path, data) -> None:
+    import json
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _is_local_auth() -> bool:
+    # Supabase configured -> always prefer Supabase unless explicitly disabled by env.
+    if supabase is not None:
+        return False
+    return LOCAL_AUTH_ENABLED
 
 
 def is_supabase_configured() -> bool:
@@ -38,11 +81,32 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 async def create_user(email: str, password: str, username: str) -> Dict[str, Any]:
-    if not is_supabase_configured():
+    # Local auth fallback for dev/smoke tests
+    if _is_local_auth():
+        users_path = _local_users_path()
+        users = _read_json(users_path, default=[])
+        if any(isinstance(u, dict) and u.get("email") == email for u in users):
+            return {"success": False, "error": "Email already exists"}
+        user_id = str(uuid.uuid4())
+        password_hash = hash_password(password)
+        created_at = datetime.now().isoformat()
+        users.append(
+            {
+                "id": user_id,
+                "email": email,
+                "username": username,
+                "password_hash": password_hash,
+                "created_at": created_at,
+            }
+        )
+        _write_json(users_path, users)
         return {
-            'success': False,
-            'error': 'Supabase not configured'
+            "success": True,
+            "user": {"id": user_id, "email": email, "username": username, "created_at": created_at},
         }
+
+    if not is_supabase_configured():
+        return {"success": False, "error": "Supabase not configured"}
     
     try:
         password_hash = hash_password(password)
@@ -79,11 +143,26 @@ async def create_user(email: str, password: str, username: str) -> Dict[str, Any
 
 
 async def authenticate_user(email: str, password: str) -> Dict[str, Any]:
-    if not is_supabase_configured():
+    # Local auth fallback for dev/smoke tests
+    if _is_local_auth():
+        users = _read_json(_local_users_path(), default=[])
+        user = next((u for u in users if isinstance(u, dict) and u.get("email") == email), None)
+        if not user:
+            return {"success": False, "error": "User not found"}
+        if not verify_password(password, user.get("password_hash", "")):
+            return {"success": False, "error": "Invalid password"}
         return {
-            'success': False,
-            'error': 'Supabase not configured'
+            "success": True,
+            "user": {
+                "id": user.get("id"),
+                "email": user.get("email"),
+                "username": user.get("username"),
+                "created_at": user.get("created_at"),
+            },
         }
+
+    if not is_supabase_configured():
+        return {"success": False, "error": "Supabase not configured"}
     
     try:
         response = supabase.table('users').select('*').eq('email', email).execute()
@@ -119,6 +198,13 @@ async def authenticate_user(email: str, password: str) -> Dict[str, Any]:
 
 
 async def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
+    if _is_local_auth():
+        users = _read_json(_local_users_path(), default=[])
+        for u in users:
+            if isinstance(u, dict) and u.get("id") == user_id:
+                return {k: u.get(k) for k in ("id", "email", "username", "created_at")}
+        return None
+
     if not is_supabase_configured():
         return None
     
@@ -134,6 +220,13 @@ async def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
 
 
 async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
+    if _is_local_auth():
+        users = _read_json(_local_users_path(), default=[])
+        for u in users:
+            if isinstance(u, dict) and u.get("email") == email:
+                return {k: u.get(k) for k in ("id", "email", "username", "created_at")}
+        return None
+
     if not is_supabase_configured():
         return None
     
@@ -149,11 +242,20 @@ async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
 
 
 async def create_user_thread(user_id: str, thread_id: str) -> Dict[str, Any]:
+    if _is_local_auth():
+        path = _local_user_threads_path()
+        rows = _read_json(path, default=[])
+        # one thread per user
+        existing = next((r for r in rows if isinstance(r, dict) and r.get("user_id") == user_id), None)
+        if existing:
+            return {"success": False, "error": "Thread already exists for this user"}
+        row = {"id": str(uuid.uuid4()), "user_id": user_id, "thread_id": thread_id, "created_at": datetime.now().isoformat()}
+        rows.append(row)
+        _write_json(path, rows)
+        return {"success": True, "thread": row}
+
     if not is_supabase_configured():
-        return {
-            'success': False,
-            'error': 'Supabase not configured'
-        }
+        return {"success": False, "error": "Supabase not configured"}
     
     try:
         response = supabase.table('user_threads').insert({
@@ -187,6 +289,10 @@ async def create_user_thread(user_id: str, thread_id: str) -> Dict[str, Any]:
 
 
 async def get_thread_by_user(user_id: str) -> Optional[Dict[str, Any]]:
+    if _is_local_auth():
+        rows = _read_json(_local_user_threads_path(), default=[])
+        return next((r for r in rows if isinstance(r, dict) and r.get("user_id") == user_id), None)
+
     if not is_supabase_configured():
         return None
     
@@ -202,6 +308,10 @@ async def get_thread_by_user(user_id: str) -> Optional[Dict[str, Any]]:
 
 
 async def get_user_by_thread(thread_id: str) -> Optional[Dict[str, Any]]:
+    if _is_local_auth():
+        rows = _read_json(_local_user_threads_path(), default=[])
+        return next((r for r in rows if isinstance(r, dict) and r.get("thread_id") == thread_id), None)
+
     if not is_supabase_configured():
         return None
     

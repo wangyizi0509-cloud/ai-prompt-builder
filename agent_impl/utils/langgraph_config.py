@@ -9,6 +9,14 @@ load_dotenv()
 
 DEBUG_MODE = os.getenv("DEBUG_MODE", "0") == "1"
 
+# If cloud config is missing/placeholder, fall back to local LangGraph automatically.
+# This makes local dev work out-of-the-box even when DEBUG_MODE isn't set.
+_cloud_url = os.getenv("LANGGRAPH_CLOUD_URL", "https://your-deployment-id.us.langgraph.app")
+_cloud_key = os.getenv("LANGGRAPH_CLOUD_API_KEY", "")
+_cloud_configured = bool(_cloud_key) and bool(_cloud_url) and "your-deployment-id" not in _cloud_url
+if not DEBUG_MODE and not _cloud_configured:
+    DEBUG_MODE = True
+
 if DEBUG_MODE:
     LANGGRAPH_URL = os.getenv("LANGGRAPH_LOCAL_URL", "http://127.0.0.1:2024")
     LANGGRAPH_API_KEY = os.getenv("LANGGRAPH_LOCAL_API_KEY", "")

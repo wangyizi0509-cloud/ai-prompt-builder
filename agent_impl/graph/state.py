@@ -161,7 +161,9 @@ class AgentState(TypedDict, total=False):
     collected_info: dict
     # Onboarding 状态
     onboarding_completed: bool
+    pending_crushe_guide: bool
     onboarding_turn_count: int
+    onboarding_last_answer_fingerprint: Optional[str]
     onboarding_max_turns: int
     onboarding_handoff: Optional[dict]
     last_onboarding_question: Optional[str]
@@ -231,7 +233,9 @@ def create_initial_state(user_message: str, **overrides) -> AgentState:
         should_continue=True,
         route_to="main_agent",
         onboarding_completed=False,  # 默认未完成，正常进入 Onboarding
+        pending_crushe_guide=False,
         onboarding_turn_count=0,
+        onboarding_last_answer_fingerprint=None,
         onboarding_max_turns=3,
         onboarding_handoff=None,
         last_onboarding_question=None,

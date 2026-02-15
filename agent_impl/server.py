@@ -49,7 +49,21 @@ app.include_router(api_router)
 
 frontend_path = os.path.join(current_dir, "frontend")
 if os.path.exists(frontend_path):
-    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="static")
+    # iOS Safari can be quite aggressive about caching static assets during dev.
+    # In DEBUG_MODE=1, disable cache to reduce stale UI issues on real devices.
+    debug_mode_for_static = os.getenv("DEBUG_MODE", "0") == "1"
+
+    if debug_mode_for_static:
+        class NoCacheStaticFiles(StaticFiles):
+            async def get_response(self, path: str, scope):
+                response = await super().get_response(path, scope)
+                if response.status_code == 200:
+                    response.headers["Cache-Control"] = "no-store"
+                return response
+
+        app.mount("/", NoCacheStaticFiles(directory=frontend_path, html=True), name="static")
+    else:
+        app.mount("/", StaticFiles(directory=frontend_path, html=True), name="static")
 else:
     logger.warning(f"Frontend path not found: {frontend_path}")
 

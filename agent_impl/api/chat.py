@@ -1,11 +1,12 @@
 import json
 import uuid
+import hashlib
 from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from typing import Optional, Literal, Any, Union
+from typing import Optional, Literal, Any, Union, List
 
 router = APIRouter(prefix="/api")
 security = HTTPBearer(auto_error=False)
@@ -25,12 +26,101 @@ class FeedbackModeInput(BaseModel):
     completion_detail: Optional[str] = ""
 
 
+class ImageInfo(BaseModel):
+    image_url: Optional[str] = None
+    ocr_result: Optional[str] = None
+    screenshot_type: Optional[str] = None
+
+
+
 class ChatRequest(BaseModel):
     message: str = ""
     session_id: str
+    images: Optional[List[ImageInfo]] = None
     feedback_mode: Optional[FeedbackModeInput] = None
     resume_payload: Optional[Union[dict[str, Any], str]] = None
     resume: Optional[bool] = None
+
+def _get_screenshot_label(screenshot_type: Optional[str]) -> str:
+    labels = {
+        "private_chat_screenshot": "私聊截图",
+        "group_chat_screenshot": "群聊截图",
+        "moments_screenshot": "朋友圈截图",
+        "other_social_media_screenshot": "其他社媒截图",
+        "universal_screenshot_analysis": "通用截图",
+    }
+    return labels.get(screenshot_type or "", "截图")
+
+
+def _build_user_message_with_images(request: ChatRequest) -> str:
+    final_message = request.message or ""
+    if request.images:
+        image_parts = []
+        for img in request.images:
+            if img.ocr_result:
+                type_label = _get_screenshot_label(img.screenshot_type)
+                image_parts.append(f"【{type_label}分析结果】\n{img.ocr_result}")
+
+        if image_parts:
+            final_message = "\n\n---\n\n".join(image_parts)
+            if request.message:
+                final_message += f"\n\n---\n\n用户补充说明：{request.message}"
+    return final_message
+
+
+def _extract_answers_from_resume_payload(resume_payload: Optional[Union[dict[str, Any], str]]) -> dict[str, Any]:
+    if not isinstance(resume_payload, dict):
+        return {}
+    answers = resume_payload.get("answers")
+    if isinstance(answers, dict):
+        return answers
+    return {k: v for k, v in resume_payload.items() if k != "answers"}
+
+
+def _stringify_answer_value(value: Any) -> str:
+    if isinstance(value, list):
+        return "、".join(str(v) for v in value)
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def _build_resume_message_from_card(inquiry_card: dict[str, Any], answers: dict[str, Any]) -> str:
+    questions = inquiry_card.get("questions") if isinstance(inquiry_card, dict) else None
+    lines: list[str] = []
+
+    if isinstance(questions, list):
+        for q in questions:
+            if not isinstance(q, dict):
+                continue
+            qid = str(q.get("id") or "").strip()
+            if not qid or qid not in answers:
+                continue
+            label = str(q.get("title") or q.get("question") or qid)
+            lines.append(f"{label}：{_stringify_answer_value(answers.get(qid))}")
+
+    if not lines:
+        for k, v in (answers or {}).items():
+            lines.append(f"{k}：{_stringify_answer_value(v)}")
+
+    if not lines:
+        return "用户已提交补充信息"
+    return "\n\n".join(lines)
+
+
+def _is_valid_inquiry_card(card: Any) -> bool:
+    if not isinstance(card, dict):
+        return False
+    questions = card.get("questions")
+    return isinstance(questions, list) and len(questions) > 0
+
+
+def _answers_fingerprint(answers: dict[str, Any]) -> str:
+    if not isinstance(answers, dict) or not answers:
+        return ""
+    canonical = json.dumps(answers, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
 
 
 async def get_optional_user_dep(
@@ -278,6 +368,88 @@ def _extract_inquiry_card_from_interrupt(final_state: dict) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
+def _extract_inquiry_card_from_chunk_interrupts(chunks: list[Any]) -> dict | None:
+    for chunk in chunks:
+        data = getattr(chunk, "data", None)
+        if isinstance(data, dict):
+            card = _extract_inquiry_card_from_interrupt(data)
+            if isinstance(card, dict):
+                return card
+        if isinstance(chunk, dict):
+            card = _extract_inquiry_card_from_interrupt(chunk)
+            if isinstance(card, dict):
+                return card
+    return None
+
+
+def _extract_inquiry_card_from_any(value: Any) -> dict | None:
+    if value is None:
+        return None
+
+    if isinstance(value, dict):
+        direct_card = value.get("inquiry_card")
+        if isinstance(direct_card, dict):
+            questions = direct_card.get("questions")
+            if isinstance(questions, list) and questions:
+                return direct_card
+
+        pending = value.get("pending_responses")
+        if isinstance(pending, list):
+            for item in pending:
+                if not isinstance(item, dict):
+                    continue
+                card = item.get("inquiry_card")
+                if isinstance(card, dict):
+                    questions = card.get("questions")
+                    if isinstance(questions, list) and questions:
+                        return card
+
+        card = _extract_inquiry_card_from_interrupt(value)
+        if card is not None:
+            return card
+        for v in value.values():
+            found = _extract_inquiry_card_from_any(v)
+            if found is not None:
+                return found
+        return None
+
+    if isinstance(value, (list, tuple)):
+        for v in value:
+            found = _extract_inquiry_card_from_any(v)
+            if found is not None:
+                return found
+        return None
+
+    data_attr = getattr(value, "data", None)
+    if data_attr is not None:
+        found = _extract_inquiry_card_from_any(data_attr)
+        if found is not None:
+            return found
+
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            found = _extract_inquiry_card_from_any(model_dump())
+            if found is not None:
+                return found
+        except Exception:
+            pass
+
+    as_dict = getattr(value, "dict", None)
+    if callable(as_dict):
+        try:
+            found = _extract_inquiry_card_from_any(as_dict())
+            if found is not None:
+                return found
+        except Exception:
+            pass
+
+    try:
+        return _extract_inquiry_card_from_any(vars(value))
+    except Exception:
+        return None
+
+
 @router.post("/chat")
 async def chat(
     request: ChatRequest,
@@ -285,12 +457,14 @@ async def chat(
     current_user=Depends(get_optional_user_dep),
 ):
     is_resume = bool(request.resume_payload) or bool(request.resume)
-    if not is_resume and not (request.message or "").strip():
+    has_images = bool(request.images)
+    if not is_resume and not (request.message or "").strip() and not has_images:
         raise HTTPException(status_code=400, detail="message is required")
     if is_resume and request.resume_payload is None:
         raise HTTPException(status_code=400, detail="resume_payload is required when resume is true")
 
-    message_preview = (request.message or "").strip()[:50]
+    final_message = _build_user_message_with_images(request) if not is_resume else ""
+    message_preview = (final_message or "").strip()[:50] if not is_resume else ""
     logger.info(
         f"Received message from session {request.session_id}: {message_preview if not is_resume else '[resume]'}..."
     )
@@ -305,27 +479,35 @@ async def chat(
     
     user_id = current_user['user_id'] if current_user else None
     thread_id = await ensure_thread_exists(request.session_id, user_id)
+    onboarding_turn_count_before: int | None = None
 
     input_payload: Any
     if is_resume:
         from langgraph.types import Command
+        base_state = get_thread_state(thread_id)
+        if isinstance(base_state, dict):
+            onboarding_turn_count_before = int(base_state.get("onboarding_turn_count", 0) or 0)
+        # 所有 inquiry 都经由 interrupt() 暂停，统一用 Command(resume=...) 恢复
         input_payload = Command(resume=request.resume_payload)
     else:
         base_state = get_thread_state(thread_id)
+        if isinstance(base_state, dict):
+            onboarding_turn_count_before = int(base_state.get("onboarding_turn_count", 0) or 0)
 
         if base_state is None:
             logger.info(f"Creating new session for thread {thread_id} (checkpointer empty)")
             current_message_id = str(uuid.uuid4())
-            state = create_initial_state(request.message, current_message_id=current_message_id)
+            state = create_initial_state(final_message, current_message_id=current_message_id)
             state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
         else:
             state = dict(base_state)
             current_message_id = str(uuid.uuid4())
-            state["user_message"] = request.message
+            state["user_message"] = final_message
             state["current_message_id"] = current_message_id
             state["_iteration_count"] = 0
             state["debug_log"] = []
             state["inquiry_card"] = None
+            state["inquiry_answers"] = None
             state["pending_questions"] = []
             state["pending_responses"] = []
             state["last_response_for_continuity"] = None
@@ -342,10 +524,11 @@ async def chat(
             data={
                 "session_id": request.session_id,
                 "thread_id": thread_id,
-                "message_preview": (request.message or "")[:100],
+                "message_preview": (final_message or request.message or "")[:100],
                 "use_stream": False,
                 "user_id": user_id,
                 "is_resume": is_resume,
+                "synthetic_resume": False,
             },
         )
         
@@ -357,11 +540,27 @@ async def chat(
         if not isinstance(final_state, dict):
             final_state = {}
         final_state = dict(final_state)
-        inquiry_card = _extract_inquiry_card_from_interrupt(final_state)
+
+        inquiry_card = _extract_inquiry_card_from_any(final_state)
+        if inquiry_card is None:
+            inquiry_card = _extract_inquiry_card_from_chunk_interrupts(chunks)
+        if inquiry_card is None:
+            inquiry_card = _extract_inquiry_card_from_any(chunks)
         if inquiry_card is not None:
             final_state["inquiry_card"] = inquiry_card
+        else:
+            final_state.pop("inquiry_card", None)
+        has_interrupt = inquiry_card is not None
+        onboarding_turn_count_after = int(final_state.get("onboarding_turn_count", 0) or 0)
+
+        merged_patch_keys: list[str] = []
+        tool_patch_log = final_state.get("tool_patch_log")
+        if isinstance(tool_patch_log, list) and tool_patch_log:
+            latest_patch = tool_patch_log[-1]
+            if isinstance(latest_patch, dict):
+                merged_patch_keys = sorted(str(k) for k in latest_patch.keys())
         
-        if inquiry_card is None:
+        if not has_interrupt:
             background_tasks.add_task(_run_maintenance_tasks_sdk, request.session_id, thread_id)
         
         pending_responses = final_state.get("pending_responses", [])
@@ -369,12 +568,11 @@ async def chat(
         feedback_status = final_state.get("feedback_status")
         feedback_question = final_state.get("feedback_question")
         
-        # 兼容旧逻辑：如果 pending_responses 为空，但有 response 字段（虽然这种情况在 SDK 模式下较少见）
-        # 或者为了前端兼容性，我们仍然构建一个 response 字符串
+        # 仅透传真实 pending_responses，避免用户侧兜底文案掩盖流程问题。
         if pending_responses:
             combined_response = "\n\n".join([r["content"] for r in pending_responses if r.get("content")])
         else:
-            combined_response = "我需要你先回答几个问题，我会根据你的答案继续。" if inquiry_card is not None else ""
+            combined_response = ""
         
         _append_debug_log(
             run_id="sdk-version",
@@ -386,6 +584,12 @@ async def chat(
                 "pending_resp_count": len(pending_responses),
                 "pending_first_has_card": bool(pending_responses[0].get("inquiry_card")) if pending_responses else False,
                 "state_has_inquiry_card": bool(final_state.get("inquiry_card")),
+                "has_interrupt": has_interrupt,
+                "is_resume": is_resume,
+                "merged_patch_keys": merged_patch_keys,
+                "has_inquiry_answers": bool(final_state.get("inquiry_answers")),
+                "onboarding_turn_count_before": onboarding_turn_count_before,
+                "onboarding_turn_count_after": onboarding_turn_count_after,
                 "onboarding_completed": final_state.get("onboarding_completed"),
                 "next_action": final_state.get("next_action"),
             },

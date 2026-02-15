@@ -79,7 +79,7 @@ pytest tests/test_specific_file.py
 #### 主智能体（Supervisor）
 
 - **Main Agent**: LangChain Agent，负责意图识别、选择是否调用子 agent、汇总结果并更新 state
-- 位于 `graph/nodes/main_agent.py`，内部使用工具循环执行所有工具调用，并在每次调用时透传 `config`（包含 `configurable.thread_id` 等）以支持子图中断恢复
+- 位于 `graph/nodes/main_agent.py`，内部使用工具循环执行所有工具调用，并在每次调用时通过 `runtime_config` 模块清洗并透传配置（含 `thread_id`），确保 Checkpointer 在子图中的正确传递与安全性。
 
 #### 子智能体（Subagents）
 
@@ -103,6 +103,7 @@ pytest tests/test_specific_file.py
 位于 `agent_impl/graph/` 目录：
 - `workflow.py`: 主 StateGraph 编排，编译入口支持 `checkpointer` 参数
 - `state.py`: TypedDict 状态定义
+- `runtime_config.py`: 运行时配置安全处理（Checkpointer 提取与清洗）
 - `nodes/`: 节点实现
   - `router.py`: 输入路由、风控、闲聊处理、消息归一化
   - `main_agent.py`: LangChain Supervisor（内置工具循环）
@@ -279,6 +280,10 @@ git push origin feature/your-feature
 ### 重构后变化
 
 **主图节点**：从原来的 `router/main_agent/status_agent/plan_agent/guide_agent/skill_tools/finalizer` 简化为 `router/onboarding/main_agent/post_turn_finalize`。
+
+**Onboarding 流程**：迁移至 Tool Calling (`submit_onboarding`) 模式，不再依赖 JSON 解析。API 层新增 `synthetic_resume` 支持非挂起式状态恢复。
+
+**配置安全**：引入 `runtime_config` 模块（`sanitize_runtime_config`），在主子 Agent 间传递配置时自动过滤 Checkpointer 等不可序列化对象，防止 `OSError`。
 
 **状态字段**：删除了 `current_agent/agent_resume_point/ask_mode/consult_mode/emotion_mode` 等旧控制字段，改用 `runtime/tool_patch_log`。
 

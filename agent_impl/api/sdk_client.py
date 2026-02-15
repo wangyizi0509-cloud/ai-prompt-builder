@@ -101,6 +101,28 @@ def get_thread_state(thread_id: str):
         return None
 
 
+def thread_has_pending_interrupt(thread_id: str) -> bool:
+    """检查 thread 是否有 pending interrupt（图在等待 Command(resume=...)）"""
+    client = get_client()
+    try:
+        state_snapshot = client.threads.get_state(thread_id)
+        # SDK 返回的 state snapshot 中 tasks 里的 interrupts 非空则表示有 pending interrupt
+        tasks = None
+        if isinstance(state_snapshot, dict):
+            tasks = state_snapshot.get("tasks")
+        else:
+            tasks = getattr(state_snapshot, "tasks", None)
+        if isinstance(tasks, (list, tuple)):
+            for task in tasks:
+                interrupts = task.get("interrupts") if isinstance(task, dict) else getattr(task, "interrupts", None)
+                if interrupts:
+                    return True
+        return False
+    except Exception as e:
+        logger.warning(f"thread_has_pending_interrupt check failed: {e}")
+        return False
+
+
 def update_thread_state(thread_id: str, updates: dict):
     """更新 thread 状态"""
     client = get_client()

@@ -45,3 +45,41 @@ def test_ask_human_interrupt_then_resume_returns_tool_result():
     assert tool_result["ok"] is True
     assert tool_result["state_patch"]["inquiry_card"]["questions"][0]["id"] == "q1"
     assert tool_result["state_patch"]["inquiry_answers"] == resume_payload
+
+
+def test_ask_human_normalizes_bad_inquiry_card_before_interrupt_and_patch():
+    def node(state: dict) -> dict:
+        inquiry_card = {
+            "questions": [
+                {"id": "", "question": "", "type": "single_choice", "options": ["A", "B"]},
+                {"id": "dup", "question": "第二题", "type": "single_choice", "options": ["A", "B"]},
+                {"id": "dup", "question": "", "type": "free_input_question"},
+            ],
+            "intro": None,
+            "reasoning": None,
+        }
+        result = ask_human.invoke({"inquiry_card": inquiry_card})
+        return {"tool_result": result}
+
+    graph = StateGraph(dict)
+    graph.add_node("n", node)
+    graph.set_entry_point("n")
+    graph.add_edge("n", END)
+    app = graph.compile(checkpointer=MemorySaver())
+
+    config = {"configurable": {"thread_id": "test_interrupt_ask_human_normalized"}}
+
+    out1 = app.invoke({}, config=config)
+    assert "__interrupt__" in out1
+    interrupt_card = out1["__interrupt__"][0].value
+    assert [q["id"] for q in interrupt_card["questions"]] == ["q1", "dup", "dup_2"]
+    assert [q["question"] for q in interrupt_card["questions"]] == ["问题1", "第二题", "问题3"]
+
+    resume_payload = {"answers": {"q1": "A", "dup": "A", "dup_2": "补充"}}
+    out2 = app.invoke(Command(resume=resume_payload), config=config)
+
+    tool_result = out2["tool_result"]
+    assert tool_result["ok"] is True
+    patch_card = tool_result["state_patch"]["inquiry_card"]
+    assert [q["id"] for q in patch_card["questions"]] == ["q1", "dup", "dup_2"]
+    assert tool_result["state_patch"]["inquiry_answers"] == resume_payload

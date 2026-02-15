@@ -110,7 +110,7 @@ LAYER3_DEFAULT_CONFIG = {
 
 def build_context(
     state: "AgentState",
-    target_agent: Literal["main_agent", "status_agent", "plan_agent", "guide_agent"] = "main_agent",
+    target_agent: Literal["main_agent", "status_agent", "plan_agent", "guide_agent", "onboarding_agent"] = "main_agent",
     include_layer0: bool = False,
 ) -> str:
     """

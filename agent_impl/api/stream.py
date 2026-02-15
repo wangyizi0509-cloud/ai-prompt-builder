@@ -1,5 +1,6 @@
 import json
 import uuid
+import hashlib
 import logging
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends
@@ -26,6 +27,59 @@ class StreamChatRequest(BaseModel):
     feedback_mode: Optional[FeedbackModeInput] = None
     resume_payload: Optional[Union[dict[str, Any], str]] = None
     resume: Optional[bool] = None
+
+
+def _extract_answers_from_resume_payload(resume_payload: Optional[Union[dict[str, Any], str]]) -> dict[str, Any]:
+    if not isinstance(resume_payload, dict):
+        return {}
+    answers = resume_payload.get("answers")
+    if isinstance(answers, dict):
+        return answers
+    return {k: v for k, v in resume_payload.items() if k != "answers"}
+
+
+def _stringify_answer_value(value: Any) -> str:
+    if isinstance(value, list):
+        return "、".join(str(v) for v in value)
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def _build_resume_message_from_card(inquiry_card: dict[str, Any], answers: dict[str, Any]) -> str:
+    questions = inquiry_card.get("questions") if isinstance(inquiry_card, dict) else None
+    lines: list[str] = []
+    if isinstance(questions, list):
+        for q in questions:
+            if not isinstance(q, dict):
+                continue
+            qid = str(q.get("id") or "").strip()
+            if not qid or qid not in answers:
+                continue
+            label = str(q.get("title") or q.get("question") or qid)
+            lines.append(f"{label}：{_stringify_answer_value(answers.get(qid))}")
+
+    if not lines:
+        for k, v in (answers or {}).items():
+            lines.append(f"{k}：{_stringify_answer_value(v)}")
+
+    if not lines:
+        return "用户已提交补充信息"
+    return "\n\n".join(lines)
+
+
+def _is_valid_inquiry_card(card: Any) -> bool:
+    if not isinstance(card, dict):
+        return False
+    questions = card.get("questions")
+    return isinstance(questions, list) and len(questions) > 0
+
+
+def _answers_fingerprint(answers: dict[str, Any]) -> str:
+    if not isinstance(answers, dict) or not answers:
+        return ""
+    canonical = json.dumps(answers, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -276,9 +330,27 @@ def _extract_inquiry_card_from_interrupt(final_state: dict) -> dict | None:
 
 
 def _extract_inquiry_card_from_any(value: Any) -> dict | None:
-    if not isinstance(value, (dict, list, tuple)):
+    if value is None:
         return None
+
     if isinstance(value, dict):
+        direct_card = value.get("inquiry_card")
+        if isinstance(direct_card, dict):
+            questions = direct_card.get("questions")
+            if isinstance(questions, list) and questions:
+                return direct_card
+
+        pending = value.get("pending_responses")
+        if isinstance(pending, list):
+            for item in pending:
+                if not isinstance(item, dict):
+                    continue
+                card = item.get("inquiry_card")
+                if isinstance(card, dict):
+                    questions = card.get("questions")
+                    if isinstance(questions, list) and questions:
+                        return card
+
         card = _extract_inquiry_card_from_interrupt(value)
         if card is not None:
             return card
@@ -287,8 +359,47 @@ def _extract_inquiry_card_from_any(value: Any) -> dict | None:
             if found is not None:
                 return found
         return None
-    for v in value:
-        found = _extract_inquiry_card_from_any(v)
+
+    if isinstance(value, (list, tuple)):
+        for v in value:
+            found = _extract_inquiry_card_from_any(v)
+            if found is not None:
+                return found
+        return None
+
+    data_attr = getattr(value, "data", None)
+    if data_attr is not None:
+        found = _extract_inquiry_card_from_any(data_attr)
+        if found is not None:
+            return found
+
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            found = _extract_inquiry_card_from_any(model_dump())
+            if found is not None:
+                return found
+        except Exception:
+            pass
+
+    as_dict = getattr(value, "dict", None)
+    if callable(as_dict):
+        try:
+            found = _extract_inquiry_card_from_any(as_dict())
+            if found is not None:
+                return found
+        except Exception:
+            pass
+
+    try:
+        return _extract_inquiry_card_from_any(vars(value))
+    except Exception:
+        return None
+
+
+def _extract_inquiry_card_from_chunks(chunks: list[Any]) -> dict | None:
+    for chunk in chunks:
+        found = _extract_inquiry_card_from_any(chunk)
         if found is not None:
             return found
     return None
@@ -361,6 +472,7 @@ async def chat_stream(
     
     user_id = current_user['user_id'] if current_user else None
     thread_id = await ensure_thread_exists(request.session_id, user_id)
+    onboarding_turn_count_before: int | None = None
 
     is_resume = bool(request.resume_payload) or bool(request.resume)
     if not is_resume and not (request.message or "").strip():
@@ -373,9 +485,15 @@ async def chat_stream(
     input_payload: Any
     if is_resume:
         from langgraph.types import Command
+        base_state = get_thread_state(thread_id)
+        if isinstance(base_state, dict):
+            onboarding_turn_count_before = int(base_state.get("onboarding_turn_count", 0) or 0)
+        # 所有 inquiry 都经由 interrupt() 暂停，统一用 Command(resume=...) 恢复
         input_payload = Command(resume=request.resume_payload)
     else:
         base_state = get_thread_state(thread_id)
+        if isinstance(base_state, dict):
+            onboarding_turn_count_before = int(base_state.get("onboarding_turn_count", 0) or 0)
 
         if base_state is None:
             logger.info("[Stream SDK] Creating new session (checkpointer empty)")
@@ -390,6 +508,7 @@ async def chat_stream(
             state["current_message_id"] = current_message_id
             state["debug_log"] = []
             state["inquiry_card"] = None
+            state["inquiry_answers"] = None
             state["pending_questions"] = []
             state["pending_responses"] = []
             state["last_response_for_continuity"] = None
@@ -400,6 +519,7 @@ async def chat_stream(
         """生成流式响应"""
         final_state = None
         interrupt_sent = False
+        merged_patch_keys: list[str] = []
         try:
             for chunk in run_assistant(thread_id, input_payload, stream_mode=request.stream_mode):
                 final_state = getattr(chunk, "data", None)
@@ -409,13 +529,38 @@ async def chat_stream(
 
                 if not interrupt_sent and isinstance(final_state, dict):
                     inquiry_card = _extract_inquiry_card_from_any(final_state)
+                    if inquiry_card is None:
+                        inquiry_card = _extract_inquiry_card_from_any(chunk)
                     if inquiry_card is not None:
                         interrupt_sent = True
                         yield f"data: {json.dumps({'type': 'interrupt', 'inquiry_card': inquiry_card}, ensure_ascii=False)}\n\n"
+
+                    tool_patch_log = final_state.get("tool_patch_log")
+                    if isinstance(tool_patch_log, list) and tool_patch_log:
+                        latest_patch = tool_patch_log[-1]
+                        if isinstance(latest_patch, dict):
+                            merged_patch_keys = sorted(str(k) for k in latest_patch.keys())
             
             # 后台运行维护任务
             if not interrupt_sent:
                 background_tasks.add_task(_run_maintenance_tasks_sdk, request.session_id, thread_id)
+
+            if isinstance(final_state, dict):
+                _append_debug_log(
+                    run_id="sdk-version-stream",
+                    hypothesis_id="S1",
+                    location="api/stream.py:chat_stream:final_state",
+                    message="Final stream state before completion",
+                    data={
+                        "is_resume": is_resume,
+                        "synthetic_resume": False,
+                        "has_interrupt": interrupt_sent,
+                        "merged_patch_keys": merged_patch_keys,
+                        "has_inquiry_answers": bool(final_state.get("inquiry_answers")),
+                        "onboarding_turn_count_before": onboarding_turn_count_before,
+                        "onboarding_turn_count_after": int(final_state.get("onboarding_turn_count", 0) or 0),
+                    },
+                )
                 
             yield "data: [DONE]\n\n"
         except Exception as e:

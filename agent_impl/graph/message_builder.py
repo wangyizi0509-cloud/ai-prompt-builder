@@ -73,7 +73,7 @@ def build_messages_for_model(
     
     Args:
         state: AgentState 状态对象
-        agent_name: Agent 名称（main_agent / status_agent / plan_agent / guide_agent）
+        agent_name: Agent 名称（main_agent / status_agent / plan_agent / guide_agent / onboarding_agent）
         current_input: 用户当前输入
     
     Returns:

@@ -9,7 +9,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 from langchain_core.runnables import RunnableConfig
 
-from graph.nodes.main_agent import _CURRENT_RUN_CONFIG, _build_all_tools
+from graph.nodes.main_agent import _build_all_tools
 
 
 def _pick_tool(tools, name: str):
@@ -35,14 +35,11 @@ def test_call_status_agent_tool_interrupt_then_resume():
     status_tool = _pick_tool(tools, "call_status_agent")
 
     def node(s: dict, config: RunnableConfig | None = None) -> dict:
-        cfg = dict(config or {})
-        cfg["checkpointer"] = checkpointer
-        token = _CURRENT_RUN_CONFIG.set(cfg)
-        try:
-            result = status_tool.invoke({"instruction": "[[TEST_INTERRUPT]] 请先问我一个问题再继续。"})
-            return {"tool_result": result}
-        finally:
-            _CURRENT_RUN_CONFIG.reset(token)
+        result = status_tool.invoke(
+            {"instruction": "[[TEST_INTERRUPT]] 请先问我一个问题再继续。"},
+            config=dict(config or {}),
+        )
+        return {"tool_result": result}
 
     graph = StateGraph(dict)
     graph.add_node("n", node)
@@ -78,14 +75,11 @@ def test_call_plan_agent_tool_interrupt_then_resume():
     plan_tool = _pick_tool(tools, "call_plan_agent")
 
     def node(s: dict, config: RunnableConfig | None = None) -> dict:
-        cfg = dict(config or {})
-        cfg["checkpointer"] = checkpointer
-        token = _CURRENT_RUN_CONFIG.set(cfg)
-        try:
-            result = plan_tool.invoke({"instruction": "[[TEST_INTERRUPT]] 请先问我一个问题再继续。"})
-            return {"tool_result": result}
-        finally:
-            _CURRENT_RUN_CONFIG.reset(token)
+        result = plan_tool.invoke(
+            {"instruction": "[[TEST_INTERRUPT]] 请先问我一个问题再继续。"},
+            config=dict(config or {}),
+        )
+        return {"tool_result": result}
 
     graph = StateGraph(dict)
     graph.add_node("n", node)
@@ -119,14 +113,11 @@ def test_call_guide_agent_tool_interrupt_then_resume():
     guide_tool = _pick_tool(tools, "call_guide_agent")
 
     def node(s: dict, config: RunnableConfig | None = None) -> dict:
-        cfg = dict(config or {})
-        cfg["checkpointer"] = checkpointer
-        token = _CURRENT_RUN_CONFIG.set(cfg)
-        try:
-            result = guide_tool.invoke({"instruction": "[[TEST_INTERRUPT]] 请先问我一个问题再继续。"})
-            return {"tool_result": result}
-        finally:
-            _CURRENT_RUN_CONFIG.reset(token)
+        result = guide_tool.invoke(
+            {"instruction": "[[TEST_INTERRUPT]] 请先问我一个问题再继续。"},
+            config=dict(config or {}),
+        )
+        return {"tool_result": result}
 
     graph = StateGraph(dict)
     graph.add_node("n", node)
