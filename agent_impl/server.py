@@ -47,6 +47,26 @@ logger.info("API routers loaded")
 app.include_router(api_router)
 
 
+def _resolve_port() -> int:
+    """Resolve runtime port from env (required on PaaS like Zeabur)."""
+    raw_port = os.getenv("PORT", "8000")
+    try:
+        return int(raw_port)
+    except (TypeError, ValueError):
+        logger.warning(f"Invalid PORT={raw_port!r}, fallback to 8000")
+        return 8000
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
+
+@app.get("/api/health")
+async def api_health_check():
+    return {"status": "healthy"}
+
+
 frontend_path = os.path.join(current_dir, "frontend")
 if os.path.exists(frontend_path):
     # iOS Safari can be quite aggressive about caching static assets during dev.
@@ -68,7 +88,8 @@ else:
     logger.warning(f"Frontend path not found: {frontend_path}")
 
 if __name__ == "__main__":
-    logger.info("Starting server on http://0.0.0.0:8000")
+    port = _resolve_port()
+    logger.info(f"Starting server on http://0.0.0.0:{port}")
     debug_mode = os.getenv("DEBUG_MODE", "0") == "1"
     if debug_mode:
         reload_enabled = os.getenv("UVICORN_RELOAD", "1") != "0"
@@ -77,7 +98,7 @@ if __name__ == "__main__":
             uvicorn.run(
                 "server:app",
                 host="0.0.0.0",
-                port=8000,
+                port=port,
                 reload=True,
                 reload_excludes=[
                     "logs/*",
@@ -89,6 +110,6 @@ if __name__ == "__main__":
             )
         else:
             logger.info("DEBUG_MODE=1: Running without auto-reload (UVICORN_RELOAD=0)")
-            uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
+            uvicorn.run(app, host="0.0.0.0", port=port, reload=False)
     else:
-        uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
+        uvicorn.run(app, host="0.0.0.0", port=port, reload=False)
