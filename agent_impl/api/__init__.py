@@ -12,9 +12,17 @@ def _load_router(module_name: str, env_flag: str | None = None):
         logger.info("Skipping %s router via %s=1", module_name, env_flag)
         return None
     logger.info("Loading %s router...", module_name)
-    module = importlib.import_module(f"{__name__}.{module_name}")
-    logger.info("Loaded %s router", module_name)
-    return module.router
+    try:
+        module = importlib.import_module(f"{__name__}.{module_name}")
+        logger.info("Loaded %s router", module_name)
+        return module.router
+    except Exception:
+        strict = os.getenv("STRICT_ROUTER_LOAD", "0") == "1"
+        logger.exception("Failed to load %s router (strict=%s)", module_name, strict)
+        if strict:
+            raise
+        # Fail-open in production to keep service bootable for health checks.
+        return None
 
 
 auth_router = _load_router("auth", "DISABLE_AUTH")
