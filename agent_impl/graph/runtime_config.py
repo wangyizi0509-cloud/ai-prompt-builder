@@ -75,3 +75,60 @@ def sanitize_nested_runtime_config(config: RunnableConfig | None) -> dict[str, A
         cfg.pop("configurable", None)
 
     return cfg
+
+
+def build_inner_agent_config(
+    config: RunnableConfig | None,
+    *,
+    namespace: str = "",
+) -> dict[str, Any]:
+    """Build a clean config for inner ``create_agent`` graphs.
+
+    When a subgraph node (e.g. ``status.run_node``) creates a *separate*
+    ``create_agent`` compiled graph and invokes it, the config from the outer
+    graph must be thoroughly cleaned.  ``sanitize_nested_runtime_config`` only
+    strips the checkpointer, but many other ``__pregel_*`` keys (``resuming``,
+    ``send``, ``read``, ``task_id``, …) and checkpoint-context keys
+    (``checkpoint_ns``, ``checkpoint_id``) leak through.  These can cause the
+    inner agent's tool-loop routing to malfunction — e.g. the model returns
+    ``finish_reason=tool_calls`` but the framework skips tool execution because
+    the contaminated ``__pregel_resuming`` flag or stale ``checkpoint_ns``
+    interferes with the inner graph's own execution.
+
+    This helper:
+    1. Sanitizes metadata (keeps only scalar values).
+    2. Preserves **only** ``thread_id`` in ``configurable`` (optionally
+       namespaced to avoid checkpoint collision with the outer graph).
+    3. Strips *all* ``__pregel_*`` and ``checkpoint_*`` keys so the inner
+       ``create_agent`` graph starts with a completely clean execution context.
+    4. Preserves top-level non-configurable keys (``callbacks``, ``tags``, etc.)
+       for LangSmith tracing.
+
+    Args:
+        config: The incoming ``RunnableConfig`` from the outer graph/node.
+        namespace: Optional suffix appended to ``thread_id`` (e.g.
+            ``"status_tool_loop"``) to create an isolated checkpoint space for
+            the inner agent.
+    """
+    cfg = sanitize_runtime_config(config)
+    cfg.pop("checkpointer", None)
+
+    raw_configurable = (config or {}).get("configurable")
+    if isinstance(raw_configurable, dict):
+        thread_id = raw_configurable.get("thread_id")
+    else:
+        thread_id = None
+
+    clean_configurable: dict[str, Any] = {}
+    if thread_id:
+        if namespace:
+            clean_configurable["thread_id"] = f"{thread_id}:{namespace}"
+        else:
+            clean_configurable["thread_id"] = thread_id
+
+    if clean_configurable:
+        cfg["configurable"] = clean_configurable
+    else:
+        cfg.pop("configurable", None)
+
+    return cfg

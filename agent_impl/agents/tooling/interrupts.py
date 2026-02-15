@@ -9,6 +9,9 @@ def _normalize_inquiry_questions(raw_questions: Any) -> list[dict[str, Any]]:
     used_ids: set[str] = set()
 
     for idx, raw_question in enumerate(raw_questions, start=1):
+        # LLM 有时把问题传成纯字符串（如 "1. 你的特长是什么？"），兜底转为 dict
+        if isinstance(raw_question, str) and raw_question.strip():
+            raw_question = {"question": raw_question.strip()}
         if not isinstance(raw_question, dict):
             continue
 

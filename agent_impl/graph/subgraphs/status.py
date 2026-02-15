@@ -19,8 +19,8 @@ from agents.tools.all_tools import build_all_tools_for_agent
 from config import get_llm
 from graph.message_builder import build_messages_for_model
 from graph.runtime_config import (
+    build_inner_agent_config,
     resolve_runtime_checkpointer,
-    sanitize_nested_runtime_config,
 )
 from graph.state import convert_message_to_dict, ensure_message_id
 
@@ -31,6 +31,9 @@ class StatusSubState(TypedDict, total=False):
     tool_patches: list[dict]
     final: dict
     state_patch: dict
+    # -- interrupt/resume bookkeeping --
+    _inner_interrupted: bool
+    _interrupt_payload: dict
 
 
 _compiled_cache: dict[int, Any] = {}
@@ -198,19 +201,27 @@ def _wrap_tools_for_patch_collection(tools: list[BaseTool], patches: list[dict])
     return wrapped
 
 
-def run_node(state: StatusSubState, config: RunnableConfig | None = None) -> dict[str, Any]:
-    task_spec = state.get("task_spec") if isinstance(state.get("task_spec"), dict) else {}
-    instruction = str(task_spec.get("instruction") or "")
-    private_messages = state.get("private_messages") if isinstance(state.get("private_messages"), list) else []
+def _create_inner_agent(
+    task_spec: dict, config: RunnableConfig | None = None
+) -> tuple[Any, dict[str, Any], list[dict]]:
+    """Build the inner create_agent graph, clean config, and a patches collector.
 
+    Returns ``(agent_graph, cfg, patches)`` — shared by *run* and
+    *handle_interrupt* so both use the same checkpointer + deterministic
+    thread_id, guaranteeing that ``Command(resume=...)`` targets the
+    original interrupt checkpoint.
+    """
     tools = _build_status_tools(task_spec)
     patches: list[dict] = []
     wrapped_tools = _wrap_tools_for_patch_collection(list(tools or []), patches)
 
-    cfg = sanitize_nested_runtime_config(config)
     rounds = max(1, int(os.getenv("SUBAGENT_TOOL_MAX_ROUNDS", "8")))
-    cfg["recursion_limit"] = max(25, rounds * 4 + 10)
     checkpointer = resolve_runtime_checkpointer(config)
+
+    # Strip ALL __pregel_* / checkpoint_* keys from the outer graph to
+    # prevent the inner agent's tool-loop from being disrupted.
+    cfg = build_inner_agent_config(config, namespace="status_tool_loop")
+    cfg["recursion_limit"] = max(25, rounds * 4 + 10)
 
     llm = get_llm(temperature=0.7, use_tools=True)
     agent_graph = create_agent(
@@ -220,6 +231,23 @@ def run_node(state: StatusSubState, config: RunnableConfig | None = None) -> dic
         name="status_tool_loop_agent",
         checkpointer=checkpointer,
     )
+    return agent_graph, cfg, patches
+
+
+def run_node(state: StatusSubState, config: RunnableConfig | None = None) -> dict[str, Any]:
+    """Run the inner agent graph.
+
+    If the inner graph interrupts, save interrupt info to state and return
+    *without* calling ``interrupt()`` — the separate ``handle_interrupt``
+    node will relay the interrupt to the outer graph.  This ensures that on
+    resume LangGraph re-executes only ``handle_interrupt`` (not this node),
+    so the model is never re-run.
+    """
+    task_spec = state.get("task_spec") if isinstance(state.get("task_spec"), dict) else {}
+    instruction = str(task_spec.get("instruction") or "")
+    private_messages = state.get("private_messages") if isinstance(state.get("private_messages"), list) else []
+
+    agent_graph, cfg, patches = _create_inner_agent(task_spec, config)
 
     if private_messages:
         messages_in: list[BaseMessage] = _dict_messages_to_lc(private_messages)
@@ -234,11 +262,49 @@ def run_node(state: StatusSubState, config: RunnableConfig | None = None) -> dic
         messages_in = list(initial_messages)
 
     result = agent_graph.invoke({"messages": messages_in}, config=cfg)
+
+    messages_out = list(result.get("messages") or []) if isinstance(result, dict) else []
+    final = messages_out[-1] if messages_out else AIMessage(content="")
+    final_text = str(getattr(final, "content", "") or "").strip()
+    normalized_private = _normalize_private_messages(messages_out)
+
+    update: dict[str, Any] = {
+        "private_messages": normalized_private,
+        "tool_patches": patches,
+        "final": {"text": final_text},
+    }
+
+    # Detect interrupt — save info to state, do NOT call interrupt() here.
     if isinstance(result, dict) and "__interrupt__" in result:
         interrupts = result.get("__interrupt__") or []
         payload = interrupts[0].value if interrupts else {}
-        answer = interrupt(payload)
-        result = agent_graph.invoke(Command(resume=answer), config=cfg)
+        update["_inner_interrupted"] = True
+        update["_interrupt_payload"] = payload
+
+    return update
+
+
+def handle_interrupt_node(state: StatusSubState, config: RunnableConfig | None = None) -> dict[str, Any]:
+    """Relay the inner graph's interrupt to the outer graph.
+
+    On first execution ``interrupt(payload)`` raises ``GraphInterrupt``,
+    pausing the outer subgraph.  On resume LangGraph re-executes *this*
+    node (not ``run``); ``interrupt()`` returns the user's answer via
+    index-matching, and ``Command(resume=answer)`` directly resumes the
+    inner graph from its **original** interrupt checkpoint.
+    """
+    payload = state.get("_interrupt_payload") if isinstance(state.get("_interrupt_payload"), dict) else {}
+
+    # First call  → raises GraphInterrupt (outer subgraph pauses)
+    # Resume call → returns user's answer immediately
+    answer = interrupt(payload)
+
+    # Reconstruct the inner agent (same checkpointer + deterministic thread_id)
+    task_spec = state.get("task_spec") if isinstance(state.get("task_spec"), dict) else {}
+    agent_graph, cfg, patches = _create_inner_agent(task_spec, config)
+
+    # Directly resume the inner graph from its original interrupt checkpoint
+    result = agent_graph.invoke(Command(resume=answer), config=cfg)
 
     messages_out = list(result.get("messages") or []) if isinstance(result, dict) else []
     final = messages_out[-1] if messages_out else AIMessage(content="")
@@ -249,7 +315,16 @@ def run_node(state: StatusSubState, config: RunnableConfig | None = None) -> dic
         "private_messages": normalized_private,
         "tool_patches": patches,
         "final": {"text": final_text},
+        "_inner_interrupted": False,
+        "_interrupt_payload": {},
     }
+
+
+def _route_after_run(state: StatusSubState) -> str:
+    """Route to handle_interrupt if the inner graph was interrupted, else finalize."""
+    if state.get("_inner_interrupted"):
+        return "handle_interrupt"
+    return "finalize"
 
 
 def finalize_node(state: StatusSubState, config: RunnableConfig | None = None) -> dict[str, Any]:
@@ -264,17 +339,26 @@ def cleanup_node(state: StatusSubState, config: RunnableConfig | None = None) ->
         updates["private_messages"] = []
     if state.get("tool_patches"):
         updates["tool_patches"] = []
+    if state.get("_inner_interrupted"):
+        updates["_inner_interrupted"] = False
+    if state.get("_interrupt_payload"):
+        updates["_interrupt_payload"] = {}
     return updates
 
 
 def create_status_subgraph() -> StateGraph:
     builder = StateGraph(StatusSubState)
     builder.add_node("run", run_node)
+    builder.add_node("handle_interrupt", handle_interrupt_node)
     builder.add_node("finalize", finalize_node)
     builder.add_node("cleanup", cleanup_node)
 
     builder.add_edge(START, "run")
-    builder.add_edge("run", "finalize")
+    builder.add_conditional_edges("run", _route_after_run, {
+        "handle_interrupt": "handle_interrupt",
+        "finalize": "finalize",
+    })
+    builder.add_edge("handle_interrupt", "finalize")
     builder.add_edge("finalize", "cleanup")
     builder.add_edge("cleanup", END)
     return builder

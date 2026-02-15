@@ -37,6 +37,7 @@ from graph.state import AgentState
 from graph.message_builder import build_messages_for_model
 from config import get_llm
 from graph.runtime_config import (
+    build_inner_agent_config,
     resolve_runtime_checkpointer,
     sanitize_nested_runtime_config,
     sanitize_runtime_config,
@@ -196,6 +197,22 @@ def _wrap_tools_for_patch_collection(tools: list[BaseTool], patches: list[dict])
     return wrapped
 
 
+def _inquiry_card_from_interrupt(interrupts: Any) -> dict[str, Any] | None:
+    """从 __interrupt__ 列表中取出 inquiry_card，供 state 与前端展示。支持 value 为 {inquiry_card: card} 或直接为 card。"""
+    if not isinstance(interrupts, list) or not interrupts:
+        return None
+    first = interrupts[0]
+    value = first.get("value") if isinstance(first, dict) else getattr(first, "value", None)
+    if not isinstance(value, dict):
+        return None
+    inner = value.get("inquiry_card") if isinstance(value.get("inquiry_card"), dict) else None
+    if inner is not None and isinstance(inner.get("questions"), list) and inner["questions"]:
+        return inner
+    if isinstance(value.get("questions"), list) and value["questions"]:
+        return value
+    return None
+
+
 def _run_langchain_supervisor(
     *,
     llm: Any,
@@ -206,9 +223,12 @@ def _run_langchain_supervisor(
 ) -> dict[str, Any]:
     patches: list[dict] = []
     wrapped_tools = _wrap_tools_for_patch_collection(list(tools or []), patches)
-    cfg = sanitize_nested_runtime_config(config)
 
     checkpointer = resolve_runtime_checkpointer(config)
+
+    # Build a clean config that strips ALL __pregel_* / checkpoint_* keys
+    # to prevent the inner agent's tool-loop from being disrupted.
+    cfg = build_inner_agent_config(config, namespace="main_tool_loop")
 
     agent_graph = create_agent(model=llm, tools=wrapped_tools, system_prompt=None, name="tool_loop_agent", checkpointer=checkpointer)
 
@@ -440,4 +460,8 @@ def main_agent_node(state: AgentState, config: RunnableConfig | None = None) -> 
     )
     if "__interrupt__" in supervisor:
         out["__interrupt__"] = supervisor["__interrupt__"]
+        # 让前端/API 能从 state 直接读到 inquiry_card 并展示（子图 ask_human 触发的 interrupt 会透传到这里）
+        _card = _inquiry_card_from_interrupt(supervisor["__interrupt__"])
+        if _card is not None:
+            out["inquiry_card"] = _card
     return out
