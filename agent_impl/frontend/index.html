@@ -3511,7 +3511,7 @@
                                 // 4. 填充状态看板
                                 if (historyData.state) {
                                     console.log('[History] Restoring dashboard state');
-                                    processStateUpdate(historyData.state);
+                                    processStateUpdate(historyData.state, { isHistoryRestore: true });
                                 }
                                 
                                 await scrollToBottom();
@@ -4670,7 +4670,7 @@
                 };
 
                 // Logic for detecting changes
-                const processStateUpdate = (newState) => {
+                const processStateUpdate = (newState, options = {}) => {
                     if (!newState) return;
 
                     // ====== Normalize: extract from layer2_memory if top-level fields are missing ======
@@ -4731,6 +4731,16 @@
                         });
                         hasUpdates = true;
                     };
+
+                    // When restoring from history, auto-complete guide to avoid re-gating
+                    // already-generated data. The guide was already shown in the original session;
+                    // re-gating on reload (especially across browsers / cleared storage) would
+                    // hide existing outputs and confuse the user.
+                    if (options.isHistoryRestore && hasReadyOutputs && !guideCompleted.value) {
+                        guideCompleted.value = true;
+                        localStorage.setItem('crusheGuideCompleted', '1');
+                        console.log('[History] Auto-completing guide — outputs already exist in restored state');
+                    }
 
                     if (isFirstReportPhase && hasReadyOutputs && !guideCompleted.value) {
                         pendingGatedOutputs.value = {
