@@ -486,45 +486,10 @@ async def chat_stream(
     if is_resume:
         from langgraph.types import Command
         base_state = get_thread_state(thread_id)
-        synthetic_resume = False
         if isinstance(base_state, dict):
             onboarding_turn_count_before = int(base_state.get("onboarding_turn_count", 0) or 0)
-        state_inquiry_card = base_state.get("inquiry_card") if isinstance(base_state, dict) else None
-        if isinstance(base_state, dict) and _is_valid_inquiry_card(state_inquiry_card):
-            synthetic_resume = True
-            answers = _extract_answers_from_resume_payload(request.resume_payload)
-            resume_message = _build_resume_message_from_card(state_inquiry_card, answers)
-            current_message_id = str(uuid.uuid4())
-            state = dict(base_state)
-            state["user_message"] = resume_message
-            state["current_message_id"] = current_message_id
-            state["debug_log"] = []
-            state["inquiry_answers"] = request.resume_payload
-            state["inquiry_card"] = None
-            state["pending_questions"] = []
-            state["pending_responses"] = []
-            state["last_response_for_continuity"] = None
-
-            collected_info = state.get("collected_info") if isinstance(state.get("collected_info"), dict) else {}
-            raw_inputs = list(collected_info.get("raw_inputs") or [])
-            if resume_message and resume_message not in raw_inputs:
-                raw_inputs.append(resume_message)
-            merged_collected = {
-                **collected_info,
-                "raw_inputs": raw_inputs,
-                "user_profile": collected_info.get("user_profile") if isinstance(collected_info.get("user_profile"), dict) else {},
-                "crush_profile": collected_info.get("crush_profile") if isinstance(collected_info.get("crush_profile"), dict) else {},
-                "pain_points": collected_info.get("pain_points") if isinstance(collected_info.get("pain_points"), list) else [],
-            }
-            state["collected_info"] = merged_collected
-
-            if answers:
-                state["onboarding_turn_count"] = int(state.get("onboarding_turn_count", 0) or 0) + 1
-                state["onboarding_last_answer_fingerprint"] = _answers_fingerprint(answers)
-
-            input_payload = state
-        else:
-            input_payload = Command(resume=request.resume_payload)
+        # 所有 inquiry 都经由 interrupt() 暂停，统一用 Command(resume=...) 恢复
+        input_payload = Command(resume=request.resume_payload)
     else:
         base_state = get_thread_state(thread_id)
         if isinstance(base_state, dict):
@@ -588,7 +553,7 @@ async def chat_stream(
                     message="Final stream state before completion",
                     data={
                         "is_resume": is_resume,
-                        "synthetic_resume": synthetic_resume if is_resume else False,
+                        "synthetic_resume": False,
                         "has_interrupt": interrupt_sent,
                         "merged_patch_keys": merged_patch_keys,
                         "has_inquiry_answers": bool(final_state.get("inquiry_answers")),
