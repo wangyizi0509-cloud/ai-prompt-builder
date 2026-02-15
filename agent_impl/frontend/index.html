@@ -4514,7 +4514,7 @@
 
                 const getTaskCardSectionLabel = (taskType, slot) => {
                     const map = {
-                        inquiry: { a: '补充目标', b: '操作说明' },
+                        inquiry: { a: '了解目的', b: '问题预览' },
                         status: { a: '现状分析标题', b: '现状分析内容' },
                         strategy: { a: '规划标题', b: '分析内容' },
                         plan: { a: '任务目标', b: '执行步骤' },
@@ -4545,7 +4545,18 @@
                     const type = task?.taskType;
 
                     if (type === 'inquiry') {
-                        if (slot === 'a') return '补充必要信息';
+                        const data = task?.inquiryData;
+                        if (slot === 'a') {
+                            // 优先使用 intro，其次用 reasoning，最后兜底
+                            return (data?.intro || data?.reasoning || '补充必要信息').trim();
+                        }
+                        // slot b: 展示问题列表摘要
+                        const questions = data?.questions || [];
+                        if (questions.length > 0) {
+                            const preview = questions.slice(0, 3).map((q, i) => `${i + 1}. ${q}`).join('；');
+                            const suffix = questions.length > 3 ? `…等${questions.length}个问题` : '';
+                            return preview + suffix;
+                        }
                         return '点击填写补充信息，完善后我再继续分析';
                     }
 
@@ -4661,6 +4672,29 @@
                 // Logic for detecting changes
                 const processStateUpdate = (newState) => {
                     if (!newState) return;
+
+                    // ====== Normalize: extract from layer2_memory if top-level fields are missing ======
+                    // Backend stores plan/status/guide data inside layer2_memory (structured objects).
+                    // The frontend expects flat string fields at the top level.
+                    // Extract and set them here to ensure the UI always has data to render.
+                    const layer2 = newState.layer2_memory;
+                    if (layer2 && typeof layer2 === 'object') {
+                        // status_report: extract from current_status_report.report_content
+                        if (!newState.status_report && layer2.current_status_report) {
+                            const reportItem = layer2.current_status_report;
+                            newState.status_report = reportItem.report_content || reportItem.content || '';
+                        }
+                        // action_plan: extract from current_action_plan.plan_content
+                        if (!newState.action_plan && layer2.current_action_plan) {
+                            const planItem = layer2.current_action_plan;
+                            newState.action_plan = planItem.plan_content || planItem.content || '';
+                        }
+                        // action_guides: extract from layer2_memory.action_guides
+                        if ((!newState.action_guides || !Array.isArray(newState.action_guides) || newState.action_guides.length === 0)
+                            && Array.isArray(layer2.action_guides) && layer2.action_guides.length > 0) {
+                            newState.action_guides = layer2.action_guides;
+                        }
+                    }
                     
                     const oldState = state.value;
                     let hasUpdates = false;
@@ -4834,7 +4868,12 @@
                                 taskState: 'new',
                                 label: 'QUESTION',
                                 title: '需要补充信息',
-                                desc: nextCard.intro || '为了更好地制定策略，请回答几个问题'
+                                desc: nextCard.intro || '为了更好地制定策略，请回答几个问题',
+                                inquiryData: {
+                                    intro: nextCard.intro || '',
+                                    reasoning: nextCard.reasoning || '',
+                                    questions: (nextCard.questions || []).map(q => q.question || ''),
+                                },
                             });
                             hasUpdates = true;
                         }
@@ -5822,6 +5861,7 @@
                     inquiryAnswers.value = initialAnswers;
 
                     // 3. Push system task card
+                    const obCard = inquiryCard.value;
                     messages.value.push({
                         role: 'system_task',
                         taskType: 'inquiry',
@@ -5830,7 +5870,12 @@
                         disabled: false,
                         label: 'ONBOARDING',
                         title: '完善基础信息',
-                        desc: '点击填写补充信息，完善后我再继续分析'
+                        desc: '点击填写补充信息，完善后我再继续分析',
+                        inquiryData: {
+                            intro: obCard?.intro || '完善基础信息，开启专属攻略',
+                            reasoning: '',
+                            questions: (obCard?.questions || []).map(q => q.question || ''),
+                        },
                     });
                     await scrollToBottom();
                 };

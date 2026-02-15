@@ -23,6 +23,7 @@ from graph.runtime_config import (
     resolve_runtime_checkpointer,
 )
 from graph.state import convert_message_to_dict, ensure_message_id
+from graph.tools.submit_tools import submit_tools_state_context
 
 
 class GuideSubState(TypedDict, total=False):
@@ -237,13 +238,13 @@ def run_node(state: GuideSubState, config: RunnableConfig | None = None) -> dict
     task_spec = state.get("task_spec") if isinstance(state.get("task_spec"), dict) else {}
     instruction = str(task_spec.get("instruction") or "")
     private_messages = state.get("private_messages") if isinstance(state.get("private_messages"), list) else []
+    parent_state = task_spec.get("parent_state") if isinstance(task_spec.get("parent_state"), dict) else {}
 
     agent_graph, cfg, patches = _create_inner_agent(task_spec, config)
 
     if private_messages:
         messages_in: list[BaseMessage] = _dict_messages_to_lc(private_messages)
     else:
-        parent_state = task_spec.get("parent_state") if isinstance(task_spec.get("parent_state"), dict) else {}
         initial_messages = build_messages_for_model(
             state=parent_state,
             agent_name="guide_agent",
@@ -252,7 +253,8 @@ def run_node(state: GuideSubState, config: RunnableConfig | None = None) -> dict
         initial_messages = _truncate_messages(initial_messages, max_total=25)
         messages_in = list(initial_messages)
 
-    result = agent_graph.invoke({"messages": messages_in}, config=cfg)
+    with submit_tools_state_context(parent_state):
+        result = agent_graph.invoke({"messages": messages_in}, config=cfg)
 
     messages_out = list(result.get("messages") or []) if isinstance(result, dict) else []
     final = messages_out[-1] if messages_out else AIMessage(content="")
@@ -287,9 +289,11 @@ def handle_interrupt_node(state: GuideSubState, config: RunnableConfig | None = 
     answer = interrupt(payload)
 
     task_spec = state.get("task_spec") if isinstance(state.get("task_spec"), dict) else {}
+    parent_state = task_spec.get("parent_state") if isinstance(task_spec.get("parent_state"), dict) else {}
     agent_graph, cfg, patches = _create_inner_agent(task_spec, config)
 
-    result = agent_graph.invoke(Command(resume=answer), config=cfg)
+    with submit_tools_state_context(parent_state):
+        result = agent_graph.invoke(Command(resume=answer), config=cfg)
 
     messages_out = list(result.get("messages") or []) if isinstance(result, dict) else []
     final = messages_out[-1] if messages_out else AIMessage(content="")
