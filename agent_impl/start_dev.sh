@@ -21,14 +21,20 @@ fi
 # 默认使用开发模式端口
 PORT=${LANGGRAPH_PORT:-2024}
 
+# 创建日志目录
+LOG_DIR="logs"
+mkdir -p "$LOG_DIR"
+LANGGRAPH_LOG="$LOG_DIR/langgraph_dev.log"
+
 echo "🚀 启动 LangGraph 服务 (Dev Mode)..."
+echo "📝 LangGraph 日志将保存到: $LANGGRAPH_LOG"
 export PATH="$PATH:$(python3 -m site --user-base)/bin"
 LANGGRAPH_PID=""
 if [ -n "$RUN_PREFIX" ] || command -v langgraph >/dev/null 2>&1; then
   if [ -n "$RUN_PREFIX" ]; then
-    $RUN_PREFIX langgraph dev --port $PORT --no-browser &
+    $RUN_PREFIX langgraph dev --port $PORT --no-browser >> "$LANGGRAPH_LOG" 2>&1 &
   else
-    langgraph dev --port $PORT --no-browser &
+    langgraph dev --port $PORT --no-browser >> "$LANGGRAPH_LOG" 2>&1 &
   fi
   LANGGRAPH_PID=$!
 else
