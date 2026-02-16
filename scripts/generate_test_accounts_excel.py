@@ -3,7 +3,6 @@ import asyncio
 import datetime
 import os
 import secrets
-import string
 import sys
 from dataclasses import dataclass
 
@@ -45,16 +44,8 @@ def _ensure_parent_dir(path: str) -> None:
 
 
 def _gen_unique_password() -> str:
-    """生成 16 位随机密码（大小写+数字+符号），不可预测"""
-    alphabet = string.ascii_letters + string.digits + "!@#$%&*"
-    while True:
-        pwd = "".join(secrets.choice(alphabet) for _ in range(16))
-        if (
-            any(c.isupper() for c in pwd)
-            and any(c.islower() for c in pwd)
-            and any(c.isdigit() for c in pwd)
-        ):
-            return pwd
+    """生成 8 位随机数字密码，不可预测"""
+    return "".join(secrets.choice("0123456789") for _ in range(8))
 
 
 def _make_accounts_offline(
@@ -273,7 +264,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--unique-passwords",
         action="store_true",
-        help="每个账号使用 16 位随机密码（不可预测），适合分发给不同用户",
+        help="每个账号使用 8 位随机数字密码，适合分发给不同用户",
     )
     p.add_argument(
         "--mode",
