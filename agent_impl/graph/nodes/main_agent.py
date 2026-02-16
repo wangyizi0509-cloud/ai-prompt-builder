@@ -452,6 +452,24 @@ def main_agent_node(state: AgentState, config: RunnableConfig | None = None) -> 
     if final_content:
         pending_responses.append({"from": "main_agent", "content": final_content, "phase": "final"})
 
+    # 当 tool loop 被 interrupt 中断且没有最终文本回复时，
+    # 从 new_messages 中提取中断前已产出的 AI 文本回复，
+    # 确保 submit_status_report 等工具完成后的总结不会因后续 interrupt 而丢失。
+    has_interrupt = "__interrupt__" in supervisor
+    if has_interrupt and not pending_responses:
+        for msg in reversed(supervisor["new_messages"]):
+            if isinstance(msg, AIMessage):
+                pre_text = (msg.content or "").strip()
+                if pre_text:
+                    pending_responses.append({
+                        "from": "main_agent",
+                        "content": pre_text,
+                        "phase": "pre_interrupt",
+                    })
+                    if not final_content:
+                        final_content = pre_text
+                    break
+
     out: dict[str, Any] = dict(merged_tool_patch)
     out.update(
         {
@@ -462,7 +480,7 @@ def main_agent_node(state: AgentState, config: RunnableConfig | None = None) -> 
             "result_summary": None,
         }
     )
-    if "__interrupt__" in supervisor:
+    if has_interrupt:
         out["__interrupt__"] = supervisor["__interrupt__"]
         # 让前端/API 能从 state 直接读到 inquiry_card 并展示（子图 ask_human 触发的 interrupt 会透传到这里）
         _card = _inquiry_card_from_interrupt(supervisor["__interrupt__"])
