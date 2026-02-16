@@ -3875,9 +3875,21 @@
                                         both_info: user_context.both_info || {},
                                     },
                                     layer2_working: {
-                                        status_report: state.status_report,
-                                        action_plan: state.action_plan,
-                                        action_guides: state.action_guides || [],
+                                        status_report: (
+                                            layer2_memory.current_status_report
+                                                ? (layer2_memory.current_status_report.report_content || '')
+                                                : (state.status_report || null)
+                                        ),
+                                        action_plan: (
+                                            layer2_memory.current_action_plan
+                                                ? (layer2_memory.current_action_plan.plan_content || '')
+                                                : (state.action_plan || null)
+                                        ),
+                                        action_guides: (
+                                            (layer2_memory.action_guides && layer2_memory.action_guides.length > 0)
+                                                ? layer2_memory.action_guides
+                                                : (state.action_guides || [])
+                                        ),
                                         recent_messages: (state.messages || []).slice(-10),
                                     },
                                     layer3_conversation: {
@@ -4248,6 +4260,8 @@
                 
                 // 上传截图
                 const uploadScreenshot = async (file, screenshotType) => {
+                    const t0 = performance.now();
+                    console.log(`[uploadScreenshot] 开始: file=${file.name}, size=${file.size}, type=${file.type}, screenshotType=${screenshotType}`);
                     try {
                         const formData = new FormData();
                         formData.append('file', file);
@@ -4261,12 +4275,15 @@
                             },
                             body: formData
                         });
+                        const elapsed = (performance.now() - t0).toFixed(0);
+                        console.log(`[uploadScreenshot] 响应: status=${response.status}, elapsed=${elapsed}ms`);
                         
                         let result = {};
                         try {
                             result = await response.json();
+                            console.log(`[uploadScreenshot] 响应体: success=${result.success}, text_len=${(result.text || '').length}, error=${result.error || 'none'}, image_url=${result.image_url || 'none'}`);
                         } catch (e) {
-                            console.warn('Screenshot upload json parse failed:', e);
+                            console.error('[uploadScreenshot] 响应体 JSON 解析失败:', e, 'status=', response.status);
                         }
                         
                         if (response.ok && result.success) {
@@ -4279,6 +4296,7 @@
                         }
 
                         const errorMessage = result.error || result.detail || '上传失败，请重试';
+                        console.error(`[uploadScreenshot] 失败: status=${response.status}, error=${errorMessage}`);
                         return {
                             success: false,
                             error: errorMessage,
@@ -4287,7 +4305,8 @@
                             screenshotType,
                         };
                     } catch (error) {
-                        console.error('Screenshot upload error:', error);
+                        const elapsed = (performance.now() - t0).toFixed(0);
+                        console.error(`[uploadScreenshot] 网络异常: elapsed=${elapsed}ms`, error);
                         const errorMessage = '网络错误，请重试';
                         return {
                             success: false,
@@ -4866,25 +4885,25 @@
                 const processStateUpdate = (newState, options = {}) => {
                     if (!newState) return;
 
-                    // ====== Normalize: extract from layer2_memory if top-level fields are missing ======
+                    // ====== Normalize: ALWAYS extract from layer2_memory (authoritative source) ======
                     // Backend stores plan/status/guide data inside layer2_memory (structured objects).
                     // The frontend expects flat string fields at the top level.
-                    // Extract and set them here to ensure the UI always has data to render.
+                    // Always prefer layer2_memory over any stale top-level fields to ensure
+                    // updates are correctly reflected.
                     const layer2 = newState.layer2_memory;
                     if (layer2 && typeof layer2 === 'object') {
-                        // status_report: extract from current_status_report.report_content
-                        if (!newState.status_report && layer2.current_status_report) {
+                        // status_report: always extract from current_status_report.report_content
+                        if (layer2.current_status_report) {
                             const reportItem = layer2.current_status_report;
                             newState.status_report = reportItem.report_content || reportItem.content || '';
                         }
-                        // action_plan: extract from current_action_plan.plan_content
-                        if (!newState.action_plan && layer2.current_action_plan) {
+                        // action_plan: always extract from current_action_plan.plan_content
+                        if (layer2.current_action_plan) {
                             const planItem = layer2.current_action_plan;
                             newState.action_plan = planItem.plan_content || planItem.content || '';
                         }
-                        // action_guides: extract from layer2_memory.action_guides
-                        if ((!newState.action_guides || !Array.isArray(newState.action_guides) || newState.action_guides.length === 0)
-                            && Array.isArray(layer2.action_guides) && layer2.action_guides.length > 0) {
+                        // action_guides: always extract from layer2_memory.action_guides
+                        if (Array.isArray(layer2.action_guides) && layer2.action_guides.length > 0) {
                             newState.action_guides = layer2.action_guides;
                         }
                     }
@@ -5272,6 +5291,7 @@
 
                         // 阶段2：后台并行 OCR，拼接最终输入后一次性发送到 /api/chat
                         isLoading.value = true;
+                        console.log('[submitInquiry] 阶段2开始: 启动截图上传与 OCR');
 
                         const screenshotUploadPromises = new Map();
                         for (const [qIndex, q] of questions.entries()) {
@@ -5279,10 +5299,12 @@
                             const qKey = getInquiryQuestionUiKey(q, qIndex);
                             const answer = snapshotAnswers[qKey];
                             const screenshotItems = getScreenshotItemsFromAnswer(answer);
+                            console.log(`[submitInquiry] 截图题 qKey=${qKey}: ${screenshotItems.length} 张截图`);
                             if (screenshotItems.length > 0) {
-                                const uploadPromises = screenshotItems.map((item) => {
+                                const uploadPromises = screenshotItems.map((item, idx) => {
                                     const existedText = item?.ocrText || item?.text || '';
                                     if (existedText) {
+                                        console.log(`[submitInquiry] 第${idx + 1}张: 已有 OCR 文本 (len=${existedText.length})，跳过上传`);
                                         return Promise.resolve({
                                             success: true,
                                             text: existedText,
@@ -5291,8 +5313,10 @@
                                         });
                                     }
                                     if (item?.file) {
+                                        console.log(`[submitInquiry] 第${idx + 1}张: 开始上传, file=${item.file.name}, size=${item.file.size}, type=${item.file.type}`);
                                         return uploadScreenshot(item.file, q.type);
                                     }
+                                    console.warn(`[submitInquiry] 第${idx + 1}张: 缺少 file 对象, item.stage=${item?.stage}, item.id=${item?.id}`);
                                     return Promise.resolve({
                                         success: false,
                                         error: '缺少图片文件',
@@ -5343,18 +5367,31 @@
                                 for (let idx = 0; idx < screenshotItems.length; idx++) {
                                     const item = screenshotItems[idx];
                                     let ocrText = item?.ocrText || item?.text || '';
+                                    console.log(`[submitInquiry] 拼接第${idx + 1}张: item.ocrText=${!!item?.ocrText}, item.text=${!!item?.text}, 初始ocrText长度=${ocrText.length}`);
 
                                     if (!ocrText && uploadPromises[idx]) {
-                                        const uploadResult = await uploadPromises[idx];
-                                        if (uploadResult?.success) {
-                                            ocrText = uploadResult.text || '';
+                                        console.log(`[submitInquiry] 第${idx + 1}张: 等待上传 promise...`);
+                                        try {
+                                            const uploadResult = await uploadPromises[idx];
+                                            console.log(`[submitInquiry] 第${idx + 1}张: 上传结果 success=${uploadResult?.success}, text_len=${(uploadResult?.text || '').length}, error=${uploadResult?.error || 'none'}`);
+                                            if (uploadResult?.success) {
+                                                ocrText = uploadResult.text || '';
+                                            } else {
+                                                console.error(`[submitInquiry] 第${idx + 1}张: 上传失败! error=${uploadResult?.error}`);
+                                            }
+                                        } catch (promiseErr) {
+                                            console.error(`[submitInquiry] 第${idx + 1}张: promise 异常`, promiseErr);
                                         }
+                                    } else if (!ocrText) {
+                                        console.warn(`[submitInquiry] 第${idx + 1}张: 无 ocrText 且无对应 uploadPromise (uploadPromises.length=${uploadPromises.length})`);
                                     }
 
                                     if (ocrText) {
                                         ocrBlocks.push(`第${idx + 1}张：\n${ocrText}`);
+                                        console.log(`[submitInquiry] 第${idx + 1}张: OCR 成功, text_len=${ocrText.length}`);
                                     } else {
                                         ocrBlocks.push(`第${idx + 1}张：截图解析失败，用户已上传图片`);
+                                        console.error(`[submitInquiry] 第${idx + 1}张: ⚠️ OCR 最终为空 -> 截图解析失败`);
                                     }
                                 }
 

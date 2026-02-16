@@ -216,12 +216,19 @@ class ImageProcessor:
         base_url: Optional[str] = None,
     ) -> dict:
         """调用多模态接口，包含基础重试，规避瞬时连接抖动。"""
+        import time
         request_api_key = api_key or self.api_key
         request_base_url = (base_url or self.base_url or "").rstrip("/")
         if not request_api_key:
             raise ValueError("API Key 未配置")
         if not request_base_url:
             raise ValueError("BASE URL 未配置")
+
+        model_name = payload.get("model", "unknown")
+        logger.info(
+            "[vision-api] 准备请求: model=%s, base_url=%s, api_key=%s..., timeout=%.0fs",
+            model_name, request_base_url, (request_api_key or "")[:8], self.timeout_seconds,
+        )
 
         headers = {
             "Authorization": f"Bearer {request_api_key}",
@@ -232,26 +239,43 @@ class ImageProcessor:
 
         last_exc: Exception | None = None
         for attempt in range(1, max_attempts + 1):
+            t_start = time.monotonic()
             try:
                 client = self._get_http_client()
-                response = await client.post(
-                    f"{request_base_url}/chat/completions",
-                    json=payload,
-                    headers=headers,
+                url = f"{request_base_url}/chat/completions"
+                logger.info("[vision-api] 发送请求 attempt=%d/%d: %s", attempt, max_attempts, url)
+                response = await client.post(url, json=payload, headers=headers)
+                elapsed = (time.monotonic() - t_start) * 1000
+                logger.info(
+                    "[vision-api] 收到响应 attempt=%d: status=%d, elapsed=%.1fms, content_length=%s",
+                    attempt, response.status_code, elapsed,
+                    response.headers.get("content-length", "unknown"),
                 )
                 if response.status_code in retryable_status_codes and attempt < max_attempts:
+                    logger.warning("[vision-api] 可重试状态码 %d，等待后重试", response.status_code)
                     await asyncio.sleep(min(1.5, 0.4 * attempt))
                     continue
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPStatusError as e:
+                elapsed = (time.monotonic() - t_start) * 1000
                 last_exc = e
+                resp_text = e.response.text[:500] if e.response else "N/A"
+                logger.error(
+                    "[vision-api] HTTP 错误 attempt=%d: status=%d, elapsed=%.1fms, body=%s",
+                    attempt, e.response.status_code, elapsed, resp_text,
+                )
                 if e.response.status_code in retryable_status_codes and attempt < max_attempts:
                     await asyncio.sleep(min(1.5, 0.4 * attempt))
                     continue
                 raise
             except (httpx.TransportError, httpx.TimeoutException) as e:
+                elapsed = (time.monotonic() - t_start) * 1000
                 last_exc = e
+                logger.error(
+                    "[vision-api] 传输/超时错误 attempt=%d: %s: %s, elapsed=%.1fms",
+                    attempt, type(e).__name__, e, elapsed,
+                )
                 if attempt < max_attempts:
                     await asyncio.sleep(min(1.5, 0.4 * attempt))
                     continue
@@ -427,21 +451,19 @@ class ImageProcessor:
     ) -> dict:
         """
         处理图片，返回结构化文本
-        
-        Args:
-            image_bytes: 图片的字节数据
-            screenshot_type: 截图类型，决定使用哪个 prompt
-            additional_context: 额外的上下文信息（可选）
-        
-        Returns:
-            {
-                "success": bool,
-                "text": str,  # 提取的文本内容
-                "screenshot_type": str,
-                "error": str | None
-            }
         """
+        import time
+        t0 = time.monotonic()
+        logger.info(
+            "[process_image] 开始: type=%s, image_size=%d bytes, context=%s, "
+            "ocr_model=%s, ocr_base_url=%s, ocr_api_key=%s...",
+            screenshot_type, len(image_bytes),
+            repr(additional_context[:80]) if additional_context else None,
+            self.ocr_model, self.ocr_base_url, (self.ocr_api_key or "")[:8],
+        )
+
         if not self.ocr_api_key:
+            logger.error("[process_image] OCR API Key 未配置，直接返回失败")
             return {
                 "success": False,
                 "text": "",
@@ -450,16 +472,22 @@ class ImageProcessor:
             }
         
         try:
-            # 构建 prompt
             base_prompt = self._get_prompt_for_type(screenshot_type)
+            logger.info("[process_image] 加载 prompt: type=%s, prompt_len=%d", screenshot_type, len(base_prompt))
             if additional_context:
                 base_prompt = f"{base_prompt}\n\n【用户补充说明】\n{additional_context}"
             
-            # 构建请求
             resized_bytes = self._maybe_resize_for_ocr(image_bytes)
+            logger.info(
+                "[process_image] 缩图完成: original=%d bytes -> resized=%d bytes",
+                len(image_bytes), len(resized_bytes),
+            )
             image_data_url = self._build_image_data_url(resized_bytes)
+            logger.info(
+                "[process_image] data_url 构建完成: mime=%s, url_len=%d",
+                self._guess_mime_type(resized_bytes), len(image_data_url),
+            )
             
-            # 豆包 Vision API 兼容 OpenAI 格式
             payload = {
                 "model": self.ocr_model,
                 "messages": [
@@ -481,21 +509,32 @@ class ImageProcessor:
                 ],
                 "max_tokens": self.ocr_max_tokens
             }
+            logger.info("[process_image] 准备调用 vision API: max_tokens=%d", self.ocr_max_tokens)
+
             result = await self._post_chat_completion(
                 self._apply_generation_controls(payload),
                 api_key=self.ocr_api_key,
                 base_url=self.ocr_base_url,
             )
             
-            # 提取文本
             choices = result.get("choices")
             if not choices or not isinstance(choices, list):
-                raise ValueError("豆包返回格式异常: 缺少 choices")
+                logger.error("[process_image] API 返回格式异常: 缺少 choices, raw_keys=%s", list(result.keys()))
+                raise ValueError("返回格式异常: 缺少 choices")
             message = choices[0].get("message") if isinstance(choices[0], dict) else None
             text = message.get("content") if isinstance(message, dict) else None
             if not isinstance(text, str):
-                raise ValueError("豆包返回格式异常: message.content 非字符串")
+                logger.error(
+                    "[process_image] API 返回 content 非字符串: type=%s, message_keys=%s",
+                    type(text).__name__, list(message.keys()) if isinstance(message, dict) else None,
+                )
+                raise ValueError("返回格式异常: message.content 非字符串")
             
+            elapsed = (time.monotonic() - t0) * 1000
+            logger.info(
+                "[process_image] 成功: text_len=%d, elapsed=%.1fms, preview=%r",
+                len(text), elapsed, text[:200],
+            )
             return {
                 "success": True,
                 "text": text,
@@ -504,6 +543,12 @@ class ImageProcessor:
             }
             
         except httpx.HTTPStatusError as e:
+            elapsed = (time.monotonic() - t0) * 1000
+            resp_text = e.response.text[:500] if e.response else "N/A"
+            logger.error(
+                "[process_image] HTTP 错误: status=%d, elapsed=%.1fms, body=%s",
+                e.response.status_code, elapsed, resp_text,
+            )
             return {
                 "success": False,
                 "text": "",
@@ -511,9 +556,13 @@ class ImageProcessor:
                 "error": f"API 请求失败: {e.response.status_code} - {e.response.text}"
             }
         except Exception as e:
+            elapsed = (time.monotonic() - t0) * 1000
             err_text = str(e).strip()
             if not err_text:
                 err_text = f"{type(e).__name__}: {repr(e)}"
+            logger.error(
+                "[process_image] 异常: %s, elapsed=%.1fms", err_text, elapsed, exc_info=True,
+            )
             return {
                 "success": False,
                 "text": "",
