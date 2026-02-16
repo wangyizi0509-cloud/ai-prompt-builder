@@ -1,10 +1,25 @@
 import os
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 router = APIRouter()
 security = HTTPBearer()
+
+AUTH_COOKIE_MAX_AGE = 7 * 24 * 60 * 60  # 7 days, matches JWT expiry
+
+
+def _set_auth_cookie(response: JSONResponse, token: str) -> None:
+    """在响应中设置认证 cookie，供页面导航时中间件校验。"""
+    response.set_cookie(
+        key="auth_token",
+        value=token,
+        max_age=AUTH_COOKIE_MAX_AGE,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
 
 
 class RegisterRequest(BaseModel):
@@ -56,11 +71,13 @@ async def register(request: RegisterRequest):
     user_data = result['user']
     token = create_jwt_token(user_data['id'], user_data['email'], user_data['username'])
     
-    return {
+    response = JSONResponse(content={
         'success': True,
         'token': token,
-        'user': user_data
-    }
+        'user': user_data,
+    })
+    _set_auth_cookie(response, token)
+    return response
 
 
 @router.post("/login")
@@ -79,11 +96,21 @@ async def login(request: LoginRequest):
     user_data = result['user']
     token = create_jwt_token(user_data['id'], user_data['email'], user_data['username'])
     
-    return {
+    response = JSONResponse(content={
         'success': True,
         'token': token,
-        'user': user_data
-    }
+        'user': user_data,
+    })
+    _set_auth_cookie(response, token)
+    return response
+
+
+@router.post("/logout")
+async def logout():
+    """登出：清除认证 cookie"""
+    response = JSONResponse(content={'success': True})
+    response.delete_cookie(key="auth_token", path="/")
+    return response
 
 
 async def get_current_user_dep(current_user=Depends(get_current_user)):
