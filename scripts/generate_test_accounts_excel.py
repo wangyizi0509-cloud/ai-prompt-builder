@@ -2,6 +2,8 @@ import argparse
 import asyncio
 import datetime
 import os
+import secrets
+import string
 import sys
 from dataclasses import dataclass
 
@@ -42,14 +44,30 @@ def _ensure_parent_dir(path: str) -> None:
         os.makedirs(parent, exist_ok=True)
 
 
-def _make_accounts_offline(count: int, start_index: int, password: str) -> list[TestAccount]:
+def _gen_unique_password() -> str:
+    """生成 16 位随机密码（大小写+数字+符号），不可预测"""
+    alphabet = string.ascii_letters + string.digits + "!@#$%&*"
+    while True:
+        pwd = "".join(secrets.choice(alphabet) for _ in range(16))
+        if (
+            any(c.isupper() for c in pwd)
+            and any(c.islower() for c in pwd)
+            and any(c.isdigit() for c in pwd)
+        ):
+            return pwd
+
+
+def _make_accounts_offline(
+    count: int, start_index: int, password: str, unique_passwords: bool = False
+) -> list[TestAccount]:
     accounts: list[TestAccount] = []
     for i in range(start_index, start_index + count):
         username_en = f"test{i:02d}"
+        pwd = _gen_unique_password() if unique_passwords else password
         accounts.append(
             TestAccount(
                 email=f"{username_en}@example.com",
-                password=password,
+                password=pwd,
                 username=f"测试用户{i:02d}",
                 user_id="",
                 created_at="",
@@ -96,13 +114,16 @@ async def _create_or_get_user_supabase(email: str, password: str, username: str)
     raise RuntimeError(f"写入 Supabase 失败: {email} ({err})")
 
 
-async def _generate_accounts_supabase(count: int, start_index: int, password: str) -> list[TestAccount]:
+async def _generate_accounts_supabase(
+    count: int, start_index: int, password: str, unique_passwords: bool = False
+) -> list[TestAccount]:
     accounts: list[TestAccount] = []
     for idx, i in enumerate(range(start_index, start_index + count), start=1):
         username_en = f"test{i:02d}"
         email = f"{username_en}@example.com"
         username = f"测试用户{i:02d}"
-        account = await _create_or_get_user_supabase(email, password, username)
+        pwd = _gen_unique_password() if unique_passwords else password
+        account = await _create_or_get_user_supabase(email, pwd, username)
         accounts.append(account)
         print(f"[{idx}/{count}] {account.source}: {account.username} ({account.email})")
     return accounts
@@ -250,6 +271,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--start", type=int, default=1, help="起始序号：1 -> test01")
     p.add_argument("--password", type=str, default="password123")
     p.add_argument(
+        "--unique-passwords",
+        action="store_true",
+        help="每个账号使用 16 位随机密码（不可预测），适合分发给不同用户",
+    )
+    p.add_argument(
         "--mode",
         type=str,
         choices=["supabase", "offline"],
@@ -269,9 +295,15 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     if args.mode == "offline":
-        accounts = _make_accounts_offline(args.count, args.start, args.password)
+        accounts = _make_accounts_offline(
+            args.count, args.start, args.password, args.unique_passwords
+        )
     else:
-        accounts = asyncio.run(_generate_accounts_supabase(args.count, args.start, args.password))
+        accounts = asyncio.run(
+            _generate_accounts_supabase(
+                args.count, args.start, args.password, args.unique_passwords
+            )
+        )
     write_markdown(accounts, args.md_output)
     test_users_md = args.update_test_users_md.strip()
     if test_users_md:
