@@ -2735,6 +2735,24 @@
     </div>
 
     <script>
+        // 全局 401 拦截：未登录时自动跳转登录页
+        (function () {
+            const _fetch = window.fetch;
+            window.fetch = async function (...args) {
+                const response = await _fetch.apply(this, args);
+                if (response.status === 401) {
+                    const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
+                    // 排除 auth 相关端点，避免登录/校验请求触发跳转
+                    if (!url.includes('/api/auth/')) {
+                        localStorage.removeItem('token');
+                        localStorage.removeItem('user');
+                        window.location.href = '/auth.html';
+                    }
+                }
+                return response;
+            };
+        })();
+
         const { createApp, ref, computed, onMounted, onBeforeUnmount, nextTick, watch } = Vue;
 
         createApp({
@@ -2817,7 +2835,9 @@
                     showLogoutConfirm.value = true;
                 };
 
-                const confirmLogout = () => {
+                const confirmLogout = async () => {
+                    // 调用后端清除 auth cookie
+                    try { await fetch('/api/auth/logout', { method: 'POST', headers: buildAuthHeaders() }); } catch (_) {}
                     localStorage.removeItem('token');
                     localStorage.removeItem('user');
                     localStorage.removeItem('session_id');
