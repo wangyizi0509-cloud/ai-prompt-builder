@@ -150,9 +150,21 @@ async def get_debug_context(session_id: str):
             "both_info": user_context.get("both_info", {}),
         },
         "layer2_working": {
-            "status_report": state.get("status_report"),
-            "action_plan": state.get("action_plan"),
-            "action_guides": state.get("action_guides", []),
+            "status_report": (
+                layer2_memory.get("current_status_report", {}).get("report_content")
+                if isinstance(layer2_memory.get("current_status_report"), dict)
+                else state.get("status_report")
+            ),
+            "action_plan": (
+                layer2_memory.get("current_action_plan", {}).get("plan_content")
+                if isinstance(layer2_memory.get("current_action_plan"), dict)
+                else state.get("action_plan")
+            ),
+            "action_guides": (
+                layer2_memory.get("action_guides", [])
+                if isinstance(layer2_memory, dict) and layer2_memory.get("action_guides")
+                else state.get("action_guides", [])
+            ),
             "recent_messages": state.get("messages", [])[-10:] if state.get("messages") else [],
         },
         "layer3_conversation": {

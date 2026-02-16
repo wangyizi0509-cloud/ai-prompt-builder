@@ -169,7 +169,18 @@ def _format_onboarding_handoff_summary(handoff: Any) -> str:
     return "\n".join(parts)
 
 
-def _wrap_tools_for_patch_collection(tools: list[BaseTool], patches: list[dict]) -> list[BaseTool]:
+def _wrap_tools_for_patch_collection(
+    tools: list[BaseTool],
+    patches: list[dict],
+    live_state: dict | None = None,
+) -> list[BaseTool]:
+    """Wrap tools to collect state_patch from each invocation.
+
+    If *live_state* is provided, the dict is **mutated in-place** after every
+    tool call so that subsequent tools (and their ``_submit_tools_state`` reads)
+    see the accumulated patches.  This prevents a later tool from overwriting an
+    earlier tool's ``layer2_memory`` changes with stale snapshot data.
+    """
     wrapped: list[BaseTool] = []
     for tool in tools:
         if not isinstance(tool, BaseTool):
@@ -182,6 +193,10 @@ def _wrap_tools_for_patch_collection(tools: list[BaseTool], patches: list[dict])
                 patch = _extract_state_patch(result)
                 if patch:
                     patches.append(patch)
+                    if live_state is not None:
+                        updated = merge_state_patch(dict(live_state), patch)
+                        live_state.clear()
+                        live_state.update(updated)
                 return _tool_output_to_content(result)
 
             return _wrapped
@@ -221,9 +236,10 @@ def _run_langchain_supervisor(
     initial_messages: list[BaseMessage],
     max_rounds: int,
     config: RunnableConfig | None = None,
+    live_state: dict | None = None,
 ) -> dict[str, Any]:
     patches: list[dict] = []
-    wrapped_tools = _wrap_tools_for_patch_collection(list(tools or []), patches)
+    wrapped_tools = _wrap_tools_for_patch_collection(list(tools or []), patches, live_state=live_state)
 
     checkpointer = resolve_runtime_checkpointer(config)
 
@@ -277,6 +293,7 @@ def _call_subagent(
             initial_messages=initial_messages,
             max_rounds=int(os.getenv("SUBAGENT_TOOL_MAX_ROUNDS", "8")),
             config=config,
+            live_state=current_state,
         )
     merged_patch = merge_patches({}, supervisor["patches"])
     output = (supervisor["final"].content or "").strip()
@@ -438,6 +455,7 @@ def main_agent_node(state: AgentState, config: RunnableConfig | None = None) -> 
             initial_messages=initial_messages,
             max_rounds=int(os.getenv("MAIN_AGENT_TOOL_MAX_ROUNDS", "10")),
             config=config,
+            live_state=working_state,
         )
 
     merged_tool_patch = merge_patches({}, supervisor["patches"])

@@ -14,7 +14,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-from agents.tooling.patch import merge_patches
+from agents.tooling.patch import merge_patches, merge_state_patch
 from agents.tools.all_tools import build_all_tools_for_agent
 from config import get_llm
 from graph.message_builder import build_messages_for_model
@@ -174,7 +174,11 @@ def _extract_state_patch(result: Any) -> dict:
     return {}
 
 
-def _wrap_tools_for_patch_collection(tools: list[BaseTool], patches: list[dict]) -> list[BaseTool]:
+def _wrap_tools_for_patch_collection(
+    tools: list[BaseTool],
+    patches: list[dict],
+    live_state: dict | None = None,
+) -> list[BaseTool]:
     wrapped: list[BaseTool] = []
     for tool in tools:
         if not isinstance(tool, BaseTool):
@@ -187,6 +191,10 @@ def _wrap_tools_for_patch_collection(tools: list[BaseTool], patches: list[dict])
                 patch = _extract_state_patch(result)
                 if patch:
                     patches.append(patch)
+                    if live_state is not None:
+                        updated = merge_state_patch(dict(live_state), patch)
+                        live_state.clear()
+                        live_state.update(updated)
                 return _tool_output_to_content(result)
 
             return _wrapped
@@ -204,12 +212,12 @@ def _wrap_tools_for_patch_collection(tools: list[BaseTool], patches: list[dict])
 
 
 def _create_inner_agent(
-    task_spec: dict, config: RunnableConfig | None = None
+    task_spec: dict, config: RunnableConfig | None = None, live_state: dict | None = None,
 ) -> tuple[Any, dict[str, Any], list[dict]]:
     """Build the inner create_agent graph, clean config, and a patches collector."""
     tools = _build_guide_tools(task_spec)
     patches: list[dict] = []
-    wrapped_tools = _wrap_tools_for_patch_collection(list(tools or []), patches)
+    wrapped_tools = _wrap_tools_for_patch_collection(list(tools or []), patches, live_state=live_state)
 
     rounds = max(1, int(os.getenv("SUBAGENT_TOOL_MAX_ROUNDS", "8")))
     checkpointer = resolve_runtime_checkpointer(config)
@@ -240,7 +248,7 @@ def run_node(state: GuideSubState, config: RunnableConfig | None = None) -> dict
     private_messages = state.get("private_messages") if isinstance(state.get("private_messages"), list) else []
     parent_state = task_spec.get("parent_state") if isinstance(task_spec.get("parent_state"), dict) else {}
 
-    agent_graph, cfg, patches = _create_inner_agent(task_spec, config)
+    agent_graph, cfg, patches = _create_inner_agent(task_spec, config, live_state=parent_state)
 
     if private_messages:
         messages_in: list[BaseMessage] = _dict_messages_to_lc(private_messages)
@@ -290,7 +298,7 @@ def handle_interrupt_node(state: GuideSubState, config: RunnableConfig | None = 
 
     task_spec = state.get("task_spec") if isinstance(state.get("task_spec"), dict) else {}
     parent_state = task_spec.get("parent_state") if isinstance(task_spec.get("parent_state"), dict) else {}
-    agent_graph, cfg, patches = _create_inner_agent(task_spec, config)
+    agent_graph, cfg, patches = _create_inner_agent(task_spec, config, live_state=parent_state)
 
     with submit_tools_state_context(parent_state):
         result = agent_graph.invoke(Command(resume=answer), config=cfg)
