@@ -180,32 +180,26 @@ def test_onboarding_resume_twice_progresses_turn_count_and_raw_inputs(monkeypatc
     monkeypatch.setattr(onboarding_module, "get_llm", lambda *args, **kwargs: DummyLLM())
     monkeypatch.setattr(onboarding_module, "_build_preliminary_assessment_fallback", lambda **kwargs: None)
 
-    answer_by_qid = {
-        "q1": "第一次补充",
-        "q2": "第二次补充",
-    }
-
-    class _FakeAskHumanTool:
-        @staticmethod
-        def invoke(payload):
-            card = payload.get("inquiry_card") if isinstance(payload, dict) else {}
-            questions = card.get("questions") if isinstance(card, dict) else []
-            qid = questions[0].get("id") if questions and isinstance(questions[0], dict) else "q1"
-            answer = answer_by_qid.get(qid, "补充信息")
-            return {
-                "state_patch": {
-                    "inquiry_card": card,
-                    "inquiry_answers": {"answers": {qid: answer}},
-                }
-            }
-
-    monkeypatch.setattr(onboarding_module, "ask_human", _FakeAskHumanTool())
-
     call_count = {"n": 0}
 
     def _fake_supervisor(**kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
+            return {
+                "final": _make_mock_response(""),
+                "new_messages": [],
+                "patches": [],
+                "__interrupt__": [
+                    {
+                        "value": {
+                            "type": "inquiry_card",
+                            "intro": "继续补充",
+                            "questions": [{"id": "q1", "question": "第一个问题"}],
+                        }
+                    }
+                ],
+            }
+        if call_count["n"] == 2:
             return {
                 "final": _make_mock_response(""),
                 "new_messages": [],
@@ -250,40 +244,28 @@ def test_onboarding_resume_twice_progresses_turn_count_and_raw_inputs(monkeypatc
 
     monkeypatch.setattr(onboarding_module, "_run_onboarding_supervisor", _fake_supervisor)
 
+    from langgraph.checkpoint.memory import MemorySaver
+    from langgraph.types import Command
+    from onboarding.workflow import compile_onboarding_workflow
+
+    checkpointer = MemorySaver()
+    app = compile_onboarding_workflow(checkpointer=checkpointer)
+    config = {"configurable": {"thread_id": "test_onboarding_resume_twice"}, "checkpointer": checkpointer}
+
     state = create_initial_state("我想追一个女生")
-    state["inquiry_card"] = {
-        "type": "inquiry_card",
-        "questions": [{"id": "q1", "question": "第一个问题"}],
-    }
+    out1 = app.invoke(state, config=config)
+    assert "__interrupt__" in out1
 
-    out1 = onboarding_module.onboarding_agent_node(
-        state,
-        config={"configurable": {"__pregel_resuming": True}},
-    )
-    assert isinstance(out1.get("inquiry_card"), dict)
-    assert out1["inquiry_card"].get("questions")
-    assert out1.get("onboarding_turn_count") == 1
-    raw_inputs1 = (((out1.get("collected_info") or {}).get("raw_inputs")) or [])
-    assert any("第一次补充" in str(item) for item in raw_inputs1)
+    out2 = app.invoke(Command(resume={"answers": {"q1": "第一次补充"}}), config=config)
+    assert "__interrupt__" in out2
 
-    state2 = dict(state)
-    state2.update(out1)
-    state2["inquiry_card"] = {
-        "type": "inquiry_card",
-        "questions": [{"id": "q2", "question": "第二个问题"}],
-    }
-    state2["inquiry_answers"] = None
-
-    out2 = onboarding_module.onboarding_agent_node(
-        state2,
-        config={"configurable": {"__pregel_resuming": True}},
-    )
-    assert "__interrupt__" not in out2
-    assert out2.get("pending_crushe_guide") is True
-    assert out2.get("onboarding_turn_count") == 2
-    raw_inputs2 = (((out2.get("collected_info") or {}).get("raw_inputs")) or [])
-    assert any("第一次补充" in str(item) for item in raw_inputs2)
-    assert any("第二次补充" in str(item) for item in raw_inputs2)
+    out3 = app.invoke(Command(resume={"answers": {"q2": "第二次补充"}}), config=config)
+    assert "__interrupt__" not in out3
+    assert out3.get("pending_crushe_guide") is True
+    assert out3.get("onboarding_turn_count") == 2
+    raw_inputs3 = (((out3.get("collected_info") or {}).get("raw_inputs")) or [])
+    assert any("第一次补充" in str(item) for item in raw_inputs3)
+    assert any("第二次补充" in str(item) for item in raw_inputs3)
 
 
 def test_onboarding_direct_submit_emits_two_phase_pending_and_waits_guide(monkeypatch):

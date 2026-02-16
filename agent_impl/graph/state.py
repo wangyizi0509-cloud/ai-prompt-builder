@@ -167,6 +167,8 @@ class AgentState(TypedDict, total=False):
     onboarding_max_turns: int
     onboarding_handoff: Optional[dict]
     last_onboarding_question: Optional[str]
+    _onboarding_interrupted: bool
+    _onboarding_interrupt_payload: dict
     # === 循环控制 ===
     _iteration_count: int
 

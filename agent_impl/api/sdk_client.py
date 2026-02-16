@@ -129,12 +129,28 @@ def update_thread_state(thread_id: str, updates: dict):
     client.threads.update_state(thread_id, updates)
 
 
-def run_assistant(thread_id: str, input_state: Any, stream_mode: str = "values"):
-    """运行 assistant 并返回流式结果"""
+def run_assistant(
+    thread_id: str,
+    input_state: Any = None,
+    stream_mode: str = "values",
+    *,
+    command: dict | None = None,
+):
+    """运行 assistant 并返回流式结果。
+
+    对于普通消息：传 input_state（新的 state）。
+    对于 resume：传 command={"resume": payload}（从 interrupt 恢复）。
+    """
     client = get_client()
-    return client.runs.stream(
-        thread_id=thread_id,
-        assistant_id=ASSISTANT_ID,
-        input=input_state,
-        stream_mode=stream_mode,
-    )
+    kwargs: dict[str, Any] = {
+        "thread_id": thread_id,
+        "assistant_id": ASSISTANT_ID,
+        "stream_mode": stream_mode,
+    }
+    if command is not None:
+        kwargs["command"] = command
+        logger.info(f"run_assistant: thread={thread_id} mode=RESUME command_keys={list(command.keys())}")
+    else:
+        kwargs["input"] = input_state
+        logger.info(f"run_assistant: thread={thread_id} mode=NEW_RUN")
+    return client.runs.stream(**kwargs)

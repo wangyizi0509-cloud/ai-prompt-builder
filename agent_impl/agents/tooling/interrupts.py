@@ -1,4 +1,19 @@
 from typing import Any
+from langchain_core.runnables import RunnableConfig
+
+
+def is_resuming(config: RunnableConfig | None) -> bool:
+    """
+    统一的 resume 检测函数，供主 agent 和 onboarding agent 使用。
+    
+    检查 config.configurable.__pregel_resuming 标志位，判断当前是否处于 resume 状态。
+    """
+    if not isinstance(config, dict):
+        return False
+    configurable = config.get("configurable")
+    if not isinstance(configurable, dict):
+        return False
+    return bool(configurable.get("__pregel_resuming"))
 
 
 def _normalize_inquiry_questions(raw_questions: Any) -> list[dict[str, Any]]:

@@ -483,6 +483,7 @@ async def chat(
         ensure_thread_exists,
         get_thread_state,
         run_assistant,
+        thread_has_pending_interrupt,
         update_thread_state,
     )
     from graph.state import create_initial_state
@@ -491,14 +492,50 @@ async def chat(
     thread_id = await ensure_thread_exists(request.session_id, user_id)
     onboarding_turn_count_before: int | None = None
 
-    input_payload: Any
+    input_payload: Any = None
+    resume_command: dict | None = None
+    synthetic_resume = False
     if is_resume:
-        from langgraph.types import Command
         base_state = get_thread_state(thread_id)
         if isinstance(base_state, dict):
             onboarding_turn_count_before = int(base_state.get("onboarding_turn_count", 0) or 0)
-        # 所有 inquiry 都经由 interrupt() 暂停，统一用 Command(resume=...) 恢复
-        input_payload = Command(resume=request.resume_payload)
+        has_pending_interrupt = thread_has_pending_interrupt(thread_id)
+        logger.info(
+            "Resume precheck: thread=%s, has_pending_interrupt=%s, state_has___interrupt__=%s, state_has_inquiry_card=%s",
+            thread_id,
+            has_pending_interrupt,
+            bool(base_state.get("__interrupt__")) if isinstance(base_state, dict) else None,
+            bool(base_state.get("inquiry_card")) if isinstance(base_state, dict) else None,
+        )
+        if has_pending_interrupt:
+            resume_command = {"resume": request.resume_payload}
+        else:
+            synthetic_resume = True
+            answers = _extract_answers_from_resume_payload(request.resume_payload)
+            inquiry_card = base_state.get("inquiry_card") if isinstance(base_state, dict) else None
+            if _is_valid_inquiry_card(inquiry_card):
+                final_message = _build_resume_message_from_card(inquiry_card, answers)
+            else:
+                lines = [f"{k}：{_stringify_answer_value(v)}" for k, v in (answers or {}).items()]
+                final_message = "\n\n".join(lines) if lines else "用户已提交补充信息"
+            logger.warning(
+                "Resume precheck failed: thread has no pending interrupt; using synthetic_resume fallback. thread=%s",
+                thread_id,
+            )
+            state = dict(base_state or {})
+            current_message_id = str(uuid.uuid4())
+            state["user_message"] = final_message
+            state["current_message_id"] = current_message_id
+            state["_iteration_count"] = 0
+            state["debug_log"] = []
+            state["inquiry_card"] = None
+            state["inquiry_answers"] = None
+            state["pending_questions"] = []
+            state["pending_responses"] = []
+            state["last_response_for_continuity"] = None
+            state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
+            input_payload = state
+        logger.info(f"Resume mode: thread={thread_id}, resume_payload_keys={list(request.resume_payload.keys()) if isinstance(request.resume_payload, dict) else type(request.resume_payload).__name__}")
     else:
         base_state = get_thread_state(thread_id)
         if isinstance(base_state, dict):
@@ -538,28 +575,33 @@ async def chat(
                 "use_stream": False,
                 "user_id": user_id,
                 "is_resume": is_resume,
-                "synthetic_resume": False,
+                "synthetic_resume": synthetic_resume,
             },
         )
         
         chunks = []
-        for chunk in run_assistant(thread_id, input_payload, stream_mode="values"):
+        for chunk in run_assistant(thread_id, input_payload, stream_mode="values", command=resume_command):
             chunks.append(chunk)
         
-        final_state = chunks[-1].data if chunks else {}
+        final_state: Any = {}
+        if chunks:
+            last_chunk = chunks[-1]
+            data_attr = getattr(last_chunk, "data", None)
+            if isinstance(data_attr, dict):
+                final_state = data_attr
+            elif isinstance(last_chunk, dict):
+                final_state = last_chunk.get("data") or {}
         if not isinstance(final_state, dict):
             final_state = {}
         final_state = dict(final_state)
 
-        inquiry_card = _extract_inquiry_card_from_any(final_state)
+        inquiry_card = _extract_inquiry_card_from_chunk_interrupts(chunks)
         if inquiry_card is None:
-            inquiry_card = _extract_inquiry_card_from_chunk_interrupts(chunks)
-        if inquiry_card is None:
-            inquiry_card = _extract_inquiry_card_from_any(chunks)
+            inquiry_card = _extract_inquiry_card_from_interrupt(final_state)
         if inquiry_card is not None:
             final_state["inquiry_card"] = inquiry_card
         else:
-            final_state.pop("inquiry_card", None)
+            final_state["inquiry_card"] = {"questions": []}
         has_interrupt = inquiry_card is not None
         onboarding_turn_count_after = int(final_state.get("onboarding_turn_count", 0) or 0)
 
@@ -596,6 +638,7 @@ async def chat(
                 "state_has_inquiry_card": bool(final_state.get("inquiry_card")),
                 "has_interrupt": has_interrupt,
                 "is_resume": is_resume,
+                "synthetic_resume": synthetic_resume,
                 "merged_patch_keys": merged_patch_keys,
                 "has_inquiry_answers": bool(final_state.get("inquiry_answers")),
                 "onboarding_turn_count_before": onboarding_turn_count_before,

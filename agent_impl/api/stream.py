@@ -492,14 +492,13 @@ async def chat_stream(
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="resume_payload is required when resume is true")
 
-    input_payload: Any
+    input_payload: Any = None
+    resume_command: dict | None = None
     if is_resume:
-        from langgraph.types import Command
         base_state = get_thread_state(thread_id)
         if isinstance(base_state, dict):
             onboarding_turn_count_before = int(base_state.get("onboarding_turn_count", 0) or 0)
-        # 所有 inquiry 都经由 interrupt() 暂停，统一用 Command(resume=...) 恢复
-        input_payload = Command(resume=request.resume_payload)
+        resume_command = {"resume": request.resume_payload}
     else:
         base_state = get_thread_state(thread_id)
         if isinstance(base_state, dict):
@@ -536,7 +535,12 @@ async def chat_stream(
         merged_patch_keys: list[str] = []
         detected_inquiry_card = None
         try:
-            for chunk in run_assistant(thread_id, input_payload, stream_mode=request.stream_mode):
+            for chunk in run_assistant(
+                thread_id,
+                input_payload,
+                stream_mode=request.stream_mode,
+                command=resume_command,
+            ):
                 final_state = getattr(chunk, "data", None)
                 if final_state is None and isinstance(chunk, dict):
                     final_state = chunk.get("data")

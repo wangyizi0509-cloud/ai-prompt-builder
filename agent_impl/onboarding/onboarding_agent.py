@@ -767,13 +767,8 @@ def _attach_preliminary_assessment_to_result(result: dict, preliminary_assessmen
     return out
 
 
-def _is_resuming(config: RunnableConfig | None) -> bool:
-    if not isinstance(config, dict):
-        return False
-    configurable = config.get("configurable")
-    if not isinstance(configurable, dict):
-        return False
-    return bool(configurable.get("__pregel_resuming"))
+# 使用统一的 resume 检测函数
+from agents.tooling.interrupts import is_resuming
 
 
 def onboarding_agent_node(state: dict, config: RunnableConfig | None = None) -> dict:
@@ -782,6 +777,9 @@ def onboarding_agent_node(state: dict, config: RunnableConfig | None = None) -> 
     - 主路径：ask_human / submit_onboarding
     - 兜底：解析旧 JSON 输出，但仍通过工具落库
     """
+    import logging as _logging
+    _ob_logger = _logging.getLogger("onboarding.agent_node")
+
     reference_questions = _load_reference_questions()
 
     working_state: dict[str, Any] = dict(state or {})
@@ -792,51 +790,54 @@ def onboarding_agent_node(state: dict, config: RunnableConfig | None = None) -> 
     existing_messages = _convert_messages_to_dict(working_state.get("messages", []))
     pre_supervisor_patch: dict[str, Any] = {}
 
-    # Resume 时优先消费上一轮 inquiry 的答案，避免节点重跑后丢失 resume payload。
-    if _is_resuming(config) and not working_state.get("inquiry_answers"):
-        resume_card = working_state.get("inquiry_card") if isinstance(working_state.get("inquiry_card"), dict) else {}
-        if not resume_card:
-            fallback_question = _pick_next_question(collected_info)
-            resume_card = {
-                "questions": [
-                    {
-                        "id": f"onboard_q_{turn_count}",
-                        "question": fallback_question or "请补充上一条问题的答案",
-                        "type": "free_input_question",
-                        "info_type": 1,
-                        "is_required": True,
-                        "purpose": "继续 Onboarding",
-                    }
-                ],
-                "intro": "请补充上一条问题的答案，我再继续判断。",
-                "reasoning": "resume onboarding inquiry",
-            }
-        ask_result = ask_human.invoke({"inquiry_card": resume_card})
-        ask_patch = _extract_state_patch(ask_result)
-        if ask_patch:
-            working_state = merge_state_patch(working_state, ask_patch)
-        raw_answers = ask_patch.get("inquiry_answers") if isinstance(ask_patch, dict) else working_state.get("inquiry_answers")
-        normalized_answers, wrapped_answers = _normalize_interrupt_answers(raw_answers)
-        resume_message = _format_resume_answers_for_history(resume_card, normalized_answers)
-        working_state["inquiry_answers"] = wrapped_answers
-        working_state["user_message"] = resume_message
-        user_message = resume_message
-        existing_messages = list(existing_messages) + [{"role": "user", "content": resume_message}]
-        collected_info = _merge_collected(collected_info, resume_message)
-        working_state["collected_info"] = collected_info
-        pre_supervisor_patch = {
-            "inquiry_answers": wrapped_answers,
-            "user_message": resume_message,
-            "collected_info": collected_info,
-        }
-        progress_patch = _build_onboarding_answer_progress_patch(working_state, wrapped_answers)
-        if progress_patch:
-            working_state = merge_state_patch(working_state, progress_patch)
-            pre_supervisor_patch = merge_state_patch(pre_supervisor_patch, progress_patch)
-            turn_count = int(working_state.get("onboarding_turn_count", turn_count) or turn_count)
+    _is_resume = is_resuming(config)
+    cfg_keys: list[str] | None = None
+    cfg_thread_id: str | None = None
+    cfg_resuming_flag: Any = None
+    cfg_configurable_keys: list[str] | None = None
+    if isinstance(config, dict):
+        cfg_keys = list(config.keys())
+        configurable = config.get("configurable")
+        if isinstance(configurable, dict):
+            cfg_thread_id = str(configurable.get("thread_id") or "") or None
+            cfg_resuming_flag = configurable.get("__pregel_resuming")
+            cfg_configurable_keys = list(configurable.keys())
+    _ob_logger.info(
+        "[onboarding] config: has_config=%s, cfg_keys=%s, configurable_keys=%s, thread_id=%s, __pregel_resuming=%s",
+        bool(config),
+        cfg_keys,
+        cfg_configurable_keys,
+        cfg_thread_id,
+        cfg_resuming_flag,
+    )
+    _ob_logger.info(
+        "[onboarding] 入口: is_resuming=%s, turn_count=%d, max_turns=%d, "
+        "onboarding_completed=%s, pending_crushe_guide=%s, "
+        "has_inquiry_card=%s, has_inquiry_answers=%s, has_state_interrupt=%s, state_interrupt_len=%s, user_message_len=%d",
+        _is_resume, turn_count, max_turns,
+        working_state.get("onboarding_completed"),
+        working_state.get("pending_crushe_guide"),
+        bool(working_state.get("inquiry_card")),
+        bool(working_state.get("inquiry_answers")),
+        bool(working_state.get("__interrupt__")),
+        len(working_state.get("__interrupt__") or []) if isinstance(working_state.get("__interrupt__"), list) else None,
+        len(user_message),
+    )
+
+    if _is_resume:
+        _ob_logger.info(
+            "[onboarding] resuming detected: inquiry_answers_present=%s, has_interrupt_payload=%s",
+            bool(working_state.get("inquiry_answers")),
+            bool(working_state.get("_onboarding_interrupt_payload")),
+        )
 
     # 如果已完成 Onboarding，但需要先完成 Crushe 指南，则拦截等待
+    # 注意：此检查在 resume 处理之后，resume 时如果 pending_crushe_guide=True 已在上面清掉
     if working_state.get("pending_crushe_guide"):
+        _ob_logger.info(
+            "[onboarding] pending_crushe_guide=True, user_message=%r, is_guide_done=%s",
+            (user_message or "")[:80], (user_message or "").strip() == GUIDE_DONE_TOKEN,
+        )
         if (user_message or "").strip() == GUIDE_DONE_TOKEN:
             handoff = working_state.get("onboarding_handoff") or {
                 "collected_context": collected_info,
@@ -865,14 +866,18 @@ def onboarding_agent_node(state: dict, config: RunnableConfig | None = None) -> 
                 ],
                 "next_action": "end_turn",
             }
+        _ob_logger.warning("[onboarding] ⚠️ pending_crushe_guide 提前退出: 未收到 GUIDE_DONE_TOKEN, route_to=end")
         return {
             "onboarding_completed": False,
             "pending_crushe_guide": True,
             "collected_info": collected_info,
             "next_action": "end_turn",
             "route_to": "end",
+            "_onboarding_interrupted": False,
+            "_onboarding_interrupt_payload": {},
         }
 
+    _ob_logger.info("[onboarding] 进入 supervisor 主逻辑: turn_count=%d, max_turns=%d", turn_count, max_turns)
     initial_messages = _build_onboarding_initial_messages(
         state=working_state,
         user_message=user_message,
@@ -942,7 +947,8 @@ def onboarding_agent_node(state: dict, config: RunnableConfig | None = None) -> 
         interrupt_update = dict(merged_tool_patch or {})
         if isinstance(payload, dict) and payload:
             interrupt_update["inquiry_card"] = payload
-        interrupt_update["__interrupt__"] = supervisor["__interrupt__"]
+        interrupt_update["_onboarding_interrupted"] = True
+        interrupt_update["_onboarding_interrupt_payload"] = payload if isinstance(payload, dict) else {}
         interrupt_update.setdefault("next_action", "end_turn")
         interrupt_update.setdefault("route_to", "onboarding")
         return interrupt_update
@@ -990,6 +996,8 @@ def onboarding_agent_node(state: dict, config: RunnableConfig | None = None) -> 
                 "has_preliminary_assessment": bool(result.get("preliminary_assessment")),
             },
         )
+        result.setdefault("_onboarding_interrupted", False)
+        result.setdefault("_onboarding_interrupt_payload", {})
         return result
 
     # === Legacy JSON 兼容兜底 ===
@@ -1023,7 +1031,9 @@ def onboarding_agent_node(state: dict, config: RunnableConfig | None = None) -> 
     legacy_user_message = user_message
     legacy_messages = list(existing_messages)
     legacy_collected_info = collected_info
-    resume_wrapped_answers: dict[str, Any] | None = None
+    resume_wrapped_answers: dict[str, Any] | None = (
+        working_state.get("inquiry_answers") if isinstance(working_state.get("inquiry_answers"), dict) else None
+    )
 
     for _ in range(max(2, max_turns + 2)):
         parsed = _safe_json_loads(legacy_content)
@@ -1072,35 +1082,19 @@ def onboarding_agent_node(state: dict, config: RunnableConfig | None = None) -> 
         )
 
         if needs_more and legacy_turn_count < max_turns and question_text:
-            ask_result = ask_human.invoke({"inquiry_card": inquiry_card})
-            ask_patch = _extract_state_patch(ask_result)
-            if ask_patch:
-                working_state = merge_state_patch(working_state, ask_patch)
-            raw_answers = ask_patch.get("inquiry_answers") if isinstance(ask_patch, dict) else working_state.get("inquiry_answers")
-            normalized_answers, resume_wrapped_answers = _normalize_interrupt_answers(raw_answers)
-            resume_message = _format_resume_answers_for_history(inquiry_card, normalized_answers)
-            progress_patch = _build_onboarding_answer_progress_patch(working_state, resume_wrapped_answers)
-            if progress_patch:
-                working_state = merge_state_patch(working_state, progress_patch)
-
-            legacy_user_message = resume_message
-            legacy_messages = list(legacy_messages) + [{"role": "user", "content": resume_message}]
-            legacy_collected_info = _merge_collected(updated_info, resume_message)
-            legacy_turn_count = int(working_state.get("onboarding_turn_count", legacy_turn_count) or legacy_turn_count)
-            conversation_history = _build_conversation_history(legacy_messages)
-            legacy_state = dict(working_state)
-            legacy_state["messages"] = list(legacy_messages)
-            legacy_state["user_message"] = legacy_user_message
-            legacy_messages_in = _build_onboarding_initial_messages(
-                state=legacy_state,
-                user_message=legacy_user_message,
-                turn_count=legacy_turn_count,
-                max_turns=max_turns,
-                reference_questions=reference_questions,
-            )
-            llm_resp = llm.invoke(legacy_messages_in)
-            legacy_content = str(getattr(llm_resp, "content", "") or "")
-            continue
+            if isinstance(inquiry_card, dict) and inquiry_card.get("type") is None:
+                inquiry_card = dict(inquiry_card)
+                inquiry_card["type"] = "inquiry_card"
+            return {
+                "onboarding_completed": False,
+                "pending_crushe_guide": False,
+                "collected_info": legacy_collected_info,
+                "inquiry_card": inquiry_card,
+                "_onboarding_interrupted": True,
+                "_onboarding_interrupt_payload": inquiry_card,
+                "next_action": "end_turn",
+                "route_to": "onboarding",
+            }
 
         recommendation = parsed.get("recommendation", "")
         suggested_action = parsed.get("suggested_action", "") or "建议进行现状分析"

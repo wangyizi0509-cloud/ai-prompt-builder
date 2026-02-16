@@ -7,6 +7,7 @@ Onboarding 子图：用于首次信息收集。
 """
 
 from langgraph.graph import StateGraph, START, END
+from langgraph.types import interrupt
 
 from langchain_core.runnables import RunnableConfig
 from graph.state import AgentState, convert_message_to_dict, ensure_message_id, get_message_id
@@ -103,18 +104,64 @@ def _normalize_onboarding_input(state: AgentState, config: RunnableConfig | None
     return updates
 
 
+def _handle_interrupt_node(state: AgentState, config: RunnableConfig | None = None) -> dict:
+    payload = state.get("_onboarding_interrupt_payload") if isinstance(state.get("_onboarding_interrupt_payload"), dict) else {}
+    answer = interrupt(payload)
+
+    from onboarding import onboarding_agent as onboarding_module
+
+    inquiry_card = state.get("inquiry_card") if isinstance(state.get("inquiry_card"), dict) else payload
+    normalized_answers, wrapped_answers = onboarding_module._normalize_interrupt_answers(answer)
+    resume_message = onboarding_module._format_resume_answers_for_history(inquiry_card if isinstance(inquiry_card, dict) else {}, normalized_answers)
+
+    updates: dict = {
+        "_onboarding_interrupted": False,
+        "_onboarding_interrupt_payload": {},
+        "inquiry_answers": wrapped_answers,
+        "inquiry_card": {"questions": []},
+        "user_message": resume_message,
+        "pending_crushe_guide": False,
+    }
+
+    messages = state.get("messages", [])
+    if isinstance(messages, list):
+        updates["messages"] = list(messages) + [{"role": "user", "content": resume_message}]
+
+    collected_info = state.get("collected_info") if isinstance(state.get("collected_info"), dict) else {}
+    updates["collected_info"] = onboarding_module._merge_collected(collected_info or {}, resume_message)
+
+    progress_patch = onboarding_module._build_onboarding_answer_progress_patch(state, wrapped_answers)
+    if progress_patch:
+        updates.update(progress_patch)
+
+    return updates
+
+
+def _route_after_onboarding_agent(state: AgentState) -> str:
+    if state.get("_onboarding_interrupted"):
+        return "handle_interrupt"
+    return "end"
+
+
 def create_onboarding_workflow() -> StateGraph:
     """创建并返回 Onboarding 子图（未编译）。"""
     builder = StateGraph(AgentState)
     builder.add_node("onboarding_input_router", _normalize_onboarding_input)
     builder.add_node("onboarding_agent", onboarding_agent_node)
+    builder.add_node("handle_interrupt", _handle_interrupt_node)
     builder.add_edge(START, "onboarding_input_router")
     builder.add_edge("onboarding_input_router", "onboarding_agent")
-    builder.add_edge("onboarding_agent", END)
+    builder.add_conditional_edges(
+        "onboarding_agent",
+        _route_after_onboarding_agent,
+        {"handle_interrupt": "handle_interrupt", "end": END},
+    )
+    builder.add_edge("handle_interrupt", "onboarding_agent")
     return builder
 
 
-def compile_onboarding_workflow():
+def compile_onboarding_workflow(checkpointer=None):
     """编译后的 Onboarding 子图，供主图引用。"""
-    return create_onboarding_workflow().compile()
-
+    if checkpointer is None:
+        return create_onboarding_workflow().compile()
+    return create_onboarding_workflow().compile(checkpointer=checkpointer)
