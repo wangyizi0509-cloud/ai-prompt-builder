@@ -49,25 +49,28 @@ async def get_default_conversation(current_user=Depends(_require_user)):
     """
     user_id = current_user["user_id"]
 
-    from supabase_service.conversation import (
-        get_default_conversation as _get_default,
-        upsert_conversation,
-    )
-    from supabase_service.client import get_thread_by_user
+    try:
+        from supabase_service.conversation import (
+            get_default_conversation as _get_default,
+            upsert_conversation,
+        )
+        from supabase_service.client import get_thread_by_user
 
-    conv = await _get_default(user_id)
-    if conv:
-        return {"success": True, "conversation": conv}
+        conv = await _get_default(user_id)
+        if conv:
+            return {"success": True, "conversation": conv}
 
-    # 从 user_threads 查找该用户绑定的 thread_id
-    user_thread = await get_thread_by_user(user_id)
-    if not user_thread:
-        return {"success": True, "conversation": None}
+        # 从 user_threads 查找该用户绑定的 thread_id
+        user_thread = await get_thread_by_user(user_id)
+        if not user_thread:
+            return {"success": True, "conversation": None}
 
-    thread_id = user_thread["thread_id"]
-    conv = await upsert_conversation(user_id, thread_id)
-    if conv:
-        return {"success": True, "conversation": conv}
+        thread_id = user_thread["thread_id"]
+        conv = await upsert_conversation(user_id, thread_id)
+        if conv:
+            return {"success": True, "conversation": conv}
+    except Exception as e:
+        logger.warning("get_default_conversation failed (table may not exist): %s", e)
 
     return {"success": True, "conversation": None}
 

@@ -660,60 +660,63 @@ async def get_chat_history(thread_id: str, current_user=Depends(get_optional_use
         raise HTTPException(status_code=403, detail="Thread does not belong to this user")
 
     try:
-        # 优先尝试从 Supabase 读取
-        from supabase_service.conversation import (
-            get_conversation_by_thread,
-            get_messages,
-            get_messages_count,
-            upsert_conversation,
-            backfill_from_langgraph_state,
-        )
-        from supabase_service.client import is_supabase_configured
+        # 优先尝试从 Supabase 读取（仅在表存在且有数据时使用）
+        supabase_ok = False
+        try:
+            from supabase_service.conversation import (
+                get_conversation_by_thread,
+                get_messages,
+                get_messages_count,
+                upsert_conversation,
+                backfill_from_langgraph_state,
+            )
+            from supabase_service.client import is_supabase_configured
 
-        if is_supabase_configured():
-            conv = await get_conversation_by_thread(thread_id)
-            if not conv:
-                # 尝试创建会话
-                conv = await upsert_conversation(user_id, thread_id)
+            if is_supabase_configured():
+                conv = await get_conversation_by_thread(thread_id)
+                if not conv:
+                    conv = await upsert_conversation(user_id, thread_id)
 
-            if conv:
-                msg_count = await get_messages_count(conv["id"])
-                if msg_count == 0:
-                    # 从 LangGraph 回填
+                if conv:
+                    supabase_ok = True
+                    msg_count = await get_messages_count(conv["id"])
+                    if msg_count == 0:
+                        from api.sdk_client import get_thread_state
+                        state = get_thread_state(thread_id)
+                        if state:
+                            await backfill_from_langgraph_state(conv["id"], thread_id, state)
+
+                    result = await get_messages(conv["id"], limit=200)
+                    messages = result.get("messages", [])
+                    clean_messages = []
+                    for msg in messages:
+                        role = msg.get("role", "")
+                        content = msg.get("content", "")
+                        kind = msg.get("kind", "chat_text")
+                        metadata = msg.get("metadata")
+
+                        if kind == "chat_text" and content and role in ("user", "assistant"):
+                            clean_messages.append({"role": role, "content": content, "kind": kind})
+                        elif kind in ("interrupt_inquiry", "inquiry_receipt", "system_task"):
+                            clean_messages.append({
+                                "role": role,
+                                "content": content,
+                                "kind": kind,
+                                "metadata": metadata,
+                            })
+
                     from api.sdk_client import get_thread_state
                     state = get_thread_state(thread_id)
-                    if state:
-                        await backfill_from_langgraph_state(conv["id"], thread_id, state)
 
-                result = await get_messages(conv["id"], limit=200)
-                messages = result.get("messages", [])
-                clean_messages = []
-                for msg in messages:
-                    role = msg.get("role", "")
-                    content = msg.get("content", "")
-                    kind = msg.get("kind", "chat_text")
-                    metadata = msg.get("metadata")
-
-                    if kind == "chat_text" and content and role in ("user", "assistant"):
-                        clean_messages.append({"role": role, "content": content, "kind": kind})
-                    elif kind in ("interrupt_inquiry", "inquiry_receipt", "system_task"):
-                        clean_messages.append({
-                            "role": role,
-                            "content": content,
-                            "kind": kind,
-                            "metadata": metadata,
-                        })
-
-                # 获取 state（用于 inquiry_card 恢复等）
-                from api.sdk_client import get_thread_state
-                state = get_thread_state(thread_id)
-
-                logger.info(f"Returning {len(clean_messages)} messages from Supabase for thread {thread_id}")
-                return {
-                    "success": True,
-                    "messages": clean_messages,
-                    "state": state,
-                }
+                    logger.info(f"Returning {len(clean_messages)} messages from Supabase for thread {thread_id}")
+                    return {
+                        "success": True,
+                        "messages": clean_messages,
+                        "state": state,
+                    }
+        except Exception as e:
+            logger.warning(f"Supabase conversation read failed (table may not exist): {e}")
+            supabase_ok = False
 
         # Fallback: 从 LangGraph 读取
         from api.sdk_client import get_thread_state
