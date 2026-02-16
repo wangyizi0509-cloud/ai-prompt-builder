@@ -7,14 +7,20 @@ from fastapi import APIRouter
 logger = logging.getLogger(__name__)
 
 
-def _load_router(module_name: str, env_flag: str | None = None):
+def _load_router(module_name: str, env_flag: str | None = None, optional: bool = False):
     if env_flag and os.getenv(env_flag, "0") == "1":
         logger.info("Skipping %s router via %s=1", module_name, env_flag)
         return None
     logger.info("Loading %s router...", module_name)
-    module = importlib.import_module(f"{__name__}.{module_name}")
-    logger.info("Loaded %s router", module_name)
-    return module.router
+    try:
+        module = importlib.import_module(f"{__name__}.{module_name}")
+        logger.info("Loaded %s router", module_name)
+        return module.router
+    except Exception:
+        if optional:
+            logger.exception("Optional router %s failed to load, skipping", module_name)
+            return None
+        raise
 
 
 auth_router = _load_router("auth", "DISABLE_AUTH")
@@ -23,7 +29,7 @@ chat_router = _load_router("chat", "DISABLE_CHAT")
 stream_router = _load_router("stream", "DISABLE_STREAM")
 guide_router = _load_router("guide", "DISABLE_GUIDE")
 debug_router = _load_router("debug", "DISABLE_DEBUG")
-conversations_router = _load_router("conversations", "DISABLE_CONVERSATIONS")
+conversations_router = _load_router("conversations", "DISABLE_CONVERSATIONS", optional=True)
 
 api_router = APIRouter()
 
