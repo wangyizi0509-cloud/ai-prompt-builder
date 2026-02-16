@@ -132,6 +132,16 @@ async def get_optional_user_dep(
     return await get_optional_user(credentials)
 
 
+security_required = HTTPBearer()
+
+
+async def get_required_user_dep(
+    credentials: HTTPAuthorizationCredentials = Depends(security_required),
+):
+    from auth_utils import get_current_user
+    return await get_current_user(credentials)
+
+
 def _append_debug_log(run_id: str, hypothesis_id: str, location: str, message: str, data: dict):
     import time
     payload = {
@@ -454,7 +464,7 @@ def _extract_inquiry_card_from_any(value: Any) -> dict | None:
 async def chat(
     request: ChatRequest,
     background_tasks: BackgroundTasks,
-    current_user=Depends(get_optional_user_dep),
+    current_user=Depends(get_required_user_dep),
 ):
     is_resume = bool(request.resume_payload) or bool(request.resume)
     has_images = bool(request.images)
@@ -477,7 +487,7 @@ async def chat(
     )
     from graph.state import create_initial_state
     
-    user_id = current_user['user_id'] if current_user else None
+    user_id = current_user['user_id']
     thread_id = await ensure_thread_exists(request.session_id, user_id)
     onboarding_turn_count_before: int | None = None
 
@@ -639,16 +649,11 @@ async def chat(
 
 
 @router.get("/chat/history/{thread_id}")
-async def get_chat_history(thread_id: str, current_user=Depends(get_optional_user_dep)):
+async def get_chat_history(thread_id: str, current_user=Depends(get_required_user_dep)):
     """
     历史消息读取接口。
     - 登录态：强制 thread 归属校验，优先从 Supabase 读取。
-    - 未登录：返回 401。
     """
-    if not current_user:
-        from fastapi import HTTPException as _Exc
-        raise _Exc(status_code=401, detail="Authentication required")
-
     user_id = current_user['user_id']
     logger.info(f"get_chat_history request: thread_id={thread_id}, user={user_id}")
 

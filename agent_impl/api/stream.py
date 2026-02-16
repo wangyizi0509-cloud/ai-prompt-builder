@@ -95,6 +95,16 @@ async def get_optional_user_dep(
     return await get_optional_user(credentials)
 
 
+security_required = HTTPBearer()
+
+
+async def get_required_user_dep(
+    credentials: HTTPAuthorizationCredentials = Depends(security_required),
+):
+    from auth_utils import get_current_user
+    return await get_current_user(credentials)
+
+
 def _append_debug_log(run_id: str, hypothesis_id: str, location: str, message: str, data: dict):
     import time
     payload = {
@@ -451,7 +461,7 @@ def _dump_stream_chunk(chunk: Any) -> dict[str, Any]:
 async def chat_stream(
     request: StreamChatRequest,
     background_tasks: BackgroundTasks,
-    current_user=Depends(get_optional_user_dep),
+    current_user=Depends(get_required_user_dep),
 ):
     """
     流式聊天接口 - 实时查看 Agent 执行过程（通过 SDK）
@@ -470,7 +480,7 @@ async def chat_stream(
     )
     from graph.state import create_initial_state
     
-    user_id = current_user['user_id'] if current_user else None
+    user_id = current_user['user_id']
     thread_id = await ensure_thread_exists(request.session_id, user_id)
     onboarding_turn_count_before: int | None = None
 
