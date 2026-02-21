@@ -5,6 +5,11 @@ from typing import Any
 from langchain_core.runnables import RunnableConfig
 
 
+def _is_proxy_user(value: Any) -> bool:
+    """True if value is a ProxyUser (LangChain Cloud injects it; not JSON-serializable)."""
+    return type(value).__name__ == "ProxyUser"
+
+
 def sanitize_runtime_config(config: RunnableConfig | None) -> dict[str, Any]:
     """
     Return a shallow-copied RunnableConfig with safe metadata.
@@ -31,6 +36,20 @@ def sanitize_runtime_config(config: RunnableConfig | None) -> dict[str, Any]:
             cfg.pop("metadata", None)
     else:
         cfg.pop("metadata", None)
+
+    # LangChain Cloud injects ProxyUser in configurable; it is not JSON-serializable
+    # and causes TypeError when checkpoint/config is serialized (e.g. subgraph invoke).
+    configurable = cfg.get("configurable")
+    if isinstance(configurable, dict):
+        configurable_copy = {
+            k: v for k, v in configurable.items() if not _is_proxy_user(v)
+        }
+        if configurable_copy:
+            cfg["configurable"] = configurable_copy
+        else:
+            cfg.pop("configurable", None)
+    else:
+        cfg.pop("configurable", None)
 
     return cfg
 

@@ -11,6 +11,19 @@ class _Obj:
     pass
 
 
+class ProxyUser:
+    """Simulates LangChain Cloud-injected user; not JSON-serializable."""
+
+    pass
+
+
+def test_sanitize_runtime_config_removes_proxy_user():
+    """ProxyUser in configurable is dropped to avoid JSON serialization errors in LangChain Cloud."""
+    cfg = {"configurable": {"thread_id": "t1", "user": ProxyUser(), "foo": "bar"}}
+    out = sanitize_runtime_config(cfg)
+    assert out.get("configurable") == {"thread_id": "t1", "foo": "bar"}
+
+
 def test_sanitize_runtime_config_removes_non_scalar_metadata_values():
     cfg = {
         "configurable": {"thread_id": "t1", "__pregel_checkpointer": object()},
