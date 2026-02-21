@@ -5,44 +5,13 @@ from typing import Any
 from langchain_core.runnables import RunnableConfig
 
 
-def _is_json_serializable_value(value: Any) -> bool:
-    """
-    Return True if value is JSON-serializable (for configurable / gRPC proto).
-    Used to drop ProxyUser and other runtime objects injected by LangChain Cloud.
-    """
-    if value is None or isinstance(value, (bool, int, float)):
-        return True
-    if isinstance(value, str):
-        return True
-    if isinstance(value, dict):
-        return all(
-            isinstance(k, str) and _is_json_serializable_value(v)
-            for k, v in value.items()
-        )
-    if isinstance(value, (list, tuple)):
-        return all(_is_json_serializable_value(v) for v in value)
-    return False
-
-
-def _filter_configurable_serializable(configurable: dict[str, Any]) -> dict[str, Any]:
-    """Keep only configurable entries whose values are JSON-serializable."""
-    if not isinstance(configurable, dict):
-        return {}
-    out: dict[str, Any] = {}
-    for k, v in configurable.items():
-        if isinstance(k, str) and _is_json_serializable_value(v):
-            out[k] = v
-    return out
-
-
 def sanitize_runtime_config(config: RunnableConfig | None) -> dict[str, Any]:
     """
-    Return a shallow-copied RunnableConfig with safe metadata and configurable.
+    Return a shallow-copied RunnableConfig with safe metadata.
 
-    LangGraph checkpointers (and LangChain Cloud gRPC) serialize config; they fail
-    when configurable contains non-JSON-serializable objects (e.g. ProxyUser,
-    checkpointer instances). We keep only scalar / JSON-serializable values in
-    both metadata and configurable.
+    LangGraph checkpointers will serialize checkpoint metadata and may fail when
+    metadata contains framework/runtime objects (e.g. auth user objects).
+    Keep only scalar metadata values for nested graph/tool invocations.
     """
     cfg = dict(config or {})
 
@@ -62,16 +31,6 @@ def sanitize_runtime_config(config: RunnableConfig | None) -> dict[str, Any]:
             cfg.pop("metadata", None)
     else:
         cfg.pop("metadata", None)
-
-    configurable = cfg.get("configurable")
-    if isinstance(configurable, dict):
-        clean = _filter_configurable_serializable(configurable)
-        if clean:
-            cfg["configurable"] = clean
-        else:
-            cfg.pop("configurable", None)
-    else:
-        cfg.pop("configurable", None)
 
     return cfg
 

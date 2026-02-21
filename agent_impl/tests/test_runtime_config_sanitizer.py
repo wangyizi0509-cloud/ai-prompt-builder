@@ -24,8 +24,7 @@ def test_sanitize_runtime_config_removes_non_scalar_metadata_values():
     }
 
     out = sanitize_runtime_config(cfg)
-    # configurable: only JSON-serializable values kept (drops __pregel_checkpointer object)
-    assert out.get("configurable") == {"thread_id": "t1"}
+    assert out.get("configurable") == cfg["configurable"]
     assert out.get("metadata") == {"ok_str": "v", "ok_int": 1, "ok_bool": True}
 
 
@@ -53,24 +52,3 @@ def test_resolve_runtime_checkpointer_supports_nested_configurable():
     cp = object()
     cfg = {"configurable": {"thread_id": "t1", "__pregel_checkpointer": cp}}
     assert resolve_runtime_checkpointer(cfg) is cp
-
-
-def test_sanitize_runtime_config_drops_non_serializable_configurable():
-    """LangChain Cloud may inject ProxyUser etc. into configurable; we drop them for gRPC."""
-    class ProxyUser:
-        pass
-
-    cfg = {
-        "configurable": {
-            "thread_id": "tid-1",
-            "user": ProxyUser(),
-            "access_token": "secret",
-            "nested_ok": {"a": 1, "b": "x"},
-        },
-    }
-    out = sanitize_runtime_config(cfg)
-    assert out.get("configurable") == {
-        "thread_id": "tid-1",
-        "access_token": "secret",
-        "nested_ok": {"a": 1, "b": "x"},
-    }
