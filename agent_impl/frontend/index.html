@@ -2996,6 +2996,14 @@
                         };
                     }
 
+                    if (kind === 'preliminary_assessment') {
+                        const pa = metadata.preliminary_assessment;
+                        if (!pa || typeof pa !== 'object') return null;
+                        const html = renderAssessmentToHTML(pa);
+                        if (!html) return null;
+                        return { role: 'assistant', content: html, isAssessment: true };
+                    }
+
                     if (kind === 'inquiry_receipt') {
                         const answers = metadata.answers || {};
                         const card = metadata.inquiry_card || {};
@@ -3631,24 +3639,37 @@
                                 if (restoredState) {
                                     const pa = restoredState.preliminary_assessment;
                                     if (pa && typeof pa === 'object') {
-                                        const html = renderAssessmentToHTML(pa);
-                                        if (html) {
-                                            // 找到"初判卡"提示语的位置（assistant 消息中含"初判"关键词）
-                                            let insertIdx = -1;
-                                            for (let i = 0; i < uiMessages.length; i++) {
-                                                const m = uiMessages[i];
-                                                if (m.role === 'assistant' && m.content &&
-                                                    (m.content.includes('初判卡') || m.content.includes('初判'))) {
-                                                    insertIdx = i + 1;
-                                                    break;
+                                        const hasAssessment = uiMessages.some(m =>
+                                            Boolean(m && (m.isAssessment || (m.role === 'assistant' && typeof m.content === 'string' && m.content.includes('assessment-card'))))
+                                        );
+                                        if (!hasAssessment) {
+                                            const html = renderAssessmentToHTML(pa);
+                                            if (html) {
+                                                // 找到"初判卡"提示语的位置（assistant 消息中含"初判"关键词）
+                                                let insertIdx = -1;
+                                                for (let i = 0; i < uiMessages.length; i++) {
+                                                    const m = uiMessages[i];
+                                                    if (m.role === 'assistant' && m.content &&
+                                                        (m.content.includes('初判卡') || m.content.includes('初判'))) {
+                                                        insertIdx = i + 1;
+                                                        break;
+                                                    }
                                                 }
-                                            }
-                                            const assessmentMsg = { role: 'assistant', content: html, isAssessment: true };
-                                            if (insertIdx > 0) {
-                                                uiMessages.splice(insertIdx, 0, assessmentMsg);
-                                            } else {
-                                                // 兜底：追加到末尾
-                                                uiMessages.push(assessmentMsg);
+                                                if (insertIdx < 0) {
+                                                    for (let i = 0; i < uiMessages.length; i++) {
+                                                        const m = uiMessages[i];
+                                                        if (m?.role === 'system_task') {
+                                                            insertIdx = i;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                                const assessmentMsg = { role: 'assistant', content: html, isAssessment: true };
+                                                if (insertIdx >= 0) {
+                                                    uiMessages.splice(insertIdx, 0, assessmentMsg);
+                                                } else {
+                                                    uiMessages.push(assessmentMsg);
+                                                }
                                             }
                                         }
                                     }
@@ -3691,22 +3712,36 @@
                                     // 插入初判卡
                                     if (historyData.state && historyData.state.preliminary_assessment) {
                                         const pa = historyData.state.preliminary_assessment;
-                                        const html = renderAssessmentToHTML(pa);
-                                        if (html) {
-                                            let insertIdx = -1;
-                                            for (let i = 0; i < legacyMsgs.length; i++) {
-                                                const m = legacyMsgs[i];
-                                                if (m.role === 'assistant' && m.content &&
-                                                    (m.content.includes('初判卡') || m.content.includes('初判'))) {
-                                                    insertIdx = i + 1;
-                                                    break;
+                                        const hasAssessment = legacyMsgs.some(m =>
+                                            Boolean(m && (m.isAssessment || (m.role === 'assistant' && typeof m.content === 'string' && m.content.includes('assessment-card'))))
+                                        );
+                                        if (!hasAssessment) {
+                                            const html = renderAssessmentToHTML(pa);
+                                            if (html) {
+                                                let insertIdx = -1;
+                                                for (let i = 0; i < legacyMsgs.length; i++) {
+                                                    const m = legacyMsgs[i];
+                                                    if (m.role === 'assistant' && m.content &&
+                                                        (m.content.includes('初判卡') || m.content.includes('初判'))) {
+                                                        insertIdx = i + 1;
+                                                        break;
+                                                    }
                                                 }
-                                            }
-                                            const assessmentMsg = { role: 'assistant', content: html, isAssessment: true };
-                                            if (insertIdx > 0) {
-                                                legacyMsgs.splice(insertIdx, 0, assessmentMsg);
-                                            } else {
-                                                legacyMsgs.push(assessmentMsg);
+                                                if (insertIdx < 0) {
+                                                    for (let i = 0; i < legacyMsgs.length; i++) {
+                                                        const m = legacyMsgs[i];
+                                                        if (m?.role === 'system_task') {
+                                                            insertIdx = i;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                                const assessmentMsg = { role: 'assistant', content: html, isAssessment: true };
+                                                if (insertIdx >= 0) {
+                                                    legacyMsgs.splice(insertIdx, 0, assessmentMsg);
+                                                } else {
+                                                    legacyMsgs.push(assessmentMsg);
+                                                }
                                             }
                                         }
                                     }

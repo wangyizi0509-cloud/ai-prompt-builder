@@ -142,6 +142,27 @@ async def persist_turn_messages(
                     })
                     part_idx += 1
 
+        pa = final_state.get("preliminary_assessment")
+        pa_updated = False
+        if isinstance(pending_responses, list) and any(isinstance(r, dict) and r.get("preliminary_assessment") for r in pending_responses):
+            pa_updated = True
+        tool_patch_log = final_state.get("tool_patch_log")
+        if not pa_updated and isinstance(tool_patch_log, list) and tool_patch_log:
+            latest_patch = tool_patch_log[-1]
+            if isinstance(latest_patch, dict) and "preliminary_assessment" in latest_patch:
+                pa_updated = True
+        if pa_updated and isinstance(pa, dict) and pa:
+            messages_to_write.append({
+                "role": "assistant",
+                "kind": "preliminary_assessment",
+                "content": None,
+                "metadata": {
+                    "preliminary_assessment": pa,
+                },
+                "part_index": part_idx,
+            })
+            part_idx += 1
+
         # 3d. interrupt 事件（inquiry_card）
         if inquiry_card:
             messages_to_write.append({

@@ -745,7 +745,7 @@ async def get_chat_history(thread_id: str, current_user=Depends(get_required_use
 
                         if kind == "chat_text" and content and role in ("user", "assistant"):
                             clean_messages.append({"role": role, "content": content, "kind": kind})
-                        elif kind in ("interrupt_inquiry", "inquiry_receipt", "system_task"):
+                        elif kind in ("interrupt_inquiry", "inquiry_receipt", "system_task", "preliminary_assessment"):
                             clean_messages.append({
                                 "role": role,
                                 "content": content,
