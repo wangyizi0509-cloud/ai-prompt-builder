@@ -2973,7 +2973,11 @@
                     if (kind === 'interrupt_inquiry') {
                         const card = metadata.inquiry_card;
                         if (!card || !card.questions || !card.questions.length) return null;
-                        const taskKey = `inquiry_${msg.turn_id || msg.id}`;
+                        const normalized = normalizeInquiryCardForUI(card);
+                        const taskKey = (normalized && normalized.key) ? normalized.key : `inquiry_${msg.turn_id || msg.id}`;
+                        if (normalized && normalized.card) {
+                            inquiryCardByTaskKey.value[taskKey] = deepClone(normalized.card);
+                        }
                         return {
                             role: 'system_task',
                             taskType: 'inquiry',
@@ -2981,13 +2985,13 @@
                             taskState: 'done',
                             label: 'QUESTION',
                             title: '需要补充信息',
-                            desc: card.intro || '为了更好地制定策略，请回答几个问题',
+                            desc: ((normalized && normalized.card && normalized.card.intro) ? normalized.card.intro : card.intro) || '为了更好地制定策略，请回答几个问题',
                             disabled: true,
                             _taskKey: taskKey,
                             inquiryData: {
-                                intro: card.intro || '',
-                                reasoning: card.reasoning || '',
-                                questions: (card.questions || []).map(q => q.question || ''),
+                                intro: ((normalized && normalized.card && normalized.card.intro) ? normalized.card.intro : card.intro) || '',
+                                reasoning: ((normalized && normalized.card && normalized.card.reasoning) ? normalized.card.reasoning : card.reasoning) || '',
+                                questions: (((normalized && normalized.card && normalized.card.questions) ? normalized.card.questions : card.questions) || []).map(q => q.question || ''),
                             },
                         };
                     }
@@ -2995,6 +2999,8 @@
                     if (kind === 'inquiry_receipt') {
                         const answers = metadata.answers || {};
                         const card = metadata.inquiry_card || {};
+                        const normalized = normalizeInquiryCardForUI(card);
+                        const taskKey = (normalized && normalized.key) ? normalized.key : `inquiry_${msg.turn_id || msg.id}`;
                         const details = [];
                         if (card.questions && Array.isArray(card.questions)) {
                             for (const q of card.questions) {
@@ -3011,7 +3017,7 @@
                         return {
                             role: 'inquiry_receipt',
                             id: `receipt_${msg.turn_id || msg.id}`,
-                            taskKey: `inquiry_${msg.turn_id || msg.id}`,
+                            taskKey,
                             summary: '已提交问卷',
                             status: 'success',
                             details,
@@ -4707,7 +4713,15 @@
                         }
                         if (taskKey) {
                             const opened = openInquiryModalForTask(taskKey);
-                            if (!opened) showInquiryModal.value = true;
+                            if (!opened) {
+                                const fallbackKey = currentInquiryCardKey.value || getInquiryTaskKey(inquiryCard.value);
+                                if (fallbackKey) {
+                                    const openedFallback = openInquiryModalForTask(fallbackKey);
+                                    if (!openedFallback) showInquiryModal.value = true;
+                                } else {
+                                    showInquiryModal.value = true;
+                                }
+                            }
                         } else {
                             showInquiryModal.value = true;
                         }
@@ -4968,6 +4982,38 @@
                             if (normalized) {
                                 inquiryCard.value = normalized.card;
                                 currentInquiryCardKey.value = normalized.key || '';
+                                if (currentInquiryCardKey.value) {
+                                    inquiryCardByTaskKey.value[currentInquiryCardKey.value] = deepClone(normalized.card);
+                                }
+                                const hasInquiryMsg = messages.value.some(m => m.role === 'system_task' && m.taskType === 'inquiry');
+                                if (!hasInquiryMsg && normalized.card.questions && normalized.card.questions.length > 0) {
+                                    const nextCard = normalized.card;
+                                    const nextInquiryKey = normalized.key || '';
+                                    pushSystemTaskOnce(nextInquiryKey || `inquiry_restore_${Date.now()}`, {
+                                        role: 'system_task',
+                                        taskType: 'inquiry',
+                                        taskKey: nextInquiryKey,
+                                        taskState: 'new',
+                                        label: 'QUESTION',
+                                        title: '需要补充信息',
+                                        desc: nextCard.intro || '为了更好地制定策略，请回答几个问题',
+                                        inquiryData: {
+                                            intro: nextCard.intro || '',
+                                            reasoning: nextCard.reasoning || '',
+                                            questions: (nextCard.questions || []).map(q => q.question || ''),
+                                        },
+                                    });
+                                } else if (hasInquiryMsg && currentInquiryCardKey.value) {
+                                    for (let i = messages.value.length - 1; i >= 0; i--) {
+                                        const msg = messages.value[i];
+                                        if (msg?.role === 'system_task' && msg.taskType === 'inquiry') {
+                                            msg.taskKey = currentInquiryCardKey.value;
+                                            msg.taskState = 'new';
+                                            msg.disabled = false;
+                                            break;
+                                        }
+                                    }
+                                }
                             }
                         }
                         if (newState.user_context) state.value.user_profile = newState.user_context;
