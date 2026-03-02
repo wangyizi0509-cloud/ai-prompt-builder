@@ -156,6 +156,49 @@ def _extract_state_patch(result: Any) -> dict:
     return {}
 
 
+def _extract_status_report_markdown(state_like: Any) -> str:
+    if not isinstance(state_like, dict):
+        return ""
+    layer2 = state_like.get("layer2_memory")
+    if not isinstance(layer2, dict):
+        return ""
+    report = layer2.get("current_status_report")
+    if not isinstance(report, dict):
+        return ""
+    content = report.get("report_content")
+    return str(content).strip() if isinstance(content, str) else ""
+
+
+def _build_status_brief(markdown: str) -> str:
+    text = (markdown or "").strip()
+    if not text:
+        return ""
+
+    lines: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("```"):
+            continue
+        line = line.lstrip("#").strip()
+        line = line.lstrip("-*+ ").strip()
+        line = line.replace("**", "").replace("`", "")
+        if line:
+            lines.append(line)
+        if len(lines) >= 4:
+            break
+
+    if not lines:
+        return ""
+
+    summary = "；".join(lines)
+    if len(summary) > 220:
+        summary = summary[:220].rstrip() + "..."
+
+    return f"【现状分析摘要】{summary}\n\n完整内容见“当前现状”面板。"
+
+
 def _format_onboarding_handoff_summary(handoff: Any) -> str:
     if not isinstance(handoff, dict):
         return ""
@@ -509,6 +552,19 @@ def main_agent_node(state: AgentState, config: RunnableConfig | None = None) -> 
     messages_out = existing_messages + list(supervisor["new_messages"])
 
     pending_responses = list(state.get("pending_responses") or [])
+    old_status_markdown = _extract_status_report_markdown(state)
+    new_status_markdown = _extract_status_report_markdown(working_state)
+    if new_status_markdown and new_status_markdown != old_status_markdown:
+        status_brief = _build_status_brief(new_status_markdown)
+        if status_brief:
+            pending_responses.append(
+                {
+                    "from": "status_agent",
+                    "content": status_brief,
+                    "phase": "status_brief",
+                }
+            )
+
     final_content = (supervisor["final"].content or "").strip()
     if final_content:
         pending_responses.append({"from": "main_agent", "content": final_content, "phase": "final"})
