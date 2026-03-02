@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 本文件为 Claude Code (claude.ai/code) 提供在此代码库中工作的指导。
 
