@@ -40,12 +40,12 @@ from config import get_llm
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# Prompt 模板加载（统一存放在 context_system/04_Prompts）
+# Prompt 模板加载（统一存放在 context_system_v2/04_Prompts）
 # ============================================================
 
 _PROMPT_FILE = (
     Path(__file__).resolve().parents[2]
-    / "context_system"
+    / "context_system_v2"
     / "04_Prompts"
     / "organize_agent_prompts.md"
 )
