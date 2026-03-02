@@ -508,7 +508,24 @@ async def chat(
             bool(base_state.get("inquiry_card")) if isinstance(base_state, dict) else None,
         )
         if has_pending_interrupt:
-            resume_command = {"resume": request.resume_payload}
+            resume_value: Any = request.resume_payload
+            resume_value_normalized: Any = resume_value
+            if isinstance(resume_value, dict):
+                resume_value_normalized = _extract_answers_from_resume_payload(resume_value)
+                logger.info(
+                    "Resume payload normalized: thread=%s, wrapper=%s, answer_key_count=%s, fp=%s",
+                    thread_id,
+                    "answers" in resume_value,
+                    len(resume_value_normalized) if isinstance(resume_value_normalized, dict) else None,
+                    _answers_fingerprint(resume_value_normalized) if isinstance(resume_value_normalized, dict) else "",
+                )
+            else:
+                logger.info(
+                    "Resume payload normalized: thread=%s, type=%s",
+                    thread_id,
+                    type(resume_value).__name__,
+                )
+            resume_command = {"resume": resume_value_normalized}
         else:
             synthetic_resume = True
             answers = _extract_answers_from_resume_payload(request.resume_payload)
@@ -535,7 +552,12 @@ async def chat(
             state["last_response_for_continuity"] = None
             state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
             input_payload = state
-        logger.info(f"Resume mode: thread={thread_id}, resume_payload_keys={list(request.resume_payload.keys()) if isinstance(request.resume_payload, dict) else type(request.resume_payload).__name__}")
+        logger.info(
+            "Resume mode: thread=%s, resume_payload_type=%s, resume_payload_keys=%s",
+            thread_id,
+            type(request.resume_payload).__name__,
+            list(request.resume_payload.keys()) if isinstance(request.resume_payload, dict) else None,
+        )
     else:
         base_state = get_thread_state(thread_id)
         if isinstance(base_state, dict):
