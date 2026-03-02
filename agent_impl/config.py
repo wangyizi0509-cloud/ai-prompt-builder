@@ -156,7 +156,9 @@ class MockLLM(BaseChatModel):
         super().__init__()
         self._tool_names: set[str] = set()
         self._interrupt_tool_call_id = "tc_mock_ask_human"
+        self._interrupt_tool_call_id_2 = "tc_mock_ask_human_2"
         self._status_tool_call_id = "tc_mock_call_status"
+        self._plan_tool_call_id = "tc_mock_call_plan"
 
     @property
     def _llm_type(self) -> str:
@@ -213,7 +215,46 @@ class MockLLM(BaseChatModel):
             )
             return ChatResult(generations=[ChatGeneration(message=msg)])
 
+        already_has_plan_result = self._has_tool_observation(messages, tool_call_id=self._plan_tool_call_id)
+        if (
+            (not already_has_plan_result)
+            and ("[[TEST_CALL_PLAN_INTERRUPT]]" in last_user_text)
+            and ("call_plan_agent" in self._tool_names)
+        ):
+            msg = AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "call_plan_agent",
+                        "args": {"instruction": "[[TEST_INTERRUPT]]"},
+                        "id": self._plan_tool_call_id,
+                        "type": "tool_call",
+                    }
+                ],
+            )
+            return ChatResult(generations=[ChatGeneration(message=msg)])
+
+        already_has_plan_result_2 = self._has_tool_observation(messages, tool_call_id=self._plan_tool_call_id)
+        if (
+            (not already_has_plan_result_2)
+            and ("[[TEST_CALL_PLAN_INTERRUPT_TWICE]]" in last_user_text)
+            and ("call_plan_agent" in self._tool_names)
+        ):
+            msg = AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "call_plan_agent",
+                        "args": {"instruction": "[[TEST_INTERRUPT_TWICE]]"},
+                        "id": self._plan_tool_call_id,
+                        "type": "tool_call",
+                    }
+                ],
+            )
+            return ChatResult(generations=[ChatGeneration(message=msg)])
+
         already_has_tool_result = self._has_tool_observation(messages, tool_call_id=self._interrupt_tool_call_id)
+        already_has_tool_result_2 = self._has_tool_observation(messages, tool_call_id=self._interrupt_tool_call_id_2)
         if (
             (not already_has_tool_result)
             and ("[[TEST_INTERRUPT]]" in last_user_text)
@@ -245,6 +286,62 @@ class MockLLM(BaseChatModel):
                 ],
             )
             return ChatResult(generations=[ChatGeneration(message=msg)])
+
+        if ("[[TEST_INTERRUPT_TWICE]]" in last_user_text) and ("ask_human" in self._tool_names):
+            if not already_has_tool_result:
+                inquiry_card = {
+                    "intro": "测试用提问卡片",
+                    "reasoning": "触发 interrupt/resume 的确定性测试",
+                    "questions": [
+                        {
+                            "id": "q1",
+                            "type": "single_choice",
+                            "question": "你选择 A 还是 B？",
+                            "options": ["A", "B"],
+                            "is_required": True,
+                            "purpose": "测试 interrupt/resume",
+                        }
+                    ],
+                }
+                msg = AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "ask_human",
+                            "args": {"inquiry_card": inquiry_card},
+                            "id": self._interrupt_tool_call_id,
+                            "type": "tool_call",
+                        }
+                    ],
+                )
+                return ChatResult(generations=[ChatGeneration(message=msg)])
+            if not already_has_tool_result_2:
+                inquiry_card = {
+                    "intro": "测试用提问卡片",
+                    "reasoning": "触发 interrupt/resume 的确定性测试",
+                    "questions": [
+                        {
+                            "id": "q2",
+                            "type": "single_choice",
+                            "question": "你选择 C 还是 D？",
+                            "options": ["C", "D"],
+                            "is_required": True,
+                            "purpose": "测试 interrupt/resume",
+                        }
+                    ],
+                }
+                msg = AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "ask_human",
+                            "args": {"inquiry_card": inquiry_card},
+                            "id": self._interrupt_tool_call_id_2,
+                            "type": "tool_call",
+                        }
+                    ],
+                )
+                return ChatResult(generations=[ChatGeneration(message=msg)])
 
         payload = {
             "task_id": "mock_task",
