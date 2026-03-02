@@ -169,6 +169,85 @@ def _extract_status_report_markdown(state_like: Any) -> str:
     return str(content).strip() if isinstance(content, str) else ""
 
 
+def _extract_layer2_from_patch(patch: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(patch, dict):
+        return {}
+    layer2 = patch.get("layer2_memory")
+    return layer2 if isinstance(layer2, dict) else {}
+
+
+def _first_non_empty_text(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _trim_for_observation(text: str, *, limit: int = 1600) -> str:
+    clean = (text or "").strip()
+    if len(clean) <= limit:
+        return clean
+    return clean[:limit].rstrip() + "\n...[已截断]"
+
+
+def _build_status_tool_observation(final_text: str, patch: dict[str, Any]) -> str:
+    layer2 = _extract_layer2_from_patch(patch)
+    report = layer2.get("current_status_report") if isinstance(layer2.get("current_status_report"), dict) else {}
+    report_id = report.get("report_id")
+    report_md = _first_non_empty_text(report.get("report_content"))
+    if not report_md:
+        return final_text
+
+    header = f"【Status 子Agent结果】已提交现状分析报告 #{report_id}" if report_id else "【Status 子Agent结果】已提交现状分析报告"
+    payload = _trim_for_observation(report_md, limit=1800)
+    if final_text:
+        return f"{final_text}\n\n{header}\n{payload}"
+    return f"{header}\n{payload}"
+
+
+def _build_plan_tool_observation(final_text: str, patch: dict[str, Any]) -> str:
+    layer2 = _extract_layer2_from_patch(patch)
+    plan = layer2.get("current_action_plan") if isinstance(layer2.get("current_action_plan"), dict) else {}
+    plan_id = plan.get("plan_id")
+    plan_md = _first_non_empty_text(plan.get("plan_content"))
+    if not plan_md:
+        return final_text
+
+    header = f"【Plan 子Agent结果】已提交行动规划 #{plan_id}" if plan_id else "【Plan 子Agent结果】已提交行动规划"
+    payload = _trim_for_observation(plan_md, limit=1800)
+    if final_text:
+        return f"{final_text}\n\n{header}\n{payload}"
+    return f"{header}\n{payload}"
+
+
+def _build_guide_tool_observation(final_text: str, patch: dict[str, Any]) -> str:
+    layer2 = _extract_layer2_from_patch(patch)
+    guides = layer2.get("action_guides") if isinstance(layer2.get("action_guides"), list) else []
+    latest = guides[-1] if guides and isinstance(guides[-1], dict) else {}
+    if not latest:
+        return final_text
+
+    guide_id = latest.get("guide_id")
+    title = _first_non_empty_text(latest.get("title"), latest.get("one_liner"))
+    guide_obj = latest.get("guide") if isinstance(latest.get("guide"), dict) else {}
+    guide_md = _first_non_empty_text(guide_obj.get("guide_content"))
+    if not guide_md:
+        return final_text
+
+    if guide_id and title:
+        header = f"【Guide 子Agent结果】已提交行动指南 #{guide_id}（{title}）"
+    elif guide_id:
+        header = f"【Guide 子Agent结果】已提交行动指南 #{guide_id}"
+    elif title:
+        header = f"【Guide 子Agent结果】已提交行动指南（{title}）"
+    else:
+        header = "【Guide 子Agent结果】已提交行动指南"
+    payload = _trim_for_observation(guide_md, limit=1800)
+    if final_text:
+        return f"{final_text}\n\n{header}\n{payload}"
+    return f"{header}\n{payload}"
+
+
 def _build_status_brief(markdown: str) -> str:
     text = (markdown or "").strip()
     if not text:
@@ -414,6 +493,7 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
         text = ""
         if isinstance(final, dict) and isinstance(final.get("text"), str):
             text = final["text"].strip()
+        text = _build_status_tool_observation(text, patch)
         return ok(output=text, state_patch=patch)
 
     def _plan_tool(instruction: str) -> ToolResult:
@@ -454,6 +534,7 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
         text = ""
         if isinstance(final, dict) and isinstance(final.get("text"), str):
             text = final["text"].strip()
+        text = _build_plan_tool_observation(text, patch)
         return ok(output=text, state_patch=patch)
 
     def _guide_tool(instruction: str) -> ToolResult:
@@ -480,6 +561,7 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
         text = ""
         if isinstance(final, dict) and isinstance(final.get("text"), str):
             text = final["text"].strip()
+        text = _build_guide_tool_observation(text, patch)
         return ok(output=text, state_patch=patch)
 
     status_tool = StructuredTool.from_function(
