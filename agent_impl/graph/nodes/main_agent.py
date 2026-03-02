@@ -20,6 +20,7 @@
 
 import json
 import os
+import hashlib
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -46,6 +47,34 @@ from graph.subgraphs.plan import get_plan_subgraph
 from graph.subgraphs.guide import get_guide_subgraph
 from graph.subgraphs.status import get_status_subgraph
 from graph.tools.submit_tools import submit_tools_state_context
+from utils.logger import get_logger
+
+
+logger = get_logger("main_agent")
+
+
+def _answers_fingerprint(answers: Any) -> str:
+    if not isinstance(answers, dict) or not answers:
+        return ""
+    canonical = json.dumps(answers, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _extract_question_ids(payload: Any) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    questions = payload.get("questions")
+    if not isinstance(questions, list):
+        return []
+    qids: list[str] = []
+    for q in questions:
+        if not isinstance(q, dict):
+            continue
+        qid = q.get("id")
+        if qid is None:
+            continue
+        qids.append(str(qid))
+    return qids
 
 
 class _SubagentToolInput(BaseModel):
@@ -189,7 +218,7 @@ def _wrap_tools_for_patch_collection(
 
         def _make_wrapped(inner: BaseTool):
             def _wrapped(**kwargs):
-                result = inner.invoke(kwargs, config=sanitize_nested_runtime_config(ensure_config()))
+                result = inner.invoke(kwargs, config=sanitize_runtime_config(ensure_config()))
                 patch = _extract_state_patch(result)
                 if patch:
                     patches.append(patch)
@@ -322,7 +351,7 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
         cfg = _current_config()
         checkpointer = resolve_runtime_checkpointer(cfg)
         subgraph = get_status_subgraph(checkpointer=checkpointer) if checkpointer is not None else get_status_subgraph()
-        invoke_cfg = sanitize_nested_runtime_config(cfg)
+        invoke_cfg = build_inner_agent_config(cfg, namespace="status_subgraph")
         parent_state = state_getter()
         sub_in = {
             "task_spec": {
@@ -332,7 +361,7 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
             "private_messages": [],
         }
         sub_out = subgraph.invoke(sub_in, config=invoke_cfg)
-        if isinstance(sub_out, dict) and "__interrupt__" in sub_out:
+        while isinstance(sub_out, dict) and "__interrupt__" in sub_out:
             interrupts = sub_out.get("__interrupt__") or []
             payload = interrupts[0].value if interrupts else {}
             answer = interrupt(payload)
@@ -348,7 +377,7 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
         cfg = _current_config()
         checkpointer = resolve_runtime_checkpointer(cfg)
         subgraph = get_plan_subgraph(checkpointer=checkpointer) if checkpointer is not None else get_plan_subgraph()
-        invoke_cfg = sanitize_nested_runtime_config(cfg)
+        invoke_cfg = build_inner_agent_config(cfg, namespace="plan_subgraph")
         parent_state = state_getter()
         sub_in = {
             "task_spec": {
@@ -358,10 +387,24 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
             "private_messages": [],
         }
         sub_out = subgraph.invoke(sub_in, config=invoke_cfg)
-        if isinstance(sub_out, dict) and "__interrupt__" in sub_out:
+        while isinstance(sub_out, dict) and "__interrupt__" in sub_out:
             interrupts = sub_out.get("__interrupt__") or []
             payload = interrupts[0].value if interrupts else {}
+            qids = _extract_question_ids(payload)
+            logger.info(
+                "call_plan_agent interrupt: question_count=%s, qids=%s",
+                len(qids),
+                qids,
+            )
             answer = interrupt(payload)
+            if isinstance(answer, dict):
+                logger.info(
+                    "call_plan_agent resumed: answer_keys=%s, fp=%s",
+                    list(answer.keys()),
+                    _answers_fingerprint(answer),
+                )
+            else:
+                logger.info("call_plan_agent resumed: answer_type=%s", type(answer).__name__)
             sub_out = subgraph.invoke(Command(resume=answer), config=invoke_cfg)
         patch = dict(sub_out.get("state_patch") or {}) if isinstance(sub_out, dict) else {}
         final = sub_out.get("final") if isinstance(sub_out, dict) else None
@@ -374,7 +417,7 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
         cfg = _current_config()
         checkpointer = resolve_runtime_checkpointer(cfg)
         subgraph = get_guide_subgraph(checkpointer=checkpointer) if checkpointer is not None else get_guide_subgraph()
-        invoke_cfg = sanitize_nested_runtime_config(cfg)
+        invoke_cfg = build_inner_agent_config(cfg, namespace="guide_subgraph")
         parent_state = state_getter()
         sub_in = {
             "task_spec": {
@@ -384,7 +427,7 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
             "private_messages": [],
         }
         sub_out = subgraph.invoke(sub_in, config=invoke_cfg)
-        if isinstance(sub_out, dict) and "__interrupt__" in sub_out:
+        while isinstance(sub_out, dict) and "__interrupt__" in sub_out:
             interrupts = sub_out.get("__interrupt__") or []
             payload = interrupts[0].value if interrupts else {}
             answer = interrupt(payload)
@@ -399,19 +442,19 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
     status_tool = StructuredTool.from_function(
         func=_status_tool,
         name="call_status_agent",
-        description="调用 status 子 agent 完成现状分析/补齐缺口",
+        description="调用现状诊断专家，分析用户与 Crush 的当前关系阶段(L/T模型)、识别致命伤及信息缺口。是所有行动规划(Plan)的前提。",
         args_schema=_SubagentToolInput,
     )
     plan_tool = StructuredTool.from_function(
         func=_plan_tool,
         name="call_plan_agent",
-        description="调用 plan 子 agent 产出行动规划",
+        description="调用战略指挥官，基于现状诊断(Status Analysis)制定宏观行动蓝图、里程碑及交战规则(ROEs)。适用于确定“接下来该怎么做”的战略方向，严禁用于撰写具体话术。",
         args_schema=_SubagentToolInput,
     )
     guide_tool = StructuredTool.from_function(
         func=_guide_tool,
         name="call_guide_agent",
-        description="调用 guide 子 agent 产出行动指南或更新指南",
+        description="调用战术教官，将战略规划落地为原子化、保姆级的具体执行指南(SOP)或任务卡片。适用于生成具体的聊天话术、朋友圈文案、约会预案及心理按摩。必须在已有 Action Plan 后调用。",
         args_schema=_SubagentToolInput,
     )
 

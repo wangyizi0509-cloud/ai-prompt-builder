@@ -39,6 +39,8 @@ def resolve_runtime_checkpointer(config: RunnableConfig | None) -> Any:
     """Extract runtime checkpointer from top-level or configurable payload."""
     cfg = dict(config or {})
     checkpointer = cfg.get("checkpointer")
+    if checkpointer is None:
+        checkpointer = cfg.get("__pregel_checkpointer")
     if checkpointer is not None:
         return checkpointer
 

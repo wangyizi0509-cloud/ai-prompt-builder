@@ -124,6 +124,50 @@ def _normalize_private_messages(messages: list[Any]) -> list[dict]:
     return out
 
 
+def _private_message_key(msg: Any) -> str:
+    if not isinstance(msg, dict):
+        return ""
+    msg_id = msg.get("id")
+    if isinstance(msg_id, str) and msg_id:
+        return f"id:{msg_id}"
+    role = str(msg.get("role") or "")
+    tool_call_id = msg.get("tool_call_id")
+    if role == "tool":
+        return f"tool:{tool_call_id or ''}:{str(msg.get('content') or '')}"
+    tool_calls = msg.get("tool_calls")
+    if isinstance(tool_calls, list) and tool_calls:
+        ids: list[str] = []
+        for tc in tool_calls:
+            if isinstance(tc, dict) and tc.get("id"):
+                ids.append(str(tc["id"]))
+        if ids:
+            return f"tool_calls:{','.join(ids)}"
+    content = str(msg.get("content") or "")
+    if content:
+        return f"{role}:{content}"
+    name = str(msg.get("name") or "")
+    if name:
+        return f"{role}:name:{name}"
+    return role
+
+
+def _merge_private_messages(existing: Any, incoming: Any) -> list[dict]:
+    base = existing if isinstance(existing, list) else []
+    add = incoming if isinstance(incoming, list) else []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for m in base + add:
+        if not isinstance(m, dict):
+            continue
+        key = _private_message_key(m)
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        out.append(m)
+    return out
+
+
 def _dict_messages_to_lc(messages: list[dict]) -> list[Any]:
     out: list[Any] = []
     for m in messages or []:
@@ -268,10 +312,13 @@ def run_node(state: GuideSubState, config: RunnableConfig | None = None) -> dict
     final = messages_out[-1] if messages_out else AIMessage(content="")
     final_text = str(getattr(final, "content", "") or "").strip()
     normalized_private = _normalize_private_messages(messages_out)
+    merged_private = _merge_private_messages(private_messages, normalized_private)
+    prev_patches = state.get("tool_patches") if isinstance(state.get("tool_patches"), list) else []
+    merged_patches = list(prev_patches) + list(patches)
 
     update: dict[str, Any] = {
-        "private_messages": normalized_private,
-        "tool_patches": patches,
+        "private_messages": merged_private,
+        "tool_patches": merged_patches,
         "final": {"text": final_text},
     }
 
@@ -307,17 +354,36 @@ def handle_interrupt_node(state: GuideSubState, config: RunnableConfig | None = 
     final = messages_out[-1] if messages_out else AIMessage(content="")
     final_text = str(getattr(final, "content", "") or "").strip()
     normalized_private = _normalize_private_messages(messages_out)
+    prev_private = state.get("private_messages") if isinstance(state.get("private_messages"), list) else []
+    merged_private = _merge_private_messages(prev_private, normalized_private)
+    prev_patches = state.get("tool_patches") if isinstance(state.get("tool_patches"), list) else []
+    merged_patches = list(prev_patches) + list(patches)
 
-    return {
-        "private_messages": normalized_private,
-        "tool_patches": patches,
+    update: dict[str, Any] = {
+        "private_messages": merged_private,
+        "tool_patches": merged_patches,
         "final": {"text": final_text},
-        "_inner_interrupted": False,
-        "_interrupt_payload": {},
     }
+
+    if isinstance(result, dict) and "__interrupt__" in result:
+        interrupts = result.get("__interrupt__") or []
+        payload2 = interrupts[0].value if interrupts else {}
+        update["_inner_interrupted"] = True
+        update["_interrupt_payload"] = payload2
+    else:
+        update["_inner_interrupted"] = False
+        update["_interrupt_payload"] = {}
+
+    return update
 
 
 def _route_after_run(state: GuideSubState) -> str:
+    if state.get("_inner_interrupted"):
+        return "handle_interrupt"
+    return "finalize"
+
+
+def _route_after_handle_interrupt(state: GuideSubState) -> str:
     if state.get("_inner_interrupted"):
         return "handle_interrupt"
     return "finalize"
@@ -354,7 +420,10 @@ def create_guide_subgraph() -> StateGraph:
         "handle_interrupt": "handle_interrupt",
         "finalize": "finalize",
     })
-    builder.add_edge("handle_interrupt", "finalize")
+    builder.add_conditional_edges("handle_interrupt", _route_after_handle_interrupt, {
+        "handle_interrupt": "handle_interrupt",
+        "finalize": "finalize",
+    })
     builder.add_edge("finalize", "cleanup")
     builder.add_edge("cleanup", END)
     return builder

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from typing import Any, Optional
@@ -24,6 +25,78 @@ from graph.runtime_config import (
 )
 from graph.state import convert_message_to_dict, ensure_message_id
 from graph.tools.submit_tools import submit_tools_state_context
+from utils.logger import get_logger
+
+
+logger = get_logger("plan_subgraph")
+
+
+def _answers_fingerprint(answers: Any) -> str:
+    if not isinstance(answers, dict) or not answers:
+        return ""
+    canonical = json.dumps(answers, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _extract_question_ids(payload: Any) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    questions = payload.get("questions")
+    if not isinstance(questions, list):
+        return []
+    qids: list[str] = []
+    for q in questions:
+        if not isinstance(q, dict):
+            continue
+        qid = q.get("id")
+        if qid is None:
+            continue
+        qids.append(str(qid))
+    return qids
+
+
+def _private_message_key(msg: Any) -> str:
+    if not isinstance(msg, dict):
+        return ""
+    msg_id = msg.get("id")
+    if isinstance(msg_id, str) and msg_id:
+        return f"id:{msg_id}"
+    role = str(msg.get("role") or "")
+    tool_call_id = msg.get("tool_call_id")
+    if role == "tool":
+        return f"tool:{tool_call_id or ''}:{str(msg.get('content') or '')}"
+    tool_calls = msg.get("tool_calls")
+    if isinstance(tool_calls, list) and tool_calls:
+        ids: list[str] = []
+        for tc in tool_calls:
+            if isinstance(tc, dict) and tc.get("id"):
+                ids.append(str(tc["id"]))
+        if ids:
+            return f"tool_calls:{','.join(ids)}"
+    content = str(msg.get("content") or "")
+    if content:
+        return f"{role}:{content}"
+    name = str(msg.get("name") or "")
+    if name:
+        return f"{role}:name:{name}"
+    return role
+
+
+def _merge_private_messages(existing: Any, incoming: Any) -> list[dict]:
+    base = existing if isinstance(existing, list) else []
+    add = incoming if isinstance(incoming, list) else []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for m in base + add:
+        if not isinstance(m, dict):
+            continue
+        key = _private_message_key(m)
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        out.append(m)
+    return out
 
 
 class PlanSubState(TypedDict, total=False):
@@ -267,10 +340,13 @@ def run_node(state: PlanSubState, config: RunnableConfig | None = None) -> dict[
     final = messages_out[-1] if messages_out else AIMessage(content="")
     final_text = str(getattr(final, "content", "") or "").strip()
     normalized_private = _normalize_private_messages(messages_out)
+    merged_private = _merge_private_messages(private_messages, normalized_private)
+    prev_patches = state.get("tool_patches") if isinstance(state.get("tool_patches"), list) else []
+    merged_patches = list(prev_patches) + list(patches)
 
     update: dict[str, Any] = {
-        "private_messages": normalized_private,
-        "tool_patches": patches,
+        "private_messages": merged_private,
+        "tool_patches": merged_patches,
         "final": {"text": final_text},
     }
 
@@ -278,6 +354,12 @@ def run_node(state: PlanSubState, config: RunnableConfig | None = None) -> dict[
     if isinstance(result, dict) and "__interrupt__" in result:
         interrupts = result.get("__interrupt__") or []
         payload = interrupts[0].value if interrupts else {}
+        qids = _extract_question_ids(payload)
+        logger.info(
+            "plan_subgraph inner interrupt captured: question_count=%s, qids=%s",
+            len(qids),
+            qids,
+        )
         update["_inner_interrupted"] = True
         update["_interrupt_payload"] = payload
 
@@ -293,7 +375,21 @@ def handle_interrupt_node(state: PlanSubState, config: RunnableConfig | None = N
     """
     payload = state.get("_interrupt_payload") if isinstance(state.get("_interrupt_payload"), dict) else {}
 
+    qids = _extract_question_ids(payload)
+    logger.info(
+        "plan_subgraph relaying interrupt: question_count=%s, qids=%s",
+        len(qids),
+        qids,
+    )
     answer = interrupt(payload)
+    if isinstance(answer, dict):
+        logger.info(
+            "plan_subgraph resumed: answer_keys=%s, fp=%s",
+            list(answer.keys()),
+            _answers_fingerprint(answer),
+        )
+    else:
+        logger.info("plan_subgraph resumed: answer_type=%s", type(answer).__name__)
 
     task_spec = state.get("task_spec") if isinstance(state.get("task_spec"), dict) else {}
     parent_state = task_spec.get("parent_state") if isinstance(task_spec.get("parent_state"), dict) else {}
@@ -306,17 +402,42 @@ def handle_interrupt_node(state: PlanSubState, config: RunnableConfig | None = N
     final = messages_out[-1] if messages_out else AIMessage(content="")
     final_text = str(getattr(final, "content", "") or "").strip()
     normalized_private = _normalize_private_messages(messages_out)
+    prev_private = state.get("private_messages") if isinstance(state.get("private_messages"), list) else []
+    merged_private = _merge_private_messages(prev_private, normalized_private)
+    prev_patches = state.get("tool_patches") if isinstance(state.get("tool_patches"), list) else []
+    merged_patches = list(prev_patches) + list(patches)
+    logger.info(
+        "plan_subgraph private_messages merged: prev=%s, incoming=%s, merged=%s",
+        len(prev_private),
+        len(normalized_private),
+        len(merged_private),
+    )
 
-    return {
-        "private_messages": normalized_private,
-        "tool_patches": patches,
+    update: dict[str, Any] = {
+        "private_messages": merged_private,
+        "tool_patches": merged_patches,
         "final": {"text": final_text},
-        "_inner_interrupted": False,
-        "_interrupt_payload": {},
     }
+
+    if isinstance(result, dict) and "__interrupt__" in result:
+        interrupts = result.get("__interrupt__") or []
+        payload2 = interrupts[0].value if interrupts else {}
+        update["_inner_interrupted"] = True
+        update["_interrupt_payload"] = payload2
+    else:
+        update["_inner_interrupted"] = False
+        update["_interrupt_payload"] = {}
+
+    return update
 
 
 def _route_after_run(state: PlanSubState) -> str:
+    if state.get("_inner_interrupted"):
+        return "handle_interrupt"
+    return "finalize"
+
+
+def _route_after_handle_interrupt(state: PlanSubState) -> str:
     if state.get("_inner_interrupted"):
         return "handle_interrupt"
     return "finalize"
@@ -353,7 +474,10 @@ def create_plan_subgraph() -> StateGraph:
         "handle_interrupt": "handle_interrupt",
         "finalize": "finalize",
     })
-    builder.add_edge("handle_interrupt", "finalize")
+    builder.add_conditional_edges("handle_interrupt", _route_after_handle_interrupt, {
+        "handle_interrupt": "handle_interrupt",
+        "finalize": "finalize",
+    })
     builder.add_edge("finalize", "cleanup")
     builder.add_edge("cleanup", END)
     return builder
