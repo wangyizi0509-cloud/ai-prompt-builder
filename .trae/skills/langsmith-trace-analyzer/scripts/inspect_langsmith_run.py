@@ -9,7 +9,8 @@ import json
 
 # 加载 .env
 def load_env():
-    env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+    # Looking for .env in the root project directory
+    env_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".env")
     if os.path.isfile(env_path):
         with open(env_path) as f:
             for line in f:
@@ -18,12 +19,16 @@ def load_env():
                     k, v = line.split("=", 1)
                     os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
-
 def main():
     load_env()
-    run_id = (sys.argv[1] or "").strip() if len(sys.argv) > 1 else None
+    
+    # Try to get run_id from arg 1, project from arg 2
+    run_id = sys.argv[1] if len(sys.argv) > 1 else None
+    project_arg = sys.argv[2] if len(sys.argv) > 2 else None
+    project_name = project_arg or os.environ.get("LANGSMITH_PROJECT", "Crushe2-0")
+    
     if not run_id:
-        print("用法: python scripts/inspect_langsmith_run.py <run_id>")
+        print("用法: python scripts/inspect_langsmith_run.py <run_id> [project_name]")
         sys.exit(1)
 
     try:
@@ -48,7 +53,6 @@ def main():
 
     # 若该 run 有 trace_id，拉取整条 trace 的所有 runs（便于看 main_agent -> skill_tools -> route 顺序）
     trace_id = getattr(run, "trace_id", None) or getattr(run, "draft_id", None) or run.id
-    project_name = os.environ.get("LANGSMITH_PROJECT", "crushe-agent-debug")
     all_runs = list(client.list_runs(project_name=project_name, trace_id=trace_id))
     # 按开始时间排序
     all_runs.sort(key=lambda r: (getattr(r, "start_time") or getattr(r, "start_time_iso", "") or ""))
@@ -58,7 +62,11 @@ def main():
         rt = getattr(r, "run_type", None)
         rid = getattr(r, "id", None)
         parent_id = getattr(r, "parent_run_id", None)
-        print(f"  {i+1}. [{rt}] {name}  id={rid}  parent={parent_id}")
+        error = getattr(r, "error", None)
+        status = "❌ ERROR" if error else "✅ OK"
+        print(f"  {i+1}. [{rt}] {name} ({status}) id={rid} parent={parent_id}")
+        if error:
+            print(f"      Error: {error}")
 
     def ser(obj):
         if obj is None:
@@ -86,6 +94,19 @@ def main():
                               "agent_resume_point", "_end_turn", "_iteration_count"):
                         if k in inp and inp[k] is not None:
                             print(f"{pref}  inputs.{k} = {repr(inp[k])}")
+                    
+                    # 打印消息概览
+                    if "messages" in inp and isinstance(inp["messages"], list):
+                        msgs = inp["messages"]
+                        print(f"{pref}  inputs.messages: count={len(msgs)}")
+                        for m in msgs[-5:]:
+                            role = m.get("role") or m.get("type")
+                            content = str(m.get("content", ""))[:50]
+                            tc = m.get("tool_calls")
+                            tcid = m.get("tool_call_id")
+                            print(f"{pref}    - [{role}] content={repr(content)} tool_calls={bool(tc)} tcid={tcid}")
+                            if tc:
+                                print(f"{pref}      tool_calls IDs: {[t.get('id') for t in tc]}")
             if getattr(r, "outputs", None):
                 out = ser(r.outputs)
                 if isinstance(out, dict) and out:
@@ -93,7 +114,13 @@ def main():
                         if k in out:
                             v = out[k]
                             if k == "messages" and isinstance(v, list):
-                                print(f"{pref}  outputs.{k} = list(len={len(v)})")
+                                print(f"{pref}  outputs.{k}: count={len(v)}")
+                                for m in v[-5:]:
+                                    role = m.get("role") or m.get("type")
+                                    content = str(m.get("content", ""))[:50]
+                                    tc = m.get("tool_calls")
+                                    tcid = m.get("tool_call_id")
+                                    print(f"{pref}    - [{role}] content={repr(content)} tool_calls={bool(tc)} tcid={tcid}")
                             else:
                                 print(f"{pref}  outputs.{k} = {repr(v)[:200]}")
         if getattr(r, "child_runs", None) and r.child_runs:
