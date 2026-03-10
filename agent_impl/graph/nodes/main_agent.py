@@ -150,6 +150,35 @@ def _tool_output_to_content(result: Any) -> str:
         return str(result)
 
 
+def _tool_failure_to_content(tool_name: str, exc: Exception) -> str:
+    name = (tool_name or "unknown_tool").strip() or "unknown_tool"
+    err = str(exc).strip() or exc.__class__.__name__
+    return f"{name} 调用失败：{err}"
+
+
+def _is_checkpoint_iter_error(exc: Exception) -> bool:
+    text = str(exc or "").lower()
+    return "error iterating checkpoint results" in text
+
+
+def _invoke_subgraph_with_fallback_namespace(
+    *,
+    subgraph: Any,
+    sub_in: dict[str, Any],
+    invoke_cfg: dict[str, Any],
+    fallback_invoke_cfg: dict[str, Any],
+    tool_name: str,
+) -> tuple[Any, dict[str, Any]]:
+    try:
+        return subgraph.invoke(sub_in, config=invoke_cfg), invoke_cfg
+    except Exception as e:
+        if not _is_checkpoint_iter_error(e):
+            raise
+        logger.exception("%s invoke failed with primary namespace", tool_name)
+        logger.warning("%s retrying with fallback namespace", tool_name)
+        return subgraph.invoke(sub_in, config=fallback_invoke_cfg), fallback_invoke_cfg
+
+
 def _extract_state_patch(result: Any) -> dict:
     if isinstance(result, dict) and isinstance(result.get("state_patch"), dict):
         return dict(result.get("state_patch") or {})
@@ -340,7 +369,11 @@ def _wrap_tools_for_patch_collection(
 
         def _make_wrapped(inner: BaseTool):
             def _wrapped(**kwargs):
-                result = inner.invoke(kwargs, config=sanitize_runtime_config(ensure_config()))
+                try:
+                    result = inner.invoke(kwargs, config=sanitize_runtime_config(ensure_config()))
+                except Exception as e:
+                    logger.exception("tool invoke failed: tool=%s", getattr(inner, "name", ""))
+                    return _tool_failure_to_content(getattr(inner, "name", ""), e)
                 patch = _extract_state_patch(result)
                 if patch:
                     patches.append(patch)
@@ -474,6 +507,7 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
         checkpointer = resolve_runtime_checkpointer(cfg)
         subgraph = get_status_subgraph(checkpointer=checkpointer) if checkpointer is not None else get_status_subgraph()
         invoke_cfg = build_inner_agent_config(cfg, namespace="status_subgraph")
+        invoke_cfg_fallback = build_inner_agent_config(cfg, namespace="status_subgraph_retry")
         parent_state = state_getter()
         sub_in = {
             "task_spec": {
@@ -482,12 +516,18 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
             },
             "private_messages": [],
         }
-        sub_out = subgraph.invoke(sub_in, config=invoke_cfg)
+        sub_out, active_cfg = _invoke_subgraph_with_fallback_namespace(
+            subgraph=subgraph,
+            sub_in=sub_in,
+            invoke_cfg=invoke_cfg,
+            fallback_invoke_cfg=invoke_cfg_fallback,
+            tool_name="call_status_agent",
+        )
         while isinstance(sub_out, dict) and "__interrupt__" in sub_out:
             interrupts = sub_out.get("__interrupt__") or []
             payload = interrupts[0].value if interrupts else {}
             answer = interrupt(payload)
-            sub_out = subgraph.invoke(Command(resume=answer), config=invoke_cfg)
+            sub_out = subgraph.invoke(Command(resume=answer), config=active_cfg)
         patch = dict(sub_out.get("state_patch") or {}) if isinstance(sub_out, dict) else {}
         final = sub_out.get("final") if isinstance(sub_out, dict) else None
         text = ""
@@ -501,6 +541,7 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
         checkpointer = resolve_runtime_checkpointer(cfg)
         subgraph = get_plan_subgraph(checkpointer=checkpointer) if checkpointer is not None else get_plan_subgraph()
         invoke_cfg = build_inner_agent_config(cfg, namespace="plan_subgraph")
+        invoke_cfg_fallback = build_inner_agent_config(cfg, namespace="plan_subgraph_retry")
         parent_state = state_getter()
         sub_in = {
             "task_spec": {
@@ -509,7 +550,13 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
             },
             "private_messages": [],
         }
-        sub_out = subgraph.invoke(sub_in, config=invoke_cfg)
+        sub_out, active_cfg = _invoke_subgraph_with_fallback_namespace(
+            subgraph=subgraph,
+            sub_in=sub_in,
+            invoke_cfg=invoke_cfg,
+            fallback_invoke_cfg=invoke_cfg_fallback,
+            tool_name="call_plan_agent",
+        )
         while isinstance(sub_out, dict) and "__interrupt__" in sub_out:
             interrupts = sub_out.get("__interrupt__") or []
             payload = interrupts[0].value if interrupts else {}
@@ -528,7 +575,7 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
                 )
             else:
                 logger.info("call_plan_agent resumed: answer_type=%s", type(answer).__name__)
-            sub_out = subgraph.invoke(Command(resume=answer), config=invoke_cfg)
+            sub_out = subgraph.invoke(Command(resume=answer), config=active_cfg)
         patch = dict(sub_out.get("state_patch") or {}) if isinstance(sub_out, dict) else {}
         final = sub_out.get("final") if isinstance(sub_out, dict) else None
         text = ""
@@ -542,6 +589,7 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
         checkpointer = resolve_runtime_checkpointer(cfg)
         subgraph = get_guide_subgraph(checkpointer=checkpointer) if checkpointer is not None else get_guide_subgraph()
         invoke_cfg = build_inner_agent_config(cfg, namespace="guide_subgraph")
+        invoke_cfg_fallback = build_inner_agent_config(cfg, namespace="guide_subgraph_retry")
         parent_state = state_getter()
         sub_in = {
             "task_spec": {
@@ -550,12 +598,18 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
             },
             "private_messages": [],
         }
-        sub_out = subgraph.invoke(sub_in, config=invoke_cfg)
+        sub_out, active_cfg = _invoke_subgraph_with_fallback_namespace(
+            subgraph=subgraph,
+            sub_in=sub_in,
+            invoke_cfg=invoke_cfg,
+            fallback_invoke_cfg=invoke_cfg_fallback,
+            tool_name="call_guide_agent",
+        )
         while isinstance(sub_out, dict) and "__interrupt__" in sub_out:
             interrupts = sub_out.get("__interrupt__") or []
             payload = interrupts[0].value if interrupts else {}
             answer = interrupt(payload)
-            sub_out = subgraph.invoke(Command(resume=answer), config=invoke_cfg)
+            sub_out = subgraph.invoke(Command(resume=answer), config=active_cfg)
         patch = dict(sub_out.get("state_patch") or {}) if isinstance(sub_out, dict) else {}
         final = sub_out.get("final") if isinstance(sub_out, dict) else None
         text = ""

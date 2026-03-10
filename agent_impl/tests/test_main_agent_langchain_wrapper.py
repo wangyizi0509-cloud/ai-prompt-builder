@@ -1,5 +1,5 @@
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 
 from agents.tooling.tool_result import ok
@@ -187,3 +187,71 @@ def test_main_agent_skips_status_brief_when_status_unchanged(monkeypatch):
     assert pending[0]["from"] == "main_agent"
     assert pending[0]["phase"] == "final"
     assert pending[0]["content"] == "final only"
+
+
+def test_main_agent_tool_failure_returns_tool_message_and_avoids_cascade(monkeypatch):
+    def _broken_status_tool(instruction: str) -> dict:
+        raise RuntimeError("checkpoint read failed")
+
+    status_tool = StructuredTool.from_function(
+        func=_broken_status_tool,
+        name="call_status_agent",
+        description="broken status tool",
+    )
+    dummy = DummyModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "call_status_agent",
+                        "args": {"instruction": "x"},
+                        "id": "tc_status",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(content="fallback final"),
+        ]
+    )
+
+    monkeypatch.setattr(main_agent_module, "get_llm", lambda *a, **k: dummy)
+    monkeypatch.setattr(main_agent_module, "_build_all_tools", lambda state_getter, runtime_config=None: [status_tool])
+
+    out = main_agent_module.main_agent_node(create_test_state("hi"))
+    assert out["pending_responses"][-1]["content"] == "fallback final"
+
+    second_round_messages = dummy.seen_messages[1]
+    tool_msgs = [m for m in second_round_messages if isinstance(m, ToolMessage)]
+    assert tool_msgs
+    assert any(str(getattr(m, "tool_call_id", "")) == "tc_status" for m in tool_msgs)
+    assert any("调用失败" in str(getattr(m, "content", "")) for m in tool_msgs)
+
+
+def test_status_tool_retries_with_fallback_namespace_on_checkpoint_iter_error(monkeypatch):
+    class _FakeSubgraph:
+        def __init__(self):
+            self.thread_ids = []
+
+        def invoke(self, payload, config=None):
+            tid = ((config or {}).get("configurable") or {}).get("thread_id", "")
+            self.thread_ids.append(tid)
+            if tid.endswith(":status_subgraph"):
+                raise RuntimeError("error iterating checkpoint results")
+            return {"state_patch": {}, "final": {"text": "status ok"}}
+
+    fake_subgraph = _FakeSubgraph()
+    monkeypatch.setattr(main_agent_module, "get_status_subgraph", lambda checkpointer=None: fake_subgraph)
+    monkeypatch.setattr(main_agent_module, "build_all_tools_for_agent", lambda role, state_getter=None: [])
+
+    tools = main_agent_module._build_all_tools(
+        lambda: {},
+        runtime_config={"configurable": {"thread_id": "thread-1"}, "checkpointer": object()},
+    )
+    status_tool = next(t for t in tools if getattr(t, "name", "") == "call_status_agent")
+    result = status_tool.invoke({"instruction": "x"})
+
+    assert result["ok"] is True
+    assert "status ok" in result["output"]
+    assert fake_subgraph.thread_ids[0].endswith(":status_subgraph")
+    assert fake_subgraph.thread_ids[1].endswith(":status_subgraph_retry")
