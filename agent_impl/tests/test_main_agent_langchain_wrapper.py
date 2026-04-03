@@ -1,6 +1,7 @@
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import StructuredTool
+from langgraph.errors import NodeInterrupt
 
 from agents.tooling.tool_result import ok
 from graph.nodes import main_agent as main_agent_module
@@ -226,6 +227,22 @@ def test_main_agent_tool_failure_returns_tool_message_and_avoids_cascade(monkeyp
     assert tool_msgs
     assert any(str(getattr(m, "tool_call_id", "")) == "tc_status" for m in tool_msgs)
     assert any("调用失败" in str(getattr(m, "content", "")) for m in tool_msgs)
+
+
+def test_main_agent_tool_wrapper_reraises_graph_interrupt():
+    def _interrupting_tool() -> dict:
+        raise NodeInterrupt({"questions": [{"id": "q1"}], "type": "inquiry_card"})
+
+    interrupt_tool = StructuredTool.from_function(
+        func=_interrupting_tool,
+        name="ask_human",
+        description="interrupting tool",
+    )
+
+    wrapped = main_agent_module._wrap_tools_for_patch_collection([interrupt_tool], patches=[])
+
+    with pytest.raises(NodeInterrupt):
+        wrapped[0].invoke({})
 
 
 def test_status_tool_retries_with_fallback_namespace_on_checkpoint_iter_error(monkeypatch):

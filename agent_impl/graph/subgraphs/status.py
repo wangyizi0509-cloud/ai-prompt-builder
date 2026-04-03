@@ -22,6 +22,12 @@ from graph.runtime_config import (
     build_inner_agent_config,
     resolve_runtime_checkpointer,
 )
+from graph.subgraphs.deferred_human import (
+    build_human_answer_patch,
+    extract_deferred_interrupt,
+    inject_human_answer_into_messages,
+    replace_ask_human_tool,
+)
 from graph.state import convert_message_to_dict, ensure_message_id
 from graph.tools.submit_tools import submit_tools_state_context
 
@@ -32,12 +38,24 @@ class StatusSubState(TypedDict, total=False):
     tool_patches: list[dict]
     final: dict
     state_patch: dict
+    intermediate_messages: list[dict]  # 子图内 agent 的中间 AI 文本
     # -- interrupt/resume bookkeeping --
     _inner_interrupted: bool
     _interrupt_payload: dict
 
 
 _compiled_cache: dict[int, Any] = {}
+
+
+def _extract_intermediate_ai_texts(messages_out: list[Any]) -> list[str]:
+    """从 messages_out 中提取中间 AIMessage 的文本内容（排除最后一条，它已在 final.text）。"""
+    ai_messages = [m for m in messages_out if isinstance(m, AIMessage)]
+    texts: list[str] = []
+    for msg in ai_messages[:-1]:
+        content = str(getattr(msg, "content", "") or "").strip()
+        if content:
+            texts.append(content)
+    return texts
 
 
 def _normalize_role(msg_dict: dict) -> dict:
@@ -198,7 +216,7 @@ def _build_status_tools(task_spec: dict) -> list[BaseTool]:
     def state_getter() -> dict:
         return parent_state
 
-    return build_all_tools_for_agent("status", state_getter=state_getter)
+    return replace_ask_human_tool(build_all_tools_for_agent("status", state_getter=state_getter))
 
 
 def _tool_output_to_content(result: Any) -> str:
@@ -220,6 +238,7 @@ def _extract_state_patch(result: Any) -> dict:
 def _wrap_tools_for_patch_collection(
     tools: list[BaseTool],
     patches: list[dict],
+    interrupt_requests: list[dict] | None = None,
     live_state: dict | None = None,
 ) -> list[BaseTool]:
     wrapped: list[BaseTool] = []
@@ -231,6 +250,9 @@ def _wrap_tools_for_patch_collection(
         def _make_wrapped(inner: BaseTool):
             def _wrapped(**kwargs):
                 result = inner.invoke(kwargs)
+                deferred_interrupt = extract_deferred_interrupt(result)
+                if deferred_interrupt and interrupt_requests is not None:
+                    interrupt_requests.append(deferred_interrupt)
                 patch = _extract_state_patch(result)
                 if patch:
                     patches.append(patch)
@@ -256,7 +278,7 @@ def _wrap_tools_for_patch_collection(
 
 def _create_inner_agent(
     task_spec: dict, config: RunnableConfig | None = None, live_state: dict | None = None,
-) -> tuple[Any, dict[str, Any], list[dict]]:
+) -> tuple[Any, dict[str, Any], list[dict], list[dict]]:
     """Build the inner create_agent graph, clean config, and a patches collector.
 
     Returns ``(agent_graph, cfg, patches)`` — shared by *run* and
@@ -266,7 +288,13 @@ def _create_inner_agent(
     """
     tools = _build_status_tools(task_spec)
     patches: list[dict] = []
-    wrapped_tools = _wrap_tools_for_patch_collection(list(tools or []), patches, live_state=live_state)
+    interrupt_requests: list[dict] = []
+    wrapped_tools = _wrap_tools_for_patch_collection(
+        list(tools or []),
+        patches,
+        interrupt_requests,
+        live_state=live_state,
+    )
 
     rounds = max(1, int(os.getenv("SUBAGENT_TOOL_MAX_ROUNDS", "8")))
     checkpointer = resolve_runtime_checkpointer(config)
@@ -284,7 +312,7 @@ def _create_inner_agent(
         name="status_tool_loop_agent",
         checkpointer=checkpointer,
     )
-    return agent_graph, cfg, patches
+    return agent_graph, cfg, patches, interrupt_requests
 
 
 def run_node(state: StatusSubState, config: RunnableConfig | None = None) -> dict[str, Any]:
@@ -301,7 +329,7 @@ def run_node(state: StatusSubState, config: RunnableConfig | None = None) -> dic
     private_messages = state.get("private_messages") if isinstance(state.get("private_messages"), list) else []
 
     parent_state = task_spec.get("parent_state") if isinstance(task_spec.get("parent_state"), dict) else {}
-    agent_graph, cfg, patches = _create_inner_agent(task_spec, config, live_state=parent_state)
+    agent_graph, cfg, patches, interrupt_requests = _create_inner_agent(task_spec, config, live_state=parent_state)
 
     if private_messages:
         messages_in: list[BaseMessage] = _dict_messages_to_lc(private_messages)
@@ -325,14 +353,20 @@ def run_node(state: StatusSubState, config: RunnableConfig | None = None) -> dic
     prev_patches = state.get("tool_patches") if isinstance(state.get("tool_patches"), list) else []
     merged_patches = list(prev_patches) + list(patches)
 
+    intermediate_texts = _extract_intermediate_ai_texts(messages_out)
+
     update: dict[str, Any] = {
         "private_messages": merged_private,
         "tool_patches": merged_patches,
         "final": {"text": final_text},
+        "intermediate_messages": [{"text": t} for t in intermediate_texts],
     }
 
     # Detect interrupt — save info to state, do NOT call interrupt() here.
-    if isinstance(result, dict) and "__interrupt__" in result:
+    if interrupt_requests:
+        update["_inner_interrupted"] = True
+        update["_interrupt_payload"] = interrupt_requests[0]
+    elif isinstance(result, dict) and "__interrupt__" in result:
         interrupts = result.get("__interrupt__") or []
         payload = interrupts[0].value if interrupts else {}
         update["_inner_interrupted"] = True
@@ -347,8 +381,8 @@ def handle_interrupt_node(state: StatusSubState, config: RunnableConfig | None =
     On first execution ``interrupt(payload)`` raises ``GraphInterrupt``,
     pausing the outer subgraph.  On resume LangGraph re-executes *this*
     node (not ``run``); ``interrupt()`` returns the user's answer via
-    index-matching, and ``Command(resume=answer)`` directly resumes the
-    inner graph from its **original** interrupt checkpoint.
+    index-matching, and we inject that answer into the stored tool-call
+    transcript before re-running the inner agent.
     """
     payload = state.get("_interrupt_payload") if isinstance(state.get("_interrupt_payload"), dict) else {}
 
@@ -359,28 +393,43 @@ def handle_interrupt_node(state: StatusSubState, config: RunnableConfig | None =
     # Reconstruct the inner agent (same checkpointer + deterministic thread_id)
     task_spec = state.get("task_spec") if isinstance(state.get("task_spec"), dict) else {}
     parent_state = task_spec.get("parent_state") if isinstance(task_spec.get("parent_state"), dict) else {}
-    agent_graph, cfg, patches = _create_inner_agent(task_spec, config, live_state=parent_state)
+    answer_patch = build_human_answer_patch(payload, answer)
+    if answer_patch:
+        updated_parent = merge_state_patch(dict(parent_state), answer_patch)
+        parent_state.clear()
+        parent_state.update(updated_parent)
 
-    # Directly resume the inner graph from its original interrupt checkpoint
+    resume_private = inject_human_answer_into_messages(
+        state.get("private_messages") if isinstance(state.get("private_messages"), list) else [],
+        answer,
+    )
+    agent_graph, cfg, patches, interrupt_requests = _create_inner_agent(task_spec, config, live_state=parent_state)
+
     with submit_tools_state_context(parent_state):
-        result = agent_graph.invoke(Command(resume=answer), config=cfg)
+        result = agent_graph.invoke({"messages": _dict_messages_to_lc(resume_private)}, config=cfg)
 
     messages_out = list(result.get("messages") or []) if isinstance(result, dict) else []
     final = messages_out[-1] if messages_out else AIMessage(content="")
     final_text = str(getattr(final, "content", "") or "").strip()
     normalized_private = _normalize_private_messages(messages_out)
-    prev_private = state.get("private_messages") if isinstance(state.get("private_messages"), list) else []
-    merged_private = _merge_private_messages(prev_private, normalized_private)
+    merged_private = _merge_private_messages(resume_private, normalized_private)
     prev_patches = state.get("tool_patches") if isinstance(state.get("tool_patches"), list) else []
-    merged_patches = list(prev_patches) + list(patches)
+    merged_patches = list(prev_patches) + [answer_patch] + list(patches)
+
+    intermediate_texts = _extract_intermediate_ai_texts(messages_out)
 
     update: dict[str, Any] = {
         "private_messages": merged_private,
         "tool_patches": merged_patches,
         "final": {"text": final_text},
+        "intermediate_messages": [{"text": t} for t in intermediate_texts],
     }
 
-    if isinstance(result, dict) and "__interrupt__" in result:
+    if interrupt_requests:
+        payload2 = interrupt_requests[0]
+        update["_inner_interrupted"] = True
+        update["_interrupt_payload"] = payload2
+    elif isinstance(result, dict) and "__interrupt__" in result:
         interrupts = result.get("__interrupt__") or []
         payload2 = interrupts[0].value if interrupts else {}
         update["_inner_interrupted"] = True
@@ -408,7 +457,8 @@ def _route_after_handle_interrupt(state: StatusSubState) -> str:
 def finalize_node(state: StatusSubState, config: RunnableConfig | None = None) -> dict[str, Any]:
     tool_patches = state.get("tool_patches") if isinstance(state.get("tool_patches"), list) else []
     merged_patch = merge_patches({}, tool_patches)
-    return {"state_patch": merged_patch}
+    intermediate = state.get("intermediate_messages") if isinstance(state.get("intermediate_messages"), list) else []
+    return {"state_patch": merged_patch, "intermediate_messages": intermediate}
 
 
 def cleanup_node(state: StatusSubState, config: RunnableConfig | None = None) -> dict[str, Any]:
@@ -421,6 +471,8 @@ def cleanup_node(state: StatusSubState, config: RunnableConfig | None = None) ->
         updates["_inner_interrupted"] = False
     if state.get("_interrupt_payload"):
         updates["_interrupt_payload"] = {}
+    if state.get("intermediate_messages"):
+        updates["intermediate_messages"] = []
     return updates
 
 

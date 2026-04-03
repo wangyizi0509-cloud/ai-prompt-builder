@@ -583,6 +583,15 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
         if isinstance(final, dict) and isinstance(final.get("text"), str):
             text = final["text"].strip()
         text = _build_status_tool_observation(text, patch)
+        # 提取子图中间 AI 消息，累积到 working_state 的临时字段
+        intermediate = sub_out.get("intermediate_messages") or [] if isinstance(sub_out, dict) else []
+        if intermediate:
+            ws = state_getter()
+            existing = ws.get("_subgraph_intermediates") or []
+            for msg in intermediate:
+                if isinstance(msg, dict) and msg.get("text"):
+                    existing.append({"from": "status_agent", "content": msg["text"], "phase": "subgraph_thinking"})
+            ws["_subgraph_intermediates"] = existing
         return ok(output=text, state_patch=patch)
 
     def _plan_tool(instruction: str) -> ToolResult:
@@ -652,6 +661,15 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
         if isinstance(final, dict) and isinstance(final.get("text"), str):
             text = final["text"].strip()
         text = _build_plan_tool_observation(text, patch)
+        # 提取子图中间 AI 消息，累积到 working_state 的临时字段
+        intermediate = sub_out.get("intermediate_messages") or [] if isinstance(sub_out, dict) else []
+        if intermediate:
+            ws = state_getter()
+            existing = ws.get("_subgraph_intermediates") or []
+            for msg in intermediate:
+                if isinstance(msg, dict) and msg.get("text"):
+                    existing.append({"from": "plan_agent", "content": msg["text"], "phase": "subgraph_thinking"})
+            ws["_subgraph_intermediates"] = existing
         return ok(output=text, state_patch=patch)
 
     def _guide_tool(instruction: str) -> ToolResult:
@@ -693,6 +711,15 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
         if isinstance(final, dict) and isinstance(final.get("text"), str):
             text = final["text"].strip()
         text = _build_guide_tool_observation(text, patch)
+        # 提取子图中间 AI 消息，累积到 working_state 的临时字段
+        intermediate = sub_out.get("intermediate_messages") or [] if isinstance(sub_out, dict) else []
+        if intermediate:
+            ws = state_getter()
+            existing = ws.get("_subgraph_intermediates") or []
+            for msg in intermediate:
+                if isinstance(msg, dict) and msg.get("text"):
+                    existing.append({"from": "guide_agent", "content": msg["text"], "phase": "subgraph_thinking"})
+            ws["_subgraph_intermediates"] = existing
         return ok(output=text, state_patch=patch)
 
     status_tool = StructuredTool.from_function(
@@ -765,6 +792,11 @@ def main_agent_node(state: AgentState, config: RunnableConfig | None = None) -> 
     messages_out = existing_messages + list(supervisor["new_messages"])
 
     pending_responses = list(state.get("pending_responses") or [])
+    # 子图中间 AI 消息 → pending_responses（排在 status_brief 和 final 之前）
+    subgraph_intermediates = working_state.pop("_subgraph_intermediates", [])
+    for item in subgraph_intermediates or []:
+        if isinstance(item, dict) and item.get("content"):
+            pending_responses.append(item)
     old_status_markdown = _extract_status_report_markdown(state)
     new_status_markdown = _extract_status_report_markdown(working_state)
     if new_status_markdown and new_status_markdown != old_status_markdown:
