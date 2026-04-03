@@ -32,6 +32,7 @@ from graph.subgraphs.deferred_human import (
 )
 from graph.tools.submit_tools import submit_tools_state_context
 from utils.logger import get_logger
+from utils.tool_call_repair import ToolCallRepairMiddleware
 
 
 logger = get_logger("plan_subgraph")
@@ -332,6 +333,7 @@ def _create_inner_agent(
         system_prompt=None,
         name="plan_tool_loop_agent",
         checkpointer=checkpointer,
+        middleware=[ToolCallRepairMiddleware()],
     )
     return agent_graph, cfg, patches, interrupt_requests
 

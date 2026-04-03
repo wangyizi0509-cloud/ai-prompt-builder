@@ -158,5 +158,6 @@
 
 工具调用（原生 function calling）：
 - `submit_action_plan(...)`：`goal` 与 `strategy` 必填，其余字段按需填写即可
+- 参数字符串内禁用英文双引号 `"`，需引用词语时用 `「」` 替代
 
 ---
