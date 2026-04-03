@@ -49,12 +49,19 @@ description: 当信息不足以产出可靠报告/规划/指南时，必须使�
 {
   "questions": [
     {
-      "id": "unique_id_1",
-      "question": "问题文案（简练、直接，不要包含选项内容）",
+      "id": "q1",
+      "question": "你更在意哪个？",
       "type": "single_choice",
-      "options": ["选项A", "选项B", "选项C"],
+      "options": ["聊天频率", "回应态度"],
       "is_required": true,
-      "purpose": "该问题的意图（用于调试）"
+      "purpose": "确认优先级"
+    },
+    {
+      "id": "q2",
+      "question": "把你们最近的聊天记录截图发我看看",
+      "type": "screenshot",
+      "is_required": false,
+      "purpose": "获取客观聊天证据"
     }
   ],
   "intro": "引导语（简短的过渡文案）",
@@ -65,7 +72,7 @@ description: 当信息不足以产出可靠报告/规划/指南时，必须使�
 ### 字段详解
 *   **questions** (Array): 问题列表，建议 **1-3 个**，保持轻量。
     *   **id** (string): 每题必填，且同一卡片内必须唯一。推荐 `q1`、`q2`、`q3` 或语义化 id（如 `relationship_duration`）。
-    *   **options** (Array<str>): 仅 `_choice` 类题型必填。**注意：前端卡片长度有限，选项文字请精简。**
+    *   **options** (Array<str>): 仅 `single_choice` / `multiple_choice` 题型必填；`free_input_question` 和 `screenshot` 不需要此字段。**注意：前端卡片长度有限，选项文字请精简。**
 *   **intro** (string): 展示给用户的引导话术。应自然衔接上文，说明提问目的。
 *   **reasoning** (string): 你的内部逻辑自查。确保每个问题都有明确的战术价值。
 
