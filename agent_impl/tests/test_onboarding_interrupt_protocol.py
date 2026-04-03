@@ -126,6 +126,28 @@ def test_onboarding_guide_done_token_keeps_route_contract(monkeypatch):
     assert out2.get("pending_crushe_guide") is False
 
 
+def test_onboarding_pending_guide_returns_soft_gate_pending_response():
+    from onboarding import onboarding_agent as onboarding_module
+
+    state = create_initial_state("我想继续问一个问题")
+    state["pending_crushe_guide"] = True
+    state["onboarding_completed"] = False
+    state["collected_info"] = {
+        "raw_inputs": ["我想继续问一个问题"],
+        "user_profile": {},
+        "crush_profile": {},
+        "pain_points": [],
+    }
+
+    out = onboarding_module.onboarding_agent_node(state)
+    assert out.get("pending_crushe_guide") is True
+    assert out.get("onboarding_completed") is False
+    pending = out.get("pending_responses") or []
+    assert pending and isinstance(pending[0], dict)
+    assert pending[0].get("phase") == "guide_gate"
+    assert pending[0].get("content")
+
+
 def test_onboarding_tool_interrupt_keeps_merged_patch(monkeypatch):
     from onboarding import onboarding_agent as onboarding_module
 

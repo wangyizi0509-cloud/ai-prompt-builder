@@ -34,6 +34,10 @@ LOG_PATH = PROJECT_ROOT / ".cursor" / "debug.log"
 GUIDE_DONE_TOKEN = "[SYS:CRUSHE_GUIDE_DONE]"
 DEFAULT_PRE_SUBMIT_CONTENT = "截图看完了，情况比你想的复杂，我先给你生成一张局势初判卡。"
 DEFAULT_POST_SUBMIT_CONTENT = "我的初步判断先到这里。真正的攻坚战才刚开始，我会基于你们最近互动做一次深度复盘。"
+GUIDE_GATE_REMINDER_CONTENT = (
+    "我已经整理好初步判断。请先点击下方《Crushe使用指南》并完成阅读，"
+    "完成后我会继续为你输出完整策略。"
+)
 
 
 #region agent log
@@ -652,6 +656,16 @@ def _build_submit_pending_responses(
     return items
 
 
+def _build_guide_gate_pending_responses() -> list[dict[str, Any]]:
+    return [
+        {
+            "from": "onboarding",
+            "content": GUIDE_GATE_REMINDER_CONTENT,
+            "phase": "guide_gate",
+        }
+    ]
+
+
 def _has_submit_patch(patch: dict[str, Any] | None) -> bool:
     if not isinstance(patch, dict):
         return False
@@ -871,6 +885,7 @@ def onboarding_agent_node(state: dict, config: RunnableConfig | None = None) -> 
             "onboarding_completed": False,
             "pending_crushe_guide": True,
             "collected_info": collected_info,
+            "pending_responses": _build_guide_gate_pending_responses(),
             "next_action": "end_turn",
             "route_to": "end",
             "_onboarding_interrupted": False,

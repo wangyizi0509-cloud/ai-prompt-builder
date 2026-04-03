@@ -1,7 +1,7 @@
 import os
 import bcrypt
 from typing import Optional, Dict, Any, List
-from supabase import create_client, Client
+from supabase import create_client, Client, ClientOptions
 from datetime import datetime
 from pathlib import Path
 import uuid
@@ -14,12 +14,24 @@ logger = logging.getLogger(__name__)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 LOCAL_AUTH_ENABLED = os.getenv("LOCAL_AUTH", "false").lower() == "true"
+SUPABASE_POSTGREST_TIMEOUT = float(os.getenv("SUPABASE_POSTGREST_TIMEOUT", "20"))
+SUPABASE_STORAGE_TIMEOUT = int(float(os.getenv("SUPABASE_STORAGE_TIMEOUT", "20")))
+SUPABASE_FUNCTION_TIMEOUT = int(float(os.getenv("SUPABASE_FUNCTION_TIMEOUT", "10")))
 
 supabase: Optional[Client] = None
 
 if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and SUPABASE_URL != "your-supabase-url-here":
     try:
-        supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+        supabase_options = ClientOptions(
+            postgrest_client_timeout=SUPABASE_POSTGREST_TIMEOUT,
+            storage_client_timeout=SUPABASE_STORAGE_TIMEOUT,
+            function_client_timeout=SUPABASE_FUNCTION_TIMEOUT,
+        )
+        supabase = create_client(
+            SUPABASE_URL,
+            SUPABASE_SERVICE_ROLE_KEY,
+            options=supabase_options,
+        )
     except Exception as e:
         logger.warning("Failed to initialize Supabase client: %s", e)
         supabase = None

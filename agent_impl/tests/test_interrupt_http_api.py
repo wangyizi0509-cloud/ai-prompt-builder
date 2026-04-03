@@ -147,3 +147,39 @@ def test_chat_resume_continues_and_returns_final_response():
     pending = out2.get("pending_responses") or []
     assert isinstance(pending, list)
     assert any(isinstance(r, dict) and r.get("content") for r in pending), "resume 后未返回 pending_responses"
+
+
+def test_empty_output_payload_returns_structured_error_fields():
+    from api import chat as chat_module
+
+    out = chat_module._normalize_chat_response_payload(
+        final_state={},
+        combined_response="",
+        pending_responses=[],
+        feedback_prefill=None,
+        feedback_status=None,
+        feedback_question=None,
+    )
+
+    assert out.get("error_code") == "EMPTY_OUTPUT"
+    assert out.get("retryable") is True
+    assert isinstance(out.get("error_message"), str) and out["error_message"]
+    assert isinstance(out.get("pending_responses"), list) and out["pending_responses"]
+    assert isinstance(out.get("response"), str) and out["response"]
+
+
+def test_pending_guide_payload_returns_onboarding_error_code():
+    from api import chat as chat_module
+
+    out = chat_module._normalize_chat_response_payload(
+        final_state={"pending_crushe_guide": True},
+        combined_response="",
+        pending_responses=[],
+        feedback_prefill=None,
+        feedback_status=None,
+        feedback_question=None,
+    )
+
+    assert out.get("error_code") == "ONBOARDING_GUIDE_REQUIRED"
+    assert out.get("retryable") is False
+    assert isinstance(out.get("error_message"), str) and out["error_message"]

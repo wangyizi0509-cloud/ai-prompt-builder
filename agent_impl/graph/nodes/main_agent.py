@@ -29,6 +29,7 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_core.runnables import RunnableConfig
 from langchain_core.runnables.config import ensure_config
+from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command, interrupt
 
 from agents.tooling.patch import ToolResult, merge_patches, merge_state_patch
@@ -183,6 +184,45 @@ def _extract_state_patch(result: Any) -> dict:
     if isinstance(result, dict) and isinstance(result.get("state_patch"), dict):
         return dict(result.get("state_patch") or {})
     return {}
+
+
+def _extract_pending_interrupt(subgraph: Any, invoke_cfg: dict[str, Any]) -> dict | None:
+    """检查子图 thread 是否有上一轮留下的 pending interrupt（未被 relay 的问题）。
+
+    用于修复跨 trace interrupt 静默消费问题：
+    - Trace 1 的外层 interrupt() 在 _plan_tool / _guide_tool / _status_tool 的 while 循环里触发
+    - Trace 2 时 main_agent_node 从零重新执行，子图全新调用，handle_interrupt_node
+      里的 interrupt() 成为第一个调用，错误消费了 answer_to_A
+    - 通过在 invoke 之前先检测 pending interrupt 并在外层 relay，确保消费顺序正确
+
+    返回 dict（非空 payload）→ 有 pending interrupt，调用方应先 relay
+    返回 None → 无 pending interrupt（首次调用、子图已完成、get_state 失败等）
+    """
+    try:
+        snapshot = subgraph.get_state(invoke_cfg)
+    except Exception:
+        return None
+    if snapshot is None:
+        return None
+
+    # 路径 1：读取子图 state values 中的语义字段（最可靠，跨 LangGraph 版本稳定）
+    values = getattr(snapshot, "values", None) or {}
+    if isinstance(values, dict) and values.get("_inner_interrupted"):
+        payload = values.get("_interrupt_payload")
+        if isinstance(payload, dict) and payload:
+            return payload
+
+    # 路径 2：兜底——读取 PregelTask.interrupts
+    tasks = getattr(snapshot, "tasks", None) or []
+    for task in tasks:
+        task_interrupts = getattr(task, "interrupts", None) or []
+        if task_interrupts:
+            first = task_interrupts[0]
+            val = getattr(first, "value", None)
+            if isinstance(val, dict) and val:
+                return val
+
+    return None
 
 
 def _extract_status_report_markdown(state_like: Any) -> str:
@@ -371,6 +411,8 @@ def _wrap_tools_for_patch_collection(
             def _wrapped(**kwargs):
                 try:
                     result = inner.invoke(kwargs, config=sanitize_runtime_config(ensure_config()))
+                except GraphBubbleUp:
+                    raise
                 except Exception as e:
                     logger.exception("tool invoke failed: tool=%s", getattr(inner, "name", ""))
                     return _tool_failure_to_content(getattr(inner, "name", ""), e)
@@ -516,13 +558,20 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
             },
             "private_messages": [],
         }
-        sub_out, active_cfg = _invoke_subgraph_with_fallback_namespace(
-            subgraph=subgraph,
-            sub_in=sub_in,
-            invoke_cfg=invoke_cfg,
-            fallback_invoke_cfg=invoke_cfg_fallback,
-            tool_name="call_status_agent",
-        )
+        pending_payload = _extract_pending_interrupt(subgraph, invoke_cfg)
+        active_cfg = invoke_cfg
+        if pending_payload is not None:
+            logger.info("call_status_agent pre-invoke relay: relaying pending interrupt from previous trace")
+            answer = interrupt(pending_payload)
+            sub_out = subgraph.invoke(Command(resume=answer), config=active_cfg)
+        else:
+            sub_out, active_cfg = _invoke_subgraph_with_fallback_namespace(
+                subgraph=subgraph,
+                sub_in=sub_in,
+                invoke_cfg=invoke_cfg,
+                fallback_invoke_cfg=invoke_cfg_fallback,
+                tool_name="call_status_agent",
+            )
         while isinstance(sub_out, dict) and "__interrupt__" in sub_out:
             interrupts = sub_out.get("__interrupt__") or []
             payload = interrupts[0].value if interrupts else {}
@@ -550,13 +599,34 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
             },
             "private_messages": [],
         }
-        sub_out, active_cfg = _invoke_subgraph_with_fallback_namespace(
-            subgraph=subgraph,
-            sub_in=sub_in,
-            invoke_cfg=invoke_cfg,
-            fallback_invoke_cfg=invoke_cfg_fallback,
-            tool_name="call_plan_agent",
-        )
+        pending_payload = _extract_pending_interrupt(subgraph, invoke_cfg)
+        active_cfg = invoke_cfg
+        if pending_payload is not None:
+            qids = _extract_question_ids(pending_payload)
+            logger.info(
+                "call_plan_agent pre-invoke relay: relaying pending interrupt from previous trace, "
+                "question_count=%s, qids=%s",
+                len(qids),
+                qids,
+            )
+            answer = interrupt(pending_payload)
+            if isinstance(answer, dict):
+                logger.info(
+                    "call_plan_agent pre-invoke relay resumed: answer_keys=%s, fp=%s",
+                    list(answer.keys()),
+                    _answers_fingerprint(answer),
+                )
+            else:
+                logger.info("call_plan_agent pre-invoke relay resumed: answer_type=%s", type(answer).__name__)
+            sub_out = subgraph.invoke(Command(resume=answer), config=active_cfg)
+        else:
+            sub_out, active_cfg = _invoke_subgraph_with_fallback_namespace(
+                subgraph=subgraph,
+                sub_in=sub_in,
+                invoke_cfg=invoke_cfg,
+                fallback_invoke_cfg=invoke_cfg_fallback,
+                tool_name="call_plan_agent",
+            )
         while isinstance(sub_out, dict) and "__interrupt__" in sub_out:
             interrupts = sub_out.get("__interrupt__") or []
             payload = interrupts[0].value if interrupts else {}
@@ -598,13 +668,20 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
             },
             "private_messages": [],
         }
-        sub_out, active_cfg = _invoke_subgraph_with_fallback_namespace(
-            subgraph=subgraph,
-            sub_in=sub_in,
-            invoke_cfg=invoke_cfg,
-            fallback_invoke_cfg=invoke_cfg_fallback,
-            tool_name="call_guide_agent",
-        )
+        pending_payload = _extract_pending_interrupt(subgraph, invoke_cfg)
+        active_cfg = invoke_cfg
+        if pending_payload is not None:
+            logger.info("call_guide_agent pre-invoke relay: relaying pending interrupt from previous trace")
+            answer = interrupt(pending_payload)
+            sub_out = subgraph.invoke(Command(resume=answer), config=active_cfg)
+        else:
+            sub_out, active_cfg = _invoke_subgraph_with_fallback_namespace(
+                subgraph=subgraph,
+                sub_in=sub_in,
+                invoke_cfg=invoke_cfg,
+                fallback_invoke_cfg=invoke_cfg_fallback,
+                tool_name="call_guide_agent",
+            )
         while isinstance(sub_out, dict) and "__interrupt__" in sub_out:
             interrupts = sub_out.get("__interrupt__") or []
             payload = interrupts[0].value if interrupts else {}

@@ -20,6 +20,71 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
+def _normalize_env_value(value: Optional[str]) -> str:
+    return str(value or "").strip()
+
+
+def _is_placeholder_key(value: Optional[str]) -> bool:
+    normalized = _normalize_env_value(value).lower()
+    if not normalized:
+        return True
+    if normalized in {"none", "null", "changeme", "todo"}:
+        return True
+    placeholder_prefixes = (
+        "your_",
+        "your-",
+        "replace_",
+        "replace-",
+        "example_",
+        "example-",
+        "<your",
+    )
+    if any(normalized.startswith(prefix) for prefix in placeholder_prefixes):
+        return True
+    if "api_key_here" in normalized or "your_api_key" in normalized:
+        return True
+    return False
+
+
+def _resolve_effective_provider(preferred_provider: str) -> str:
+    provider = _normalize_env_value(preferred_provider).lower() or "deepseek"
+    if provider == "mock":
+        return provider
+
+    deepseek_key = os.getenv("DEEPSEEK_API_KEY")
+    openai_key = os.getenv("OPENAI_API_KEY")
+    doubao_key = os.getenv("DOUBAO_API_KEY")
+    doubao_endpoint = _normalize_env_value(os.getenv("DOUBAO_ENDPOINT_ID"))
+
+    has_deepseek = not _is_placeholder_key(deepseek_key)
+    has_openai = not _is_placeholder_key(openai_key)
+    has_doubao = (not _is_placeholder_key(doubao_key)) and bool(doubao_endpoint)
+
+    if provider == "deepseek" and not has_deepseek:
+        if has_doubao:
+            logger.warning("LLM_PROVIDER=deepseek but DEEPSEEK_API_KEY is placeholder; fallback to doubao")
+            return "doubao"
+        if has_openai:
+            logger.warning("LLM_PROVIDER=deepseek but DEEPSEEK_API_KEY is placeholder; fallback to openai")
+            return "openai"
+    if provider == "openai" and not has_openai:
+        if has_doubao:
+            logger.warning("LLM_PROVIDER=openai but OPENAI_API_KEY is placeholder; fallback to doubao")
+            return "doubao"
+        if has_deepseek:
+            logger.warning("LLM_PROVIDER=openai but OPENAI_API_KEY is placeholder; fallback to deepseek")
+            return "deepseek"
+    if provider == "doubao" and not has_doubao:
+        if has_deepseek:
+            logger.warning("LLM_PROVIDER=doubao but DOUBAO config is incomplete; fallback to deepseek")
+            return "deepseek"
+        if has_openai:
+            logger.warning("LLM_PROVIDER=doubao but DOUBAO config is incomplete; fallback to openai")
+            return "openai"
+
+    return provider
+
+
 class ChatDeepSeekReasoning(ChatDeepSeek):
     """
     自定义 DeepSeek Reasoner 包装器，正确处理 reasoning_content 回传
@@ -95,19 +160,26 @@ def get_llm(temperature: float = 0.7, model: Optional[str] = None, use_tools: bo
     Returns:
         LangChain ChatModel 实例
     """
-    provider = os.getenv("LLM_PROVIDER", "deepseek").lower()
+    provider = _resolve_effective_provider(os.getenv("LLM_PROVIDER", "deepseek"))
     
     if provider == "mock":
         return MockLLM()
     if provider == "doubao":
+        endpoint_id = _normalize_env_value(os.getenv("DOUBAO_ENDPOINT_ID"))
+        if not endpoint_id:
+            raise ValueError("DOUBAO_ENDPOINT_ID is required when provider is doubao")
+        if _is_placeholder_key(os.getenv("DOUBAO_API_KEY")):
+            raise ValueError("DOUBAO_API_KEY is missing or placeholder")
         return ChatOpenAI(
-            model=os.getenv("DOUBAO_ENDPOINT_ID"),
+            model=endpoint_id,
             openai_api_key=os.getenv("DOUBAO_API_KEY"),
             openai_api_base=os.getenv("DOUBAO_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"),
             temperature=temperature,
         )
     
     elif provider == "deepseek":
+        if _is_placeholder_key(os.getenv("DEEPSEEK_API_KEY")):
+            raise ValueError("DEEPSEEK_API_KEY is missing or placeholder")
         resolved_model = model or os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
         
         # 工具调用场景：使用 deepseek-reasoner（ChatDeepSeekReasoning 正确处理 reasoning_content 回传）
@@ -128,6 +200,8 @@ def get_llm(temperature: float = 0.7, model: Optional[str] = None, use_tools: bo
         )
     
     elif provider == "openai":
+        if _is_placeholder_key(os.getenv("OPENAI_API_KEY")):
+            raise ValueError("OPENAI_API_KEY is missing or placeholder")
         return ChatOpenAI(
             model=model or os.getenv("OPENAI_MODEL", "gpt-4o"),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
