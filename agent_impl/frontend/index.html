@@ -4379,11 +4379,12 @@
                 // 判断是否是截图类型
                 const isScreenshotType = (type) => {
                     return [
+                        'screenshot',
+                        // 向后兼容：旧的截图子类型
                         'private_chat_screenshot',
                         'group_chat_screenshot',
                         'moments_screenshot',
                         'other_social_media_screenshot',
-                        // 后端/Prompt 允许的通用截图类型（旧前端不识别会导致“题目无输入控件”）
                         'universal_screenshot_analysis',
                     ].includes(type);
                 };
@@ -5308,7 +5309,12 @@
 
                     // Check Status Update
                     if (newState.status_report && newState.status_report !== oldState.status_report) {
-                        pushAssistantOnce(`status_preface_${newState.status_report}`, '这是基于你提供的信息生成的现状分析报告：');
+                        // 如果 pending_responses 已包含 status_agent 的中间消息，不再推送硬编码过渡
+                        const hasStatusThinking = Array.isArray(newState.pending_responses) &&
+                            newState.pending_responses.some(r => r.from === 'status_agent' && r.phase === 'subgraph_thinking');
+                        if (!hasStatusThinking) {
+                            pushAssistantOnce(`status_preface_${newState.status_report}`, '这是基于你提供的信息生成的现状分析报告：');
+                        }
                         pushSystemTaskOnce(`status_${newState.status_report}`, {
                             role: 'system_task',
                             taskType: 'status',
@@ -5321,6 +5327,12 @@
 
                     // Check Plan Update
                     if (newState.action_plan && newState.action_plan !== oldState.action_plan) {
+                        // 如果 pending_responses 已包含 plan_agent 的中间消息，不再推送硬编码过渡
+                        const hasPlanThinking = Array.isArray(newState.pending_responses) &&
+                            newState.pending_responses.some(r => r.from === 'plan_agent' && r.phase === 'subgraph_thinking');
+                        if (!hasPlanThinking) {
+                            pushAssistantOnce(`plan_preface_${newState.action_plan}`, '我已为你制定了专属的行动计划：');
+                        }
                         pushSystemTaskOnce(`plan_${newState.action_plan}`, {
                             role: 'system_task',
                             taskType: 'strategy',
@@ -6323,7 +6335,11 @@
 
                             // Emit task cards now (same UX as original, but after guide)
                             if (bundle.status_report && bundle.status_report !== prev.status_report) {
-                                pushAssistantOnce(`status_preface_${bundle.status_report}`, '这是基于你提供的信息生成的现状分析报告：');
+                                const hasStatusThinking = Array.isArray(bundle.pending_responses) &&
+                                    bundle.pending_responses.some(r => r.from === 'status_agent' && r.phase === 'subgraph_thinking');
+                                if (!hasStatusThinking) {
+                                    pushAssistantOnce(`status_preface_${bundle.status_report}`, '这是基于你提供的信息生成的现状分析报告：');
+                                }
                                 pushSystemTaskOnce(`status_${bundle.status_report}`, {
                                     role: 'system_task',
                                     taskType: 'status',
@@ -6333,6 +6349,11 @@
                                 });
                             }
                             if (bundle.action_plan && bundle.action_plan !== prev.action_plan) {
+                                const hasPlanThinking = Array.isArray(bundle.pending_responses) &&
+                                    bundle.pending_responses.some(r => r.from === 'plan_agent' && r.phase === 'subgraph_thinking');
+                                if (!hasPlanThinking) {
+                                    pushAssistantOnce(`plan_preface_${bundle.action_plan}`, '我已为你制定了专属的行动计划：');
+                                }
                                 pushSystemTaskOnce(`plan_${bundle.action_plan}`, {
                                     role: 'system_task',
                                     taskType: 'strategy',

@@ -1,6 +1,21 @@
 from typing import Any
 from langchain_core.runnables import RunnableConfig
 
+# 前端能渲染的合法题型集合（与 ask_human.py 的 QuestionType Literal 保持同步）
+# 旧的截图子类型保留在此集合中，确保历史数据不被错误降级
+_VALID_QUESTION_TYPES = frozenset({
+    "free_input_question",
+    "single_choice",
+    "multiple_choice",
+    "screenshot",
+    # 向后兼容：旧的截图子类型仍视为合法，不被重置为 free_input_question
+    "private_chat_screenshot",
+    "group_chat_screenshot",
+    "moments_screenshot",
+    "other_social_media_screenshot",
+    "universal_screenshot_analysis",
+})
+
 
 def is_resuming(config: RunnableConfig | None) -> bool:
     """
@@ -52,6 +67,12 @@ def _normalize_inquiry_questions(raw_questions: Any) -> list[dict[str, Any]]:
 
         question["id"] = dedup_id
         question["question"] = question_text
+
+        # 兜底：type 不在合法集合内时，重置为 free_input_question，避免前端 fallback 渲染
+        raw_type = question.get("type")
+        if not isinstance(raw_type, str) or raw_type not in _VALID_QUESTION_TYPES:
+            question["type"] = "free_input_question"
+
         normalized.append(question)
 
     return normalized

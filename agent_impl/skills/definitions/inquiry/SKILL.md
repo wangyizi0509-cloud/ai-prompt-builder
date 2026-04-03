@@ -25,14 +25,18 @@ description: 当信息不足以产出可靠报告/规划/指南时，必须使�
 
 ## 2. 题型定义 (Question Types)
 
+> ⚠️ **`type` 字段只能使用下表中的值，严禁自造任何新 type（如 `open_question`、`text_input` 等），否则前端无法渲染。**
+
 请根据你的提问意图，严格选择以下题型：
 
-| 意图场景 | 推荐题型 (`type`) | 优势 |
+| 意图场景 | 必须使用的 `type` 值 | 优势 |
 | :--- | :--- | :--- |
-| **定时间/地点/预算/二选一** | `single_choice` / `multiple_choice` | 降低认知负荷，快速锁定参数 |
-| **分析聊天记录/朋友圈/回复** | `private_chat_screenshot` / `moments_screenshot` / `group_chat_screenshot` | 获取客观事实，避免主观偏差 |
-| **复杂情感/开放式描述** | `free_input_question` | 捕捉细腻情绪（作为保底手段） |
-| **其他社媒分析** | `other_social_media_screenshot` | 覆盖小红书/Instagram等场景 |
+| **复杂情感/开放式描述/背景说明** | `free_input_question` | 捕捉细腻情绪（开放文字输入的唯一合法值） |
+| **定时间/地点/预算/二选一** | `single_choice` / `multiple_choice` | 降低认知负荷，快速锁定参数；**必须附带 `options`** |
+| **需要查看截图/图片（聊天记录、朋友圈、社媒等）** | `screenshot` | 获取客观事实，避免主观偏差 |
+
+**合法 `type` 枚举（共 4 个，仅此而已）：**
+`free_input_question` · `single_choice` · `multiple_choice` · `screenshot`
 
 ---
 

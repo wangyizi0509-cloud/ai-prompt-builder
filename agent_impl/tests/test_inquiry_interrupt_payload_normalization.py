@@ -17,8 +17,9 @@ def test_build_inquiry_interrupt_payload_normalizes_question_ids_and_text():
     )
 
     questions = payload["questions"]
-    assert [q["id"] for q in questions] == ["q1", "dup", "dup_2", "q4"]
-    assert [q["question"] for q in questions] == ["问题1", "第二题", "问题3", "末题"]
+    # "bad_item" 字符串会被 normalizer 转为 {"question": "bad_item"}，因此共 5 道题
+    assert [q["id"] for q in questions] == ["q1", "dup", "dup_2", "q4", "q5"]
+    assert [q["question"] for q in questions] == ["问题1", "第二题", "问题3", "末题", "bad_item"]
     assert payload["type"] == "inquiry_card"
     assert payload["intro"] == ""
     assert payload["reasoning"] == ""
