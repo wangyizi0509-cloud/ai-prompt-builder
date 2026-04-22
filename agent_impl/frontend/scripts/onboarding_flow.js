@@ -1167,106 +1167,239 @@
     /** 从 image 路径中提取"局势分析/行动规划/聊天指导/行动指南/朋友圈指导"。 */
     function deriveFeatureName(imagePath) {
       if (!imagePath) return null;
-      const names = ['局势分析', '行动规划', '聊天指导', '行动指南', '朋友圈指导'];
+      const names = ['情感罗盘', '局势分析', '行动规划', '聊天指导', '行动指南', '朋友圈指导'];
       for (const n of names) if (imagePath.indexOf(n) >= 0) return n;
       return null;
     }
 
-    /** 渲染 FeaturePreview HTML（对齐 design/page5-card-hook.jsx 的 5 种 Frame）。 */
+    /** 通用卡片外壳：紫调阴影 + 微渐变 + 顶部品牌渐变线 + DraftBanner */
+    function _featCardOpen() {
+      return [
+        '<div style="padding:14px;background:linear-gradient(180deg,#fff 0%,#FDFAFF 100%);border-radius:12px;border:0.5px solid rgba(138,75,255,0.12);box-shadow:0 8px 32px rgba(105,124,255,0.10);position:relative;overflow:hidden;font-family:inherit">',
+        '<div style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,#8A4BFF,#FF65C2)"></div>',
+        '<div style="display:flex;align-items:center;gap:6px;padding:6px 10px;margin-bottom:12px;background:linear-gradient(135deg,rgba(138,75,255,0.06),rgba(255,101,194,0.06));border-radius:8px;border-left:2px solid #8A4BFF">',
+        '  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="#8A4BFF" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>',
+        '  <span style="font-size:10px;color:#8A4BFF;font-weight:600;letter-spacing:0.2px">为你定制中 · 完整版诊断后解锁</span>',
+        '</div>'
+      ].join('');
+    }
+    function _featCardClose() { return '</div>'; }
+    function _featLockHint(txt) {
+      return [
+        '<div style="display:flex;align-items:center;justify-content:center;gap:5px;padding:6px 8px;background:rgba(138,75,255,0.04);border-radius:6px;margin-top:8px">',
+        '  <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#8A4BFF" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>',
+        '  <span style="font-size:9px;color:#8A4BFF;font-weight:600">' + txt + '</span>',
+        '</div>'
+      ].join('');
+    }
+
+    /** 渲染 FeaturePreview HTML（对齐 design/final/page5-card-hook.jsx 的最新版组件）。 */
     function renderFeaturePreview(feature) {
       switch (feature) {
-        case '局势分析':
-          return [
-            '<div class="feature-card">',
-            '  <div class="feature-card__head">',
-            '    <span class="feature-card__title">📊 局势分析 · 现状快照</span>',
-            '    <span class="feature-tag feature-tag--amber">T+3 天</span>',
-            '  </div>',
-            '  <div>',
-            [['吸引力 A', 52, false], ['舒适感 C', 68, false], ['张力 R', 18, true]].map(([k,v,d]) =>
-              '<div class="feature-acr__row">' +
-                '<span class="feature-acr__label">' + k + '</span>' +
-                '<div class="feature-acr__bar-wrap"><div class="feature-acr__bar' + (d?' danger':'') + '" style="width:' + v + '%"></div></div>' +
-                '<span class="feature-acr__score" style="color:' + (d?'#C00':'#8A4BFF') + '">' + v + '</span>' +
+        case '情感罗盘':
+        case '局势分析': {
+          const dims = [
+            { label: '吸引力', v: 52, danger: false },
+            { label: '舒适感', v: 68, danger: false },
+            { label: '张力',   v: 18, danger: true  },
+            { label: '信任度', v: 45, danger: false },
+            { label: '回应度', v: 31, danger: true  },
+          ];
+          const progress = 34;
+          const r = 30, cx = 38, cy = 38, sw = 5;
+          const circ = 2 * Math.PI * r;
+          const dash = (circ * progress / 100).toFixed(2) + ' ' + circ.toFixed(2);
+          const barsHtml = dims.map(d => {
+            const bg = d.danger ? 'linear-gradient(90deg,#E84057,#FF7B8E)' : 'linear-gradient(90deg,#8A4BFF,#B07FFF)';
+            const labelColor = d.danger ? '#E84057' : '#888';
+            return [
+              '<div style="display:flex;align-items:center;gap:6px">',
+              '  <div style="width:36px;font-size:9px;font-weight:600;color:' + labelColor + ';text-align:right;flex-shrink:0">' + d.label + '</div>',
+              '  <div style="flex:1;height:5px;background:#F0EBFA;border-radius:3px;overflow:hidden;filter:blur(3px)">',
+              '    <div style="width:' + d.v + '%;height:100%;border-radius:3px;background:' + bg + '"></div>',
+              '  </div>',
               '</div>'
-            ).join(''),
-            '  </div>',
-            '  <div class="feature-acr__trend">',
-            '    <svg width="40" height="12" viewBox="0 0 40 12"><polyline points="0,4 8,3 16,5 24,7 32,9 40,10" fill="none" stroke="#C00" stroke-width="1.5"/></svg>',
-            '    <span>张力持续下滑，预计 2 周内触底</span>',
-            '  </div>',
-            '</div>'
-          ].join('');
-        case '行动规划':
+            ].join('');
+          }).join('');
           return [
-            '<div class="feature-card">',
-            '  <div class="feature-card__head">',
-            '    <span class="feature-card__title">🧭 行动规划 · 3 阶段</span>',
-            '    <span class="feature-tag feature-tag--violet">4 周</span>',
+            _featCardOpen(),
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">',
+            '  <div style="display:flex;align-items:center;gap:5px">',
+            '    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#8A4BFF" stroke-width="1.4" stroke-linecap="round"><path d="M8 14A6 6 0 1 1 8 2a6 6 0 0 1 0 12z"/><path d="M8 5v3l2 1.5"/></svg>',
+            '    <span style="font-size:11px;font-weight:700;color:#1a1a1a">情感罗盘 · 关系快照</span>',
             '  </div>',
-            '  <div>',
-            [
-              { s: 'Phase 1', w: 'W1-2', t: '回撤密度 · 重置节奏', first: true },
-              { s: 'Phase 2', w: 'W3',   t: '制造稀缺 · 建立张力', first: false },
-              { s: 'Phase 3', w: 'W4',   t: '精准邀约 · 推进关系', first: false },
-            ].map(p =>
-              '<div class="feature-plan__row ' + (p.first?'first':'rest') + '">' +
-                '<span class="feature-plan__stage">' + p.s + '</span>' +
-                '<span class="feature-plan__week">' + p.w + '</span>' +
-                '<span class="feature-plan__text">' + p.t + '</span>' +
-              '</div>'
-            ).join(''),
-            '  </div>',
-            '</div>'
-          ].join('');
-        case '聊天指导':
-          return [
-            '<div class="feature-card">',
-            '  <div class="feature-card__head">',
-            '    <span class="feature-card__title">💬 聊天指导 · 逐条批注</span>',
-            '    <span class="feature-tag feature-tag--green">实时</span>',
-            '  </div>',
-            '  <div class="feature-chat">',
-            '    <div class="feature-chat__bubble">最近你都没主动找我玩了 😃</div>',
-            '    <div class="feature-chat__note">',
-            '      <span class="feature-chat__note-chip">⚠ 试探</span>',
-            '      <span>建议：不解释 · 反问回去</span>',
+            '  <span style="display:inline-block;padding:2px 7px;border-radius:5px;background:#FFF4E0;color:#E88F00;font-size:10px;font-weight:700">需关注</span>',
+            '</div>',
+            '<div style="display:flex;gap:12px;align-items:center">',
+            '  <div style="flex-shrink:0;display:flex;flex-direction:column;align-items:center">',
+            '    <div style="position:relative;width:76px;height:76px">',
+            '      <svg width="76" height="76" viewBox="0 0 76 76">',
+            '        <circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="#F0EBFA" stroke-width="' + sw + '"/>',
+            '        <circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="url(#ringGsit)" stroke-width="' + sw + '" stroke-linecap="round" stroke-dasharray="' + dash + '" transform="rotate(-90 ' + cx + ' ' + cy + ')"/>',
+            '        <defs><linearGradient id="ringGsit" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#8A4BFF"/><stop offset="100%" stop-color="#FF65C2"/></linearGradient></defs>',
+            '      </svg>',
+            '      <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">',
+            '        <div style="font-family:\'DM Sans\',sans-serif;font-size:22px;font-weight:700;color:#1a1a1a;line-height:1;filter:blur(5px);user-select:none">34</div>',
+            '        <div style="font-size:8px;color:#999;margin-top:2px">关系进度</div>',
+            '      </div>',
             '    </div>',
-            '    <div class="feature-chat__bubble me">是你先不理我的吧？</div>',
+            '    <div style="margin-top:4px;padding:2px 8px;background:rgba(138,75,255,0.08);border-radius:4px;font-size:9px;font-weight:600;color:#8A4BFF">暧昧初期</div>',
             '  </div>',
-            '</div>'
+            '  <div style="flex:1;display:flex;flex-direction:column;gap:5px">',
+            '    <div style="font-size:9px;font-weight:700;color:#888;margin-bottom:1px">5 维健康度</div>',
+                 barsHtml,
+            '  </div>',
+            '</div>',
+            _featLockHint('完成诊断后解锁你的真实数据'),
+            _featCardClose()
           ].join('');
-        case '行动指南':
+        }
+        case '行动规划': {
+          const phases = [
+            { text: '停止主动 · 让 TA 开始找你', blur: false },
+            { text: '制造存在感 · 让 TA 觉得你在变化', blur: true },
+            { text: '精准出手 · 一步推进关系', blur: true },
+          ];
+          const phasesHtml = phases.map((p, i) => {
+            const dotBg = i === 0 ? '#8A4BFF' : '#fff';
+            const dotBorder = i === 0 ? 'none' : '1.5px solid #8A4BFF';
+            const dotShadow = i === 0 ? '0 0 0 3px rgba(138,75,255,0.15)' : 'none';
+            const rowMargin = i < 2 ? '10px' : '0';
+            const bg = i === 0 ? 'rgba(138,75,255,0.06)' : '#FAFAFC';
+            const leftBorder = i === 0 ? '2px solid #8A4BFF' : '2px solid transparent';
+            const filter = p.blur ? 'filter:blur(4px);user-select:none;' : '';
+            return [
+              '<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:' + rowMargin + ';position:relative">',
+              '  <div style="position:absolute;left:-18px;top:5px;width:10px;height:10px;border-radius:50%;background:' + dotBg + ';border:' + dotBorder + ';box-shadow:' + dotShadow + '"></div>',
+              '  <div style="flex:1;padding:6px 10px;border-radius:8px;background:' + bg + ';border-left:' + leftBorder + ';' + filter + '">',
+              '    <span style="font-family:\'DM Sans\',sans-serif;font-size:9px;font-weight:700;color:#8A4BFF;letter-spacing:0.5px">PHASE ' + (i + 1) + '</span>',
+              '    <div style="font-size:11px;color:#333;margin-top:2px">' + p.text + '</div>',
+              '  </div>',
+              '</div>'
+            ].join('');
+          }).join('');
           return [
-            '<div class="feature-card">',
-            '  <div class="feature-card__head">',
-            '    <span class="feature-card__title">🎯 行动指南 · 邀约推演</span>',
+            _featCardOpen(),
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">',
+            '  <div style="display:flex;align-items:center;gap:5px">',
+            '    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#8A4BFF" stroke-width="1.4" stroke-linecap="round"><circle cx="4" cy="4" r="2"/><circle cx="12" cy="12" r="2"/><path d="M6 4h4a2 2 0 0 1 2 2v4"/></svg>',
+            '    <span style="font-size:11px;font-weight:700;color:#1a1a1a">行动规划 · 3 阶段</span>',
             '  </div>',
-            '  <div class="feature-action__body">',
-            '    <div><b>时机：</b>周三晚 · 对方刚下班</div>',
-            '    <div style="margin-top:4px"><b>理由：</b>你偶然聊过的那部电影首映</div>',
-            '    <div style="margin-top:4px"><b>话术：</b>"…你不是想看这个吗，周六有场..."</div>',
-            '  </div>',
-            '  <div class="feature-action__meta">',
-            '    <span>成功率预估 72%</span>',
-            '    <span>↗ vs 上周 +18%</span>',
-            '  </div>',
-            '</div>'
+            '  <span style="display:inline-block;padding:2px 7px;border-radius:5px;background:#F8EDFF;color:#8A4BFF;font-size:10px;font-weight:700">4 周</span>',
+            '</div>',
+            '<div style="position:relative;padding-left:18px">',
+            '  <div style="position:absolute;left:5px;top:6px;bottom:6px;width:0;border-left:1.5px dashed rgba(138,75,255,0.3)"></div>',
+               phasesHtml,
+            '</div>',
+            _featLockHint('完成诊断后解锁完整规划'),
+            _featCardClose()
           ].join('');
-        case '朋友圈指导':
+        }
+        case '聊天指导': {
           return [
-            '<div class="feature-card">',
-            '  <div class="feature-card__head">',
-            '    <span class="feature-card__title">📷 朋友圈指导 · 本周建设</span>',
-            '    <span class="feature-tag feature-tag--violet">3 条</span>',
+            _featCardOpen(),
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">',
+            '  <div style="display:flex;align-items:center;gap:5px">',
+            '    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#8A4BFF" stroke-width="1.4" stroke-linecap="round"><path d="M2 3h12v8H6l-3 2v-2H2z" stroke-linejoin="round"/></svg>',
+            '    <span style="font-size:11px;font-weight:700;color:#1a1a1a">聊天指导 · 逐条批注</span>',
             '  </div>',
-            '  <div class="feature-moments">',
-            '    <div class="feature-moments__cell">📸 周二<br/>晒风景</div>',
-            '    <div class="feature-moments__cell">🍳 周五<br/>生活感</div>',
-            '    <div class="feature-moments__cell">🎧 周日<br/>品味感</div>',
+            '  <span style="display:inline-block;padding:2px 7px;border-radius:5px;background:#E6F7F0;color:#0A8049;font-size:10px;font-weight:700">实时</span>',
+            '</div>',
+            // 模拟截图区域
+            '<div style="background:#F5F5F5;border-radius:8px;padding:8px 8px 6px;position:relative">',
+            '  <div style="position:absolute;top:-8px;left:8px;padding:1px 6px;background:#8A4BFF;border-radius:4px;font-size:8px;font-weight:700;color:#fff;letter-spacing:0.3px;z-index:2">你的截图</div>',
+            '  <div style="display:flex;flex-direction:column;gap:5px;margin-top:2px">',
+            '    <div style="align-self:flex-start;max-width:82%;padding:6px 10px;background:#fff;border-radius:10px 10px 10px 3px;font-size:10.5px;color:#333">哈哈好久没聊了</div>',
+            '    <div style="align-self:flex-end;max-width:82%;position:relative">',
+            '      <div style="padding:6px 10px;background:#95EC69;border-radius:10px 10px 3px 10px;font-size:10.5px;color:#333">是啊！最近怎么样</div>',
+            '      <div style="position:absolute;left:-2px;right:-2px;top:-3px;bottom:-3px;border:1.5px solid rgba(138,75,255,0.5);border-radius:10px;pointer-events:none"></div>',
+            '      <div style="position:absolute;top:50%;right:-46px;transform:translateY(-50%);display:flex;align-items:center">',
+            '        <div style="width:12px;border-top:1px dashed #8A4BFF"></div>',
+            '        <div style="background:#8A4BFF;border-radius:3px;padding:2px 4px;font-size:7px;font-weight:700;color:#fff;white-space:nowrap">回复过快</div>',
+            '      </div>',
+            '    </div>',
+            '    <div style="align-self:flex-start;max-width:82%;position:relative">',
+            '      <div style="padding:6px 10px;background:#fff;border-radius:10px 10px 10px 3px;font-size:10.5px;color:#333">还行吧，你呢</div>',
+            '      <div style="position:absolute;left:-2px;right:-2px;top:-3px;bottom:-3px;border:1.5px solid rgba(232,64,87,0.5);border-radius:10px;pointer-events:none"></div>',
+            '      <div style="position:absolute;top:50%;left:-38px;transform:translateY(-50%);display:flex;align-items:center">',
+            '        <div style="background:#E84057;border-radius:3px;padding:2px 4px;font-size:7px;font-weight:700;color:#fff;white-space:nowrap">敷衍</div>',
+            '        <div style="width:8px;border-top:1px dashed #E84057"></div>',
+            '      </div>',
+            '    </div>',
             '  </div>',
-            '</div>'
+            '</div>',
+            // 小话建议回复区
+            '<div style="margin-top:8px;background:linear-gradient(135deg,rgba(138,75,255,0.06),rgba(255,101,194,0.04));border-radius:8px;padding:7px 10px;border-left:2px solid #8A4BFF">',
+            '  <div style="font-size:9px;font-weight:700;color:#8A4BFF;margin-bottom:4px;letter-spacing:0.3px">小话建议回复</div>',
+            '  <div style="font-size:10px;color:#333;line-height:1.5">"哈哈在搞一个新东西，还挺有意思的"</div>',
+            '  <div style="font-size:8px;color:#8A4BFF;font-weight:600;margin-top:3px;opacity:0.7">策略：制造好奇 · 不正面回答 · 2h 后发</div>',
+            '</div>',
+            '<div style="margin-top:6px;font-size:9px;color:#999;text-align:center">截图发给小话 · 逐句标注 + 回复建议</div>',
+            _featCardClose()
           ].join('');
+        }
+        case '行动指南': {
+          return [
+            _featCardOpen(),
+            '<div style="display:flex;align-items:center;gap:5px;margin-bottom:10px">',
+            '  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#8A4BFF" stroke-width="1.4"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="3"/><circle cx="8" cy="8" r="0.8" fill="#8A4BFF"/></svg>',
+            '  <span style="font-size:11px;font-weight:700;color:#1a1a1a">行动指南 · 邀约推演</span>',
+            '</div>',
+            '<div style="display:flex;align-items:center;gap:14px;margin-bottom:12px">',
+            '  <div style="position:relative;width:56px;height:56px;flex-shrink:0">',
+            '    <svg width="56" height="56" viewBox="0 0 56 56">',
+            '      <circle cx="28" cy="28" r="20" fill="none" stroke="#F0EBFA" stroke-width="4"/>',
+            '      <circle cx="28" cy="28" r="20" fill="none" stroke="url(#ringGact)" stroke-width="4" stroke-linecap="round" stroke-dasharray="' + (2*Math.PI*20*0.72).toFixed(2) + ' ' + (2*Math.PI*20).toFixed(2) + '" transform="rotate(-90 28 28)"/>',
+            '      <defs><linearGradient id="ringGact" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#8A4BFF"/><stop offset="100%" stop-color="#FF65C2"/></linearGradient></defs>',
+            '    </svg>',
+            '    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">',
+            '      <span style="font-family:\'DM Sans\',sans-serif;font-size:18px;font-weight:700;color:#8A4BFF">72%</span>',
+            '    </div>',
+            '  </div>',
+            '  <div>',
+            '    <div style="font-size:10px;color:#999;margin-bottom:4px">邀约成功率预估</div>',
+            '    <div style="display:flex;gap:4px">',
+            '      <span style="padding:2px 7px;border-radius:4px;background:rgba(138,75,255,0.08);font-size:9px;font-weight:600;color:#8A4BFF">周三晚</span>',
+            '      <span style="padding:2px 7px;border-radius:4px;background:rgba(255,101,194,0.08);font-size:9px;font-weight:600;color:#D44FA0">电影首映</span>',
+            '    </div>',
+            '  </div>',
+            '</div>',
+            '<div style="position:relative;overflow:hidden">',
+            '  <div style="padding:7px 10px;background:#FAFAFC;border-radius:8px;font-size:10px;color:#444;line-height:1.6">"你不是想看这个吗，周六有场，要不要一起……"</div>',
+            '  <div style="position:absolute;top:0;right:0;bottom:0;width:40px;background:linear-gradient(to right,transparent,#FAFAFC)"></div>',
+            '</div>',
+            _featLockHint('完成诊断后解锁最优时机 + 3 套话术'),
+            _featCardClose()
+          ].join('');
+        }
+        case '朋友圈指导': {
+          const items = [
+            { title: '不刷存在感', colorA: '#F6F0FF', colorB: '#EEEAFF' },
+            { title: '晒成长感',   colorA: '#FFF0F9', colorB: '#F6F0FF' },
+            { title: '制造神秘感', colorA: '#F6F0FF', colorB: '#EEEAFF' },
+          ];
+          const itemsHtml = items.map(it =>
+            '<div style="flex:1;border-radius:8px;overflow:hidden;border:0.5px solid rgba(138,75,255,0.1)">' +
+            '  <div style="height:36px;background:linear-gradient(135deg,' + it.colorA + ',' + it.colorB + ')"></div>' +
+            '  <div style="padding:5px 6px;font-size:9px;font-weight:600;color:#6B3FB0;text-align:center;line-height:1.3">' + it.title + '</div>' +
+            '</div>'
+          ).join('');
+          return [
+            _featCardOpen(),
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">',
+            '  <div style="display:flex;align-items:center;gap:5px">',
+            '    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#8A4BFF" stroke-width="1.4" stroke-linecap="round"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>',
+            '    <span style="font-size:11px;font-weight:700;color:#1a1a1a">朋友圈指导 · 本周建设</span>',
+            '  </div>',
+            '  <span style="display:inline-block;padding:2px 7px;border-radius:5px;background:#F8EDFF;color:#8A4BFF;font-size:10px;font-weight:700">3 条</span>',
+            '</div>',
+            '<div style="display:flex;gap:6px">',
+               itemsHtml,
+            '</div>',
+            '<div style="margin-top:8px;font-size:9px;color:#999;text-align:center">本周 3 条 · 含配图建议 + 发布时间</div>',
+            _featCardClose()
+          ].join('');
+        }
         default:
           return '';
       }
