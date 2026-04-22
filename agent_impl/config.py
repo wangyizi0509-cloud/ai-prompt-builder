@@ -443,6 +443,43 @@ def get_default_llm():
     return get_llm(temperature=0.7)
 
 
+def get_onboarding_vision_llm(temperature: float = 0.3):
+    """
+    Onboarding v2 analyze 节点专用：智谱 BigModel GLM vision 旗舰。
+
+    - 场景：一张聊天截图 + 400 字自由描述 → 结构化 JSON（5 条 skip_rules + FirstHook）
+    - 模型：glm-4.6v（106B 原生 function call，结构化输出稳定）
+    - 协议：OpenAI 兼容，base_url = https://open.bigmodel.cn/api/paas/v4/
+    - 环境变量：
+        - ONBOARDING_VISION_API_KEY（缺省回退到 IMAGE_TYPE_DETECT_API_KEY）
+        - ONBOARDING_VISION_BASE_URL（默认 https://open.bigmodel.cn/api/paas/v4/）
+        - ONBOARDING_VISION_MODEL（默认 glm-4.6v）
+    """
+    api_key = (
+        _normalize_env_value(os.getenv("ONBOARDING_VISION_API_KEY"))
+        or _normalize_env_value(os.getenv("IMAGE_TYPE_DETECT_API_KEY"))
+    )
+    if _is_placeholder_key(api_key):
+        raise ValueError(
+            "ONBOARDING_VISION_API_KEY (or IMAGE_TYPE_DETECT_API_KEY fallback) "
+            "is missing or placeholder"
+        )
+    base_url = (
+        _normalize_env_value(os.getenv("ONBOARDING_VISION_BASE_URL"))
+        or "https://open.bigmodel.cn/api/paas/v4/"
+    )
+    model = (
+        _normalize_env_value(os.getenv("ONBOARDING_VISION_MODEL"))
+        or "glm-4.6v"
+    )
+    return ChatOpenAI(
+        model=model,
+        openai_api_key=api_key,
+        openai_api_base=base_url,
+        temperature=temperature,
+    )
+
+
 def get_thinking_llm(temperature: float = 0.7):
     """
     获取支持思考模式 + 工具调用的 LLM 实例
