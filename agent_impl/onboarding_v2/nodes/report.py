@@ -204,27 +204,18 @@ async def _call_llm_once(
         HumanMessage(content=user_prompt),
     ]
 
-    # 强制 tool_choice:指定 DiagnosisReport 工具,模型必须调用它
+    # 绑定 DiagnosisReport 工具(tool_choice=auto)。
+    #
+    # 注:DeepSeek thinking 模式(`extra_body={"thinking":{...}}`)在 DeepSeek 服务端会
+    # 走 reasoner 路径,而 `deepseek-reasoner` 不接受强制 tool_choice=function,会报
+    # "does not support this tool_choice"。所以这里只 bind 工具、不强制 choice,
+    # 依赖 prompt 硬约束("必须调用 DiagnosisReport 工具")让模型自主调用。
     try:
-        llm_with_tool = llm.bind_tools(
-            [DiagnosisReport],
-            tool_choice={
-                "type": "function",
-                "function": {"name": "DiagnosisReport"},
-            },
-        )
+        llm_with_tool = llm.bind_tools([DiagnosisReport])
     except TypeError:
-        # 兜底:若 LangChain 版本对 Pydantic class 绑定签名不兼容,
-        # 退回到字典形式(仍走 OpenAI tool_call 协议,不回退到 JSON mode)
         from langchain_core.utils.function_calling import convert_to_openai_tool
 
-        llm_with_tool = llm.bind_tools(
-            [convert_to_openai_tool(DiagnosisReport)],
-            tool_choice={
-                "type": "function",
-                "function": {"name": "DiagnosisReport"},
-            },
-        )
+        llm_with_tool = llm.bind_tools([convert_to_openai_tool(DiagnosisReport)])
 
     if hasattr(llm_with_tool, "ainvoke"):
         response = await llm_with_tool.ainvoke(messages)
