@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Crushe.AI · Onboarding 可点击原型</title>
+  <link rel="stylesheet" href="colors_and_type.css">
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;font-family:"Noto Sans SC","PingFang SC","Inter",sans-serif;background:#0f0f14;color:#fff;min-height:100vh}
+
+    .stage{
+      display:flex; min-height:100vh;
+      align-items:flex-start;
+    }
+
+    /* 左侧：控制面板 */
+    .control{
+      width:320px; padding:28px 24px;
+      background:rgba(255,255,255,.03);
+      border-right:0.5px solid rgba(255,255,255,.08);
+      position:sticky; top:0; height:100vh; overflow-y:auto;
+      flex-shrink:0;
+    }
+    .control .brand{
+      font-size:11px; letter-spacing:2.5px; color:#FF65C2; font-weight:700;
+    }
+    .control h1{
+      font-size:22px; font-weight:700; letter-spacing:-0.4px;
+      margin:8px 0 6px; line-height:1.3;
+    }
+    .control .subtitle{
+      font-size:12px; color:rgba(255,255,255,.6); line-height:1.65;
+    }
+    .control .sec{
+      margin-top:24px; padding-top:20px;
+      border-top:0.5px solid rgba(255,255,255,.08);
+    }
+    .control .sec-title{
+      font-size:10px; letter-spacing:1.8px; color:rgba(255,255,255,.5); font-weight:700;
+      margin-bottom:12px;
+    }
+
+    /* 步骤列表 */
+    .steps{ display:flex; flex-direction:column; gap:4px; }
+    .step{
+      display:flex; align-items:center; gap:10px;
+      padding:9px 12px; border-radius:10px;
+      cursor:pointer; transition:all .15s ease-out;
+      border:0.5px solid transparent;
+      font-size:13px; color:rgba(255,255,255,.7);
+    }
+    .step:hover{ background:rgba(255,255,255,.04); color:#fff; }
+    .step.active{
+      background:linear-gradient(135deg,rgba(138,75,255,.24),rgba(255,101,194,.15));
+      border-color:rgba(138,75,255,.4);
+      color:#fff; font-weight:600;
+    }
+    .step.done{ color:rgba(255,255,255,.55); }
+    .step .dot{
+      width:20px; height:20px; border-radius:50%;
+      background:rgba(255,255,255,.08); color:rgba(255,255,255,.5);
+      font-family:"DM Sans",sans-serif; font-size:11px; font-weight:700;
+      display:flex; align-items:center; justify-content:center; flex-shrink:0;
+    }
+    .step.active .dot{ background:#8A4BFF; color:#fff; }
+    .step.done .dot{ background:rgba(76,175,80,.24); color:#7FE0A0; }
+
+    /* 提示 */
+    .hint{
+      margin-top:22px; padding:12px 14px;
+      background:rgba(255,184,0,.1); border:0.5px solid rgba(255,184,0,.3);
+      border-radius:10px;
+      font-size:12px; color:#FFD67A; line-height:1.7;
+    }
+    .nav-row{
+      margin-top:16px; display:flex; gap:8px;
+    }
+    .btn{
+      flex:1; padding:10px; border-radius:10px;
+      background:rgba(255,255,255,.08); color:#fff;
+      border:0.5px solid rgba(255,255,255,.15);
+      font-size:12px; font-weight:600; cursor:pointer;
+      font-family:inherit;
+    }
+    .btn:hover{ background:rgba(255,255,255,.14) }
+    .btn.primary{
+      background:linear-gradient(135deg,#8A4BFF,#FF65C2);
+      border-color:transparent;
+    }
+
+    /* 右侧：原型舞台 */
+    .phone-stage{
+      flex:1; min-height:100vh;
+      display:flex; align-items:center; justify-content:center;
+      padding:30px;
+      background:
+        radial-gradient(circle at 30% 40%, rgba(138,75,255,.12) 0%, transparent 50%),
+        radial-gradient(circle at 70% 60%, rgba(255,101,194,.10) 0%, transparent 50%),
+        #0f0f14;
+    }
+    .phone-stage .wrap{
+      transform: scale(0.92);
+      transform-origin: center;
+    }
+
+    /* 顶部小标签 */
+    .flag{
+      position:fixed; top:20px; right:20px; z-index:100;
+      padding:6px 12px; background:rgba(255,101,194,.15);
+      border:0.5px solid rgba(255,101,194,.4);
+      border-radius:999px;
+      font-size:11px; font-weight:700; letter-spacing:1px; color:#FF65C2;
+    }
+
+    /* 调试选项 · 钩子场景切换（分组 + 折叠） */
+    .hook-group{ margin-bottom:10px }
+    .hook-group-title{
+      font-size:10px; font-weight:700; color:rgba(255,255,255,.5);
+      letter-spacing:1px; padding:6px 4px; cursor:pointer;
+      display:flex; align-items:center; justify-content:space-between;
+      user-select:none;
+    }
+    .hook-group-title:hover{ color:rgba(255,255,255,.8) }
+    .hook-group-title .caret{ font-size:9px; transition:transform .15s }
+    .hook-group.collapsed .caret{ transform:rotate(-90deg) }
+    .hook-group.collapsed .hook-scenes{ display:none }
+    .hook-scenes{ display:flex; flex-direction:column; gap:3px; padding-left:4px }
+    .hook-scene{
+      padding:6px 9px; border-radius:7px;
+      background:rgba(255,255,255,.04); border:0.5px solid rgba(255,255,255,.08);
+      font-size:11px; color:rgba(255,255,255,.72); cursor:pointer;
+      line-height:1.4;
+    }
+    .hook-scene:hover{ background:rgba(255,255,255,.08); color:#fff }
+    .hook-scene.active{
+      background:rgba(138,75,255,.25); border-color:rgba(138,75,255,.5);
+      color:#fff; font-weight:600;
+      box-shadow:inset 2px 0 0 #FF65C2;
+    }
+
+    /* 单选钩子页：右侧底部提示 */
+    .step-detail{
+      margin-top:14px; padding:12px 14px;
+      background:rgba(255,255,255,.04); border-radius:10px;
+      font-size:11px; color:rgba(255,255,255,.6); line-height:1.7;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="flag">★ CLICKABLE PROTOTYPE</div>
+
+  <div class="stage">
+
+    <!-- ═════════ 左侧控制面板 ═════════ -->
+    <aside class="control">
+      <div class="brand">CRUSHE.AI · 可点击原型</div>
+      <h1>Onboarding 完整流程</h1>
+      <div class="subtitle">点击页面内的按钮在 7 个页面间跳转，左侧步骤条同步高亮</div>
+
+      <div class="sec">
+        <div class="sec-title">当前流程</div>
+        <div class="steps" id="steps"></div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-title">钩子场景（仅 ⑤ 页有效）</div>
+        <div class="hook-scenes" id="hookScenes"></div>
+        <div class="step-detail">
+          切换场景会影响「⑤ 卡片钩子」页显示的诊断内容和功能预览。覆盖 A1–A4 的关键组合+末题。
+        </div>
+      </div>
+
+      <div class="nav-row">
+        <button class="btn" onclick="prev()">← 上一步</button>
+        <button class="btn primary" onclick="next()">下一步 →</button>
+      </div>
+      <button class="btn" style="margin-top:8px;width:100%" onclick="reset()">↻ 重新开始</button>
+    </aside>
+
+    <!-- ═════════ 右侧原型舞台 ═════════ -->
+    <main class="phone-stage">
+      <div class="wrap" id="phone"></div>
+    </main>
+  </div>
+
+  <!-- React + Babel -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin></script>
+
+  <script type="text/babel" src="shared.jsx"></script>
+  <script type="text/babel" src="page1-splash.jsx"></script>
+  <script type="text/babel" src="page2-freedesc.jsx"></script>
+  <script type="text/babel" src="page3-opening-hook.jsx"></script>
+  <script type="text/babel" src="page4-question.jsx"></script>
+  <script type="text/babel" src="page5-card-hook.jsx"></script>
+  <script type="text/babel" src="page6-closing.jsx"></script>
+  <script type="text/babel" src="page7-report.jsx"></script>
+
+  <script type="text/babel" data-presets="env,react">
+    // ─── 流程定义 ───
+    // 钩子步骤合并成一个 "hook" · 内容由侧栏"钩子场景"决定
+    const FLOW = [
+      { key: 'splash',   label: '① 开屏',           desc: '品牌锚定 · 用户真实发言' },
+      { key: 'free',     label: '② 自由描述',       desc: '文字 + 至少 1 张截图（必填）' },
+      { key: 'opening',  label: '③ 首发钩子',       desc: 'AI 基于描述给的首条判断' },
+      { key: 'q0',       label: '④ A0 性别',        desc: '快速单选 · 设定称谓（不计入进度）' },
+      { key: 'q1',       label: '④ Q1 关系性质',     desc: '单选' },
+      { key: 'q3',       label: '④ Q3 行动历史',     desc: '多选 · 可带"其他"输入' },
+      { key: 'q5',       label: '④ Q5 目标确认',     desc: '末题 · 单选' },
+      { key: 'hook',     label: '⑤ 卡片钩子',       desc: '内容由左侧"钩子场景"决定' },
+      { key: 'loading',  label: '⑥ Loading',       desc: 'Aurora 光晕动效' },
+      { key: 'report',   label: '⑦ 诊断报告',       desc: 'Dark Hero · 5 维 · 付费' },
+      { key: 'paid',     label: '✓ 已付费',         desc: '下单成功（演示终点）' },
+    ];
+
+    // 所有钩子场景（与 hook-gallery.html 一致，全量 ~30 个）
+    // 分组展示：[group, key, label, getData]
+    const HOOK_GROUPS = [
+      { title: 'A1 · 关系性质（单选）', items: [
+        { key:'A1_colleague',  label:'同事',           build: () => ({ ...window.HOOKS_A1.colleague, qIdx:0, total:5, qLabel:'Q1 · 同事' }) },
+        { key:'A1_classmate',  label:'同学',           build: () => ({ ...window.HOOKS_A1.classmate, qIdx:0, total:5, qLabel:'Q1 · 同学' }) },
+        { key:'A1_online',     label:'网友',           build: () => ({ ...window.HOOKS_A1.online,    qIdx:0, total:5, qLabel:'Q1 · 网友' }) },
+        { key:'A1_intro',      label:'朋友介绍/相亲',  build: () => ({ ...window.HOOKS_A1.intro,     qIdx:0, total:5, qLabel:'Q1 · 朋友介绍' }) },
+        { key:'A1_offline',    label:'线下偶遇',       build: () => ({ ...window.HOOKS_A1.offline,   qIdx:0, total:5, qLabel:'Q1 · 线下偶遇' }) },
+      ]},
+      { title: 'A2 · 关系时长（单选）', items: [
+        { key:'A2_lt1m',   label:'不到 1 个月',  build: () => ({ ...window.HOOKS_A2.lt1m,   qIdx:1, total:5, qLabel:'Q2 · 不到 1 个月' }) },
+        { key:'A2_1to3m',  label:'1–3 个月',     build: () => ({ ...window.HOOKS_A2['1to3m'],  qIdx:1, total:5, qLabel:'Q2 · 1–3 个月' }) },
+        { key:'A2_3to6m',  label:'3–6 个月',     build: () => ({ ...window.HOOKS_A2['3to6m'],  qIdx:1, total:5, qLabel:'Q2 · 3–6 个月' }) },
+        { key:'A2_6mto1y', label:'半年到 1 年',   build: () => ({ ...window.HOOKS_A2['6mto1y'], qIdx:1, total:5, qLabel:'Q2 · 半年-1 年' }) },
+        { key:'A2_gt1y',   label:'1 年以上',      build: () => ({ ...window.HOOKS_A2.gt1y,   qIdx:1, total:5, qLabel:'Q2 · 1 年以上' }) },
+      ]},
+      { title: 'A3 · 行动历史（单选钩子）', items: [
+        { key:'A3_confess',   label:'表白过（挂局势分析）', build: () => ({ ...window.HOOKS_A3.confess,   qIdx:2, total:5, qLabel:'Q3 · 表白过' }) },
+        { key:'A3_rejected',  label:'邀约被拒（挂行动指南）', build: () => ({ ...window.HOOKS_A3.rejected, qIdx:2, total:5, qLabel:'Q3 · 邀约被拒' }) },
+        { key:'A3_expensive', label:'送贵重礼物（挂行动规划）', build: () => ({ ...window.HOOKS_A3.expensive, qIdx:2, total:5, qLabel:'Q3 · 送贵礼' }) },
+        { key:'A3_public',    label:'当众特别照顾',         build: () => ({ ...window.HOOKS_A3.public,    qIdx:2, total:5, qLabel:'Q3 · 当众照顾' }) },
+        { key:'A3_chatting',  label:'频繁主动聊天（挂聊天指导）', build: () => ({ ...window.HOOKS_A3.chatting, qIdx:2, total:5, qLabel:'Q3 · 天天主动聊' }) },
+        { key:'A3_asked',     label:'约成功过',             build: () => ({ ...window.HOOKS_A3.asked,     qIdx:2, total:5, qLabel:'Q3 · 约成功过' }) },
+        { key:'A3_none',      label:'以上都没有（挂行动规划）', build: () => ({ ...window.HOOKS_A3.none,    qIdx:2, total:5, qLabel:'Q3 · 没动作' }) },
+      ]},
+      { title: 'A3 ★ 组合钩子', items: [
+        { key:'A3_combo_confess_high',label:'表白 + 高暴露（整体策略重置）',build: () => ({ ...window.HOOKS_A3.combo_confess_high, qIdx:2, total:5, qLabel:'Q3 · 组合 · 完全明牌' }) },
+        { key:'A3_combo_confess_rej', label:'表白 + 被拒邀约',             build: () => ({ ...window.HOOKS_A3.combo_confess_rej,  qIdx:2, total:5, qLabel:'Q3 · 组合 · 表白+被拒' }) },
+        { key:'A3_combo_rej_chat',    label:'天天聊 + 被拒邀约',           build: () => ({ ...window.HOOKS_A3.combo_rej_chat,     qIdx:2, total:5, qLabel:'Q3 · 组合 · 享受关注不推进' }) },
+        { key:'A3_combo_fallback',    label:'其他组合 · 兜底',             build: () => ({ ...window.HOOKS_A3.combo_fallback,     qIdx:2, total:5, qLabel:'Q3 · 组合 · 兜底' }) },
+      ]},
+      { title: 'A4 · 负面信号（单选钩子）', items: [
+        { key:'A4_friendzoned',label:'好人卡（挂行动规划）',    build: () => ({ ...window.HOOKS_A4.friendzoned, qIdx:3, total:5, qLabel:'Q4 · 好人卡' }) },
+        { key:'A4_toolman',    label:'工具人（挂朋友圈指导）',  build: () => ({ ...window.HOOKS_A4.toolman,     qIdx:3, total:5, qLabel:'Q4 · 工具人' }) },
+        { key:'A4_refused',    label:'拒绝见面（挂局势分析）',  build: () => ({ ...window.HOOKS_A4.refused,     qIdx:3, total:5, qLabel:'Q4 · 拒绝见面' }) },
+        { key:'A4_others_warm',label:'对别人更热情',            build: () => ({ ...window.HOOKS_A4.others_warm, qIdx:3, total:5, qLabel:'Q4 · 对别人热情' }) },
+        { key:'A4_slow_reply', label:'回复越来越慢',            build: () => ({ ...window.HOOKS_A4.slow_reply,  qIdx:3, total:5, qLabel:'Q4 · 回复越来越慢' }) },
+        { key:'A4_cold_reply', label:'聊天敷衍',                build: () => ({ ...window.HOOKS_A4.cold_reply,  qIdx:3, total:5, qLabel:'Q4 · 聊天敷衍' }) },
+        { key:'A4_none2',      label:'以上都没有（挂行动规划）',build: () => ({ ...window.HOOKS_A4.none2,       qIdx:3, total:5, qLabel:'Q4 · 没负面信号' }) },
+      ]},
+      { title: 'A4 ★ 组合钩子', items: [
+        { key:'A4_combo_friend_any', label:'好人卡 + 任意其他',      build: () => ({ ...window.HOOKS_A4.combo_friend_any,  qIdx:3, total:5, qLabel:'Q4 · 组合 · 好人卡+冷淡' }) },
+        { key:'A4_combo_tool_cold',  label:'工具人 + 冷淡',          build: () => ({ ...window.HOOKS_A4.combo_tool_cold,   qIdx:3, total:5, qLabel:'Q4 · 组合 · 有用不心动' }) },
+        { key:'A4_combo_cold_refuse',label:'冷淡 + 拒绝见面',        build: () => ({ ...window.HOOKS_A4.combo_cold_refuse, qIdx:3, total:5, qLabel:'Q4 · 组合 · 系统性拉距' }) },
+        { key:'A4_combo_cold_other', label:'冷淡 + 对别人热情',      build: () => ({ ...window.HOOKS_A4.combo_cold_other,  qIdx:3, total:5, qLabel:'Q4 · 组合 · 选择性距离' }) },
+        { key:'A4_combo_fallback',   label:'其他组合 · 兜底',        build: () => ({ ...window.HOOKS_A4.combo_fallback,    qIdx:3, total:5, qLabel:'Q4 · 组合 · 兜底' }) },
+      ]},
+      { title: 'A5 · 目标确认（末题）', items: [
+        { key:'A5_last', label:'末题 · 按钮=生成完整诊断报告', build: () => ({
+          tag: '目标确认',
+          short: '锁定目标后，我会围绕它为你定制策略。',
+          body: '你的目标选定后，接下来我会按目标优先级拆解问题：吸引力不足先补吸引力，张力弱就先造张力，推进卡住就从节奏调起。5 道题的信息已经足够——现在帮你生成一份完整诊断。',
+          highlight: '完整诊断',
+          feature: null,
+          qIdx: 4, total: 5, qLabel: 'Q5 · 目标确认 · 末题',
+        }) },
+      ]},
+    ];
+
+    // 扁平化供查找
+    const HOOK_SCENES = HOOK_GROUPS.flatMap(g => g.items);
+
+    // ─── 主应用 ───
+    function App() {
+      const [stepIdx, setStepIdx] = React.useState(0);
+      const [hookScene, setHookScene] = React.useState('A3_combo_confess_high'); // 默认组合
+      const cur = FLOW[stepIdx];
+
+      window._gotoStep = (k) => {
+        const i = FLOW.findIndex(s => s.key === k);
+        if (i >= 0) setStepIdx(i);
+      };
+      window._next = () => setStepIdx(i => Math.min(FLOW.length - 1, i + 1));
+      window._prev = () => setStepIdx(i => Math.max(0, i - 1));
+      window._reset = () => { setStepIdx(0); setHookScene('A3_combo_confess_high'); window.GENDER = null; };
+
+      // 切换钩子场景时，自动跳到"⑤ 卡片钩子"步骤方便预览
+      const onHookSceneChange = (k) => {
+        setHookScene(k);
+        const hookIdx = FLOW.findIndex(s => s.key === 'hook');
+        if (hookIdx >= 0) setStepIdx(hookIdx);
+      };
+
+      React.useEffect(() => {
+        renderSteps(stepIdx);
+        renderHookScenes(hookScene, onHookSceneChange);
+      }, [stepIdx, hookScene]);
+
+      const next = () => window._next();
+      const back = () => window._prev();
+
+      let screen;
+      if (cur.key === 'splash')       screen = <Splash_FINAL onNext={next}/>;
+      else if (cur.key === 'free')    screen = <FreeDesc_V1_Compact onNext={next} onBack={back}/>;
+      else if (cur.key === 'opening') screen = <OpeningHook_V1_QuickRead onNext={next} onBack={back}/>;
+      else if (cur.key === 'q0')      screen = <Q0Demo onNext={next} onBack={back}/>;
+      else if (cur.key === 'q1')      screen = <Question_V1_SingleDemo onNext={next} onBack={back}/>;
+      else if (cur.key === 'q3')      screen = <Question_V1_MultiDemo onNext={next} onBack={back}/>;
+      else if (cur.key === 'q5')      screen = <Q5Demo onNext={next} onBack={back}/>;
+      else if (cur.key === 'hook') {
+        const scene = HOOK_SCENES.find(s => s.key === hookScene) || HOOK_SCENES[0];
+        const data = scene.build();
+        screen = <CardHook_V1_Report hookData={data} onNext={next} onBack={back}/>;
+      }
+      else if (cur.key === 'loading') screen = <Closing_V2_Loading onNext={next}/>;
+      else if (cur.key === 'report')  screen = <Report_V2_DarkHero onPay={next} onBack={back}/>;
+      else if (cur.key === 'paid')    screen = <PaidSuccess onBack={back}/>;
+
+      return screen;
+    }
+
+    // A0 性别题（不显示 5 题进度条，选完写入 window.GENDER 直接跳到下一步）
+    function Q0Demo({ onNext, onBack }) {
+      const Q = {
+        id: 'A0_gender',
+        q: '先问你一个小问题 — 你是？',
+        sub: '这样我和你说话的时候可以更自然 😊',
+        type: 'single',
+        opts: [
+          { t: '男生', key: 'male' },
+          { t: '女生', key: 'female' },
+          { t: '不想说', key: 'other' },
+        ],
+      };
+      const [sel, setSel] = React.useState(null);
+      return (
+        <Frame bg="#F7F7FA">
+          <div style={{ position: 'absolute', top: 44, left: 0, right: 0, padding: '18px 21px 14px', zIndex: 10, background: '#F7F7FA' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <button onClick={onBack} style={{ width: 36, height: 36, borderRadius: 10, background: '#fff', border: '0.5px solid #E5E0F5', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="2"><path d="M15 6l-6 6 6 6"/></svg>
+              </button>
+              <div style={{ fontSize: 11, color: '#999', fontWeight: 600, letterSpacing: 1 }}>快速了解一下你</div>
+              <div style={{ width: 36 }}/>
+            </div>
+          </div>
+          <div style={{ position: 'absolute', top: 110, left: 21, right: 21 }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#1a1a1a', lineHeight: 1.45, marginBottom: 6 }}>{Q.q}</div>
+            <div style={{ fontSize: 13, color: '#999', marginBottom: 24 }}>{Q.sub}</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {Q.opts.map(opt => (
+                <button key={opt.key} onClick={() => {
+                  setSel(opt.key);
+                  window.GENDER = opt.key;
+                  setTimeout(onNext, 400);
+                }} style={{
+                  padding: '14px 16px', borderRadius: 12, textAlign: 'left', cursor: 'pointer',
+                  background: sel === opt.key ? '#F8EDFF' : '#fff',
+                  border: `1px solid ${sel === opt.key ? '#8A4BFF' : '#E5E0F5'}`,
+                  color: sel === opt.key ? '#8A4BFF' : '#333',
+                  fontSize: 15, fontWeight: sel === opt.key ? 700 : 500,
+                  fontFamily: 'inherit', transition: 'all .15s',
+                }}>
+                  {opt.t}
+                </button>
+              ))}
+            </div>
+          </div>
+        </Frame>
+      );
+    }
+
+    // Q5 (末题) 演示
+    function Q5Demo({ onNext, onBack }) {
+      const [sel, setSel] = React.useState('closer');
+      return (
+        <QuestionCard
+          Q={window.QUESTIONS[5]} qIdx={4} total={5}
+          selected={sel}
+          onSelect={(k) => { setSel(k); setTimeout(onNext, 700); }}
+          onBack={onBack}
+        />
+      );
+    }
+
+    // 付费成功终点页（演示用）
+    function PaidSuccess({ onBack }) {
+      return (
+        <Frame bg="#F7F7FA">
+          <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:40 }}>
+            <div style={{ width:96, height:96, borderRadius:'50%', background:'linear-gradient(135deg,#8A4BFF,#FF65C2)', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 20px 40px rgba(138,75,255,.4)' }}>
+              <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+            </div>
+            <div style={{ marginTop:24, fontSize:22, fontWeight:700, textAlign:'center', color:'#1a1a1a' }}>解锁成功！</div>
+            <div style={{ marginTop:10, fontSize:13, color:'#666', textAlign:'center', lineHeight:1.7 }}>
+              你的专属方案正在准备中<br/>小话老师会在 3 分钟内上线陪你
+            </div>
+            <button onClick={onBack} style={{ marginTop:32, padding:'10px 20px', borderRadius:10, background:'#fff', border:'0.5px solid #E5E0F5', color:'#8A4BFF', fontSize:13, fontWeight:600, cursor:'pointer' }}>← 回报告页</button>
+          </div>
+        </Frame>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('phone')).render(<App/>);
+
+    // ─── 左侧面板更新 ───
+    function renderSteps(active) {
+      const root = document.getElementById('steps');
+      root.innerHTML = '';
+      FLOW.forEach((s, i) => {
+        const el = document.createElement('div');
+        el.className = 'step' + (i === active ? ' active' : (i < active ? ' done' : ''));
+        el.innerHTML = `
+          <div class="dot">${i < active ? '✓' : String(i+1).padStart(2,'0')}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px">${s.label}</div>
+            <div style="font-size:10px; color:rgba(255,255,255,.45); margin-top:2px">${s.desc}</div>
+          </div>
+        `;
+        el.onclick = () => window._gotoStep(s.key);
+        root.appendChild(el);
+      });
+    }
+
+    function renderHookScenes(active, setFn) {
+      const root = document.getElementById('hookScenes');
+      root.innerHTML = '';
+      // 初始化时：默认折叠所有组，只展开第一组
+      if (!window._collapsedGroups) {
+        window._collapsedGroups = new Set();
+        HOOK_GROUPS.forEach((g, gi) => { if (gi !== 0) window._collapsedGroups.add(g.title); });
+      }
+      // 当 active 所在的组被折叠时，自动展开它
+      HOOK_GROUPS.forEach(g => {
+        if (g.items.some(s => s.key === active)) window._collapsedGroups.delete(g.title);
+      });
+      HOOK_GROUPS.forEach((g, gi) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'hook-group';
+        if (window._collapsedGroups.has(g.title)) wrap.classList.add('collapsed');
+
+        const title = document.createElement('div');
+        title.className = 'hook-group-title';
+        title.innerHTML = `<span>${g.title} · ${g.items.length}</span><span class="caret">▾</span>`;
+        title.onclick = () => {
+          if (window._collapsedGroups.has(g.title)) window._collapsedGroups.delete(g.title);
+          else window._collapsedGroups.add(g.title);
+          renderHookScenes(active, setFn);
+        };
+        wrap.appendChild(title);
+
+        const list = document.createElement('div');
+        list.className = 'hook-scenes';
+        g.items.forEach(s => {
+          const el = document.createElement('div');
+          el.className = 'hook-scene' + (s.key === active ? ' active' : '');
+          el.textContent = s.label;
+          el.onclick = () => setFn(s.key);
+          list.appendChild(el);
+        });
+        wrap.appendChild(list);
+        root.appendChild(wrap);
+      });
+    }
+
+    // 绑定顶部按钮
+    window.next = () => window._next();
+    window.prev = () => window._prev();
+    window.reset = () => window._reset();
+  </script>
+
+</body>
+</html>

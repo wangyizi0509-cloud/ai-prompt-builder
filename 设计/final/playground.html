@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>功能预览卡 Playground</title>
+  <link rel="stylesheet" href="colors_and_type.css">
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;font-family:"Noto Sans SC","PingFang SC","Inter",sans-serif;background:#0f0f14;color:#fff;min-height:100vh;padding:40px}
+    h1{font-size:24px;font-weight:700;margin:0 0 6px}
+    .subtitle{font-size:13px;color:rgba(255,255,255,.5);margin-bottom:40px}
+    .section{margin-bottom:56px}
+    .section-title{font-size:11px;letter-spacing:2.5px;color:#FF65C2;font-weight:700;margin-bottom:20px}
+    .row{display:flex;gap:32px;flex-wrap:wrap;align-items:flex-start}
+    .col{display:flex;flex-direction:column;align-items:center;gap:12px}
+    .col .label{font-size:14px;font-weight:700;color:#fff}
+    .col .desc{font-size:11px;color:rgba(255,255,255,.5);text-align:center;max-width:280px;line-height:1.6}
+    .card-wrap{width:300px;padding:0;border-radius:14px;overflow:hidden}
+  </style>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <h1>功能预览卡 Playground</h1>
+  <div class="subtitle">情感罗盘 × 3 方案 + 聊天指导 × 3 方案 · 选你喜欢的</div>
+  <div id="root"></div>
+
+  <script type="text/babel">
+// ─── 共用样式 ───
+const cardShell = {
+  padding: 14,
+  background: 'linear-gradient(180deg, #fff 0%, #FDFAFF 100%)',
+  borderRadius: 12,
+  border: '0.5px solid rgba(138,75,255,0.12)',
+  boxShadow: '0 8px 32px rgba(105,124,255,0.10)',
+  position: 'relative',
+  overflow: 'hidden',
+  width: 300,
+  fontFamily: '"Noto Sans SC","PingFang SC","Inter",sans-serif',
+};
+function AccentBar() {
+  return <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'linear-gradient(90deg, #8A4BFF, #FF65C2)' }}/>;
+}
+function DraftBanner() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', marginBottom: 12, background: 'linear-gradient(135deg, rgba(138,75,255,0.06), rgba(255,101,194,0.06))', borderRadius: 8, borderLeft: '2px solid #8A4BFF' }}>
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="#8A4BFF" strokeWidth="1.5" strokeLinecap="round"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>
+      <span style={{ fontSize: 10, color: '#8A4BFF', fontWeight: 600, letterSpacing: 0.2 }}>为你定制中 · 完整版诊断后解锁</span>
+    </div>
+  );
+}
+function Tag({ children, tone = 'violet', size = 'xs' }) {
+  const tones = { violet: { bg: '#F8EDFF', fg: '#8A4BFF' }, amber: { bg: '#FFF4E0', fg: '#E88F00' }, greenish: { bg: '#E6F7F0', fg: '#0A8049' }, red: { bg: '#FFE6E6', fg: '#C00' } };
+  const t = tones[tone] || tones.violet;
+  return <span style={{ display: 'inline-block', padding: size === 'xs' ? '2px 7px' : '3px 9px', borderRadius: 5, background: t.bg, color: t.fg, fontSize: size === 'xs' ? 10 : 11, fontWeight: 700, lineHeight: 1.4 }}>{children}</span>;
+}
+function IconGauge() {
+  return <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"><path d="M8 14A6 6 0 1 1 8 2a6 6 0 0 1 0 12z"/><path d="M8 5v3l2 1.5"/></svg>;
+}
+function IconChat() {
+  return <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"><path d="M2 3h12v8H6l-3 2v-2H2z" strokeLinejoin="round"/></svg>;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 情感罗盘方案 A：Oura 风 — 大弧进度 + 小雷达
+// ═══════════════════════════════════════════════════════════════
+function CompassA() {
+  const dims = [
+    { label: '吸引力', v: 0.52 },
+    { label: '舒适感', v: 0.68 },
+    { label: '张力',   v: 0.18 },
+    { label: '信任度', v: 0.45 },
+    { label: '回应度', v: 0.31 },
+  ];
+  const progress = 34; // 关系进度
+  // 大弧参数
+  const arcR = 44, arcCx = 150, arcCy = 52, arcW = 7;
+  const arcCirc = Math.PI * arcR;
+  // 小雷达参数
+  const cx = 44, cy = 36, R = 22;
+  const ang = i => -Math.PI/2 + i * 2 * Math.PI / 5;
+  const pt = (i, r) => [cx + r * Math.cos(ang(i)), cy + r * Math.sin(ang(i))];
+  const poly = r => dims.map((_,i) => pt(i,r).map(v=>v.toFixed(1)).join(',')).join(' ');
+  const dataPoly = dims.map((d,i) => pt(i, R*d.v).map(v=>v.toFixed(1)).join(',')).join(' ');
+  const anch = ['middle','start','start','end','end'];
+
+  return (
+    <div style={cardShell}>
+      <AccentBar/>
+      <DraftBanner/>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 10 }}>
+        <span style={{ color: '#8A4BFF' }}><IconGauge/></span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#1a1a1a' }}>情感罗盘</span>
+        <Tag tone="amber">需关注</Tag>
+      </div>
+      {/* 大弧进度条 */}
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 4 }}>
+        <div style={{ position: 'relative', width: 300, height: 64 }}>
+          <svg width="300" height="64" viewBox="60 2 180 60">
+            <path d={`M ${arcCx - arcR} ${arcCy} A ${arcR} ${arcR} 0 0 1 ${arcCx + arcR} ${arcCy}`} fill="none" stroke="#F0EBFA" strokeWidth={arcW} strokeLinecap="round"/>
+            <path d={`M ${arcCx - arcR} ${arcCy} A ${arcR} ${arcR} 0 0 1 ${arcCx + arcR} ${arcCy}`} fill="none" stroke="url(#arcG_a)" strokeWidth={arcW} strokeLinecap="round" strokeDasharray={`${arcCirc * progress / 100} ${arcCirc}`}/>
+            <defs><linearGradient id="arcG_a" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#8A4BFF"/><stop offset="100%" stopColor="#FF65C2"/></linearGradient></defs>
+          </svg>
+          <div style={{ position: 'absolute', bottom: 2, left: '50%', transform: 'translateX(-50%)', textAlign: 'center' }}>
+            <div style={{ fontFamily: 'DM Sans', fontSize: 26, fontWeight: 700, color: '#1a1a1a', lineHeight: 1 }}>{progress}<span style={{ fontSize: 12, color: '#999' }}>/100</span></div>
+            <div style={{ fontSize: 9, color: '#999', marginTop: 2 }}>关系进度</div>
+          </div>
+          {/* 左右端点标签 */}
+          <div style={{ position: 'absolute', bottom: 20, left: 52, fontSize: 8, color: '#BBB' }}>刚认识</div>
+          <div style={{ position: 'absolute', bottom: 20, right: 52, fontSize: 8, color: '#BBB' }}>在一起</div>
+        </div>
+      </div>
+      {/* 小雷达 + 右侧维度列表 */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+        <div style={{ flexShrink: 0, width: 88, height: 72 }}>
+          <svg width="88" height="72" viewBox="0 0 88 72" style={{ overflow: 'visible' }}>
+            <polygon points={poly(R)} fill="none" stroke="#E5E0F5" strokeWidth="0.5"/>
+            <polygon points={poly(R*0.5)} fill="none" stroke="#F0EBFA" strokeWidth="0.4" strokeDasharray="1.5,1.5"/>
+            <defs>
+              <linearGradient id="rF_a" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="rgba(138,75,255,0.18)"/><stop offset="100%" stopColor="rgba(255,101,194,0.10)"/></linearGradient>
+              <linearGradient id="rS_a" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#8A4BFF"/><stop offset="100%" stopColor="#FF65C2"/></linearGradient>
+            </defs>
+            <polygon points={dataPoly} fill="url(#rF_a)" stroke="url(#rS_a)" strokeWidth="1.2" strokeLinejoin="round"/>
+            {dims.map((d,i) => <circle key={i} cx={pt(i,R*d.v)[0].toFixed(1)} cy={pt(i,R*d.v)[1].toFixed(1)} r="2" fill={d.v < 0.25 ? '#E84057' : '#8A4BFF'}/>)}
+            {dims.map((d,i) => {
+              const [lx,ly] = pt(i, R+10);
+              return <text key={i} x={lx.toFixed(1)} y={(ly).toFixed(1)} textAnchor={anch[i]} dominantBaseline="middle" fontSize="6.5" fontWeight="600" fill={d.v < 0.25 ? '#E84057' : '#AAA'}>{d.label}</text>;
+            })}
+          </svg>
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {dims.map((d, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 36, fontSize: 9, fontWeight: 600, color: d.v < 0.25 ? '#E84057' : '#888', textAlign: 'right', flexShrink: 0 }}>{d.label}</div>
+              <div style={{ flex: 1, height: 5, background: '#F0EBFA', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ width: (d.v*100)+'%', height: '100%', borderRadius: 3, background: d.v < 0.25 ? 'linear-gradient(90deg,#E84057,#FF7B8E)' : 'linear-gradient(90deg,#8A4BFF,#B07FFF)' }}/>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px', background: 'linear-gradient(90deg, rgba(232,64,87,0.04), transparent)', borderRadius: 6, marginTop: 8 }}>
+        <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#E84057', flexShrink: 0 }}/>
+        <span style={{ fontSize: 9, color: '#E84057', lineHeight: 1.4 }}>张力 · 回应度 低于安全线</span>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 情感罗盘方案 B：WHOOP 风 — 关系进度环 Hero + 横条维度
+// ═══════════════════════════════════════════════════════════════
+function CompassB() {
+  const dims = [
+    { label: '吸引力', v: 52, color: '#8A4BFF' },
+    { label: '舒适感', v: 68, color: '#8A4BFF' },
+    { label: '张力',   v: 18, color: '#E84057' },
+    { label: '信任度', v: 45, color: '#8A4BFF' },
+    { label: '回应度', v: 31, color: '#E84057' },
+  ];
+  const progress = 34;
+  const r = 34, cx = 42, cy = 42, sw = 5;
+  const circ = 2 * Math.PI * r;
+  return (
+    <div style={cardShell}>
+      <AccentBar/>
+      <DraftBanner/>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 10 }}>
+        <span style={{ color: '#8A4BFF' }}><IconGauge/></span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#1a1a1a' }}>情感罗盘</span>
+        <Tag tone="amber">需关注</Tag>
+      </div>
+      <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+        {/* 进度环 */}
+        <div style={{ position: 'relative', width: 84, height: 84, flexShrink: 0 }}>
+          <svg width="84" height="84" viewBox="0 0 84 84">
+            <circle cx={cx} cy={cy} r={r} fill="none" stroke="#F0EBFA" strokeWidth={sw}/>
+            <circle cx={cx} cy={cy} r={r} fill="none" stroke="url(#ringG_b)" strokeWidth={sw}
+              strokeLinecap="round" strokeDasharray={`${circ * progress / 100} ${circ}`}
+              transform={`rotate(-90 ${cx} ${cy})`}/>
+            <defs><linearGradient id="ringG_b" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#8A4BFF"/><stop offset="100%" stopColor="#FF65C2"/></linearGradient></defs>
+          </svg>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ fontFamily: 'DM Sans', fontSize: 24, fontWeight: 700, color: '#1a1a1a', lineHeight: 1 }}>{progress}</div>
+            <div style={{ fontSize: 8, color: '#999', marginTop: 2 }}>关系进度</div>
+          </div>
+        </div>
+        {/* 标签解释 */}
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>暧昧初期</div>
+          <div style={{ fontSize: 10, color: '#888', lineHeight: 1.5 }}>有基础好感，但还没有<br/>明确的推进动作</div>
+        </div>
+      </div>
+      {/* 五维横条 */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+        {dims.map((d, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: 36, fontSize: 9, fontWeight: 600, color: d.color, textAlign: 'right', flexShrink: 0 }}>{d.label}</div>
+            <div style={{ flex: 1, height: 6, background: '#F0EBFA', borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ width: d.v+'%', height: '100%', borderRadius: 3, background: d.color === '#E84057' ? 'linear-gradient(90deg,#E84057,#FF7B8E)' : 'linear-gradient(90deg,#8A4BFF,#B07FFF)' }}/>
+            </div>
+            <div style={{ width: 20, fontSize: 9, fontWeight: 700, color: d.color, fontFamily: 'DM Sans' }}>{d.v}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 情感罗盘方案 C：Apple Health 风 — 横向进度条 Hero + 迷你雷达缩略
+// ═══════════════════════════════════════════════════════════════
+function CompassC() {
+  const dims = [
+    { label: '吸引力', v: 0.52 },
+    { label: '舒适感', v: 0.68 },
+    { label: '张力',   v: 0.18 },
+    { label: '信任度', v: 0.45 },
+    { label: '回应度', v: 0.31 },
+  ];
+  const progress = 34;
+  // 迷你雷达
+  const cx = 28, cy = 28, R = 18;
+  const ang = i => -Math.PI/2 + i * 2 * Math.PI / 5;
+  const pt = (i, r) => [cx + r * Math.cos(ang(i)), cy + r * Math.sin(ang(i))];
+  const poly = r => dims.map((_,i) => pt(i,r).map(v=>v.toFixed(1)).join(',')).join(' ');
+  const dataPoly = dims.map((d,i) => pt(i, R*d.v).map(v=>v.toFixed(1)).join(',')).join(' ');
+  return (
+    <div style={cardShell}>
+      <AccentBar/>
+      <DraftBanner/>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 10 }}>
+        <span style={{ color: '#8A4BFF' }}><IconGauge/></span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#1a1a1a' }}>情感罗盘</span>
+        <Tag tone="amber">需关注</Tag>
+      </div>
+      {/* 关系进度条（横向） */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+          <div>
+            <span style={{ fontFamily: 'DM Sans', fontSize: 28, fontWeight: 700, color: '#1a1a1a' }}>{progress}</span>
+            <span style={{ fontSize: 11, color: '#999', marginLeft: 2 }}>/ 100</span>
+          </div>
+          <div style={{ padding: '3px 8px', background: 'rgba(138,75,255,0.08)', borderRadius: 5, fontSize: 10, fontWeight: 600, color: '#8A4BFF' }}>暧昧初期</div>
+        </div>
+        <div style={{ height: 8, background: '#F0EBFA', borderRadius: 4, overflow: 'hidden', position: 'relative' }}>
+          <div style={{ width: progress+'%', height: '100%', borderRadius: 4, background: 'linear-gradient(90deg, #8A4BFF, #FF65C2)' }}/>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+          <span style={{ fontSize: 8, color: '#BBB' }}>刚认识</span>
+          <span style={{ fontSize: 8, color: '#BBB' }}>暧昧期</span>
+          <span style={{ fontSize: 8, color: '#BBB' }}>确认关系</span>
+        </div>
+      </div>
+      {/* 下半区：迷你雷达 + 一句话洞察 */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', background: '#FAFAFC', borderRadius: 8, padding: '8px 10px' }}>
+        <svg width="56" height="56" viewBox="0 0 56 56" style={{ flexShrink: 0, overflow: 'visible' }}>
+          <polygon points={poly(R)} fill="none" stroke="#E5E0F5" strokeWidth="0.5"/>
+          <defs>
+            <linearGradient id="rF_c" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="rgba(138,75,255,0.18)"/><stop offset="100%" stopColor="rgba(255,101,194,0.10)"/></linearGradient>
+            <linearGradient id="rS_c" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#8A4BFF"/><stop offset="100%" stopColor="#FF65C2"/></linearGradient>
+          </defs>
+          <polygon points={dataPoly} fill="url(#rF_c)" stroke="url(#rS_c)" strokeWidth="1" strokeLinejoin="round"/>
+          {dims.map((d,i) => <circle key={i} cx={pt(i,R*d.v)[0].toFixed(1)} cy={pt(i,R*d.v)[1].toFixed(1)} r="1.5" fill={d.v < 0.25 ? '#E84057' : '#8A4BFF'}/>)}
+        </svg>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#1a1a1a', marginBottom: 3 }}>5 维健康度</div>
+          <div style={{ fontSize: 9, color: '#E84057', lineHeight: 1.5, fontWeight: 600 }}>张力 · 回应度 低于安全线</div>
+          <div style={{ fontSize: 9, color: '#888', lineHeight: 1.5, marginTop: 2 }}>舒适感尚可，但缺乏心动感</div>
+        </div>
+      </div>
+      <div style={{ marginTop: 6, fontSize: 9, color: '#999', textAlign: 'center' }}>实时更新 · 每周自动刷新</div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 聊天指导方案 A：截图批注风 — 灰底截图区 + 标注引线 + 建议区
+// ═══════════════════════════════════════════════════════════════
+function ChatA() {
+  const annotStyle = {
+    position: 'absolute', left: -2, right: -2,
+    border: '1.5px solid rgba(138,75,255,0.5)',
+    borderRadius: 10, pointerEvents: 'none',
+  };
+  return (
+    <div style={cardShell}>
+      <AccentBar/>
+      <DraftBanner/>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 8 }}>
+        <span style={{ color: '#8A4BFF' }}><IconChat/></span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#1a1a1a' }}>聊天指导 · 逐条批注</span>
+        <Tag tone="greenish">实时</Tag>
+      </div>
+      {/* 截图区域 */}
+      <div style={{ background: '#F5F5F5', borderRadius: 8, padding: '8px 8px 6px', position: 'relative' }}>
+        <div style={{ position: 'absolute', top: -8, left: 8, padding: '1px 6px', background: '#8A4BFF', borderRadius: 4, fontSize: 8, fontWeight: 700, color: '#fff', letterSpacing: 0.3, zIndex: 2 }}>你的截图</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 2 }}>
+          <div style={{ alignSelf: 'flex-start', maxWidth: '80%', padding: '6px 10px', background: '#fff', borderRadius: '10px 10px 10px 3px', fontSize: 10.5, color: '#333' }}>哈哈好久没聊了</div>
+          <div style={{ alignSelf: 'flex-end', maxWidth: '80%', position: 'relative' }}>
+            <div style={{ padding: '6px 10px', background: '#95EC69', borderRadius: '10px 10px 3px 10px', fontSize: 10.5, color: '#333' }}>是啊！最近怎么样</div>
+            <div style={{ ...annotStyle, top: -3, bottom: -3 }}/>
+            <div style={{ position: 'absolute', top: '50%', right: -46, transform: 'translateY(-50%)', display: 'flex', alignItems: 'center' }}>
+              <div style={{ width: 12, borderTop: '1px dashed #8A4BFF' }}/>
+              <div style={{ background: '#8A4BFF', borderRadius: 3, padding: '2px 4px', fontSize: 7, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>回复过快</div>
+            </div>
+          </div>
+          <div style={{ alignSelf: 'flex-start', maxWidth: '80%', position: 'relative' }}>
+            <div style={{ padding: '6px 10px', background: '#fff', borderRadius: '10px 10px 10px 3px', fontSize: 10.5, color: '#333' }}>还行吧，你呢</div>
+            <div style={{ ...annotStyle, top: -3, bottom: -3, borderColor: 'rgba(232,64,87,0.5)' }}/>
+            <div style={{ position: 'absolute', top: '50%', left: -38, transform: 'translateY(-50%)', display: 'flex', alignItems: 'center' }}>
+              <div style={{ background: '#E84057', borderRadius: 3, padding: '2px 4px', fontSize: 7, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>敷衍</div>
+              <div style={{ width: 8, borderTop: '1px dashed #E84057' }}/>
+            </div>
+          </div>
+        </div>
+      </div>
+      {/* 军师建议 */}
+      <div style={{ marginTop: 8, background: 'linear-gradient(135deg, rgba(138,75,255,0.06), rgba(255,101,194,0.04))', borderRadius: 8, padding: '7px 10px', borderLeft: '2px solid #8A4BFF' }}>
+        <div style={{ fontSize: 9, fontWeight: 700, color: '#8A4BFF', marginBottom: 4 }}>军师建议回复</div>
+        <div style={{ fontSize: 10, color: '#333', lineHeight: 1.5 }}>"哈哈在搞一个新东西，还挺有意思的"</div>
+        <div style={{ fontSize: 8, color: '#8A4BFF', fontWeight: 600, marginTop: 3, opacity: 0.7 }}>策略：制造好奇 · 不正面回答 · 2h 后发</div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 聊天指导方案 B：教练覆盖层风 — 对话降灰 + 浮动批注卡
+// ═══════════════════════════════════════════════════════════════
+function ChatB() {
+  return (
+    <div style={cardShell}>
+      <AccentBar/>
+      <DraftBanner/>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 8 }}>
+        <span style={{ color: '#8A4BFF' }}><IconChat/></span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#1a1a1a' }}>聊天指导 · 逐条批注</span>
+        <Tag tone="greenish">实时</Tag>
+      </div>
+      {/* 对话区域（降灰 + 覆盖层） */}
+      <div style={{ position: 'relative' }}>
+        {/* 对话（降灰） */}
+        <div style={{ opacity: 0.5, display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <div style={{ alignSelf: 'flex-start', maxWidth: '78%', padding: '6px 10px', background: '#F0EEF5', borderRadius: '10px 10px 10px 3px', fontSize: 10.5, color: '#333' }}>哈哈好久没聊了</div>
+          <div style={{ alignSelf: 'flex-end', maxWidth: '78%', padding: '6px 10px', background: '#95EC69', borderRadius: '10px 10px 3px 10px', fontSize: 10.5, color: '#333' }}>是啊！最近怎么样</div>
+          <div style={{ alignSelf: 'flex-start', maxWidth: '78%', padding: '6px 10px', background: '#F0EEF5', borderRadius: '10px 10px 10px 3px', fontSize: 10.5, color: '#333' }}>还行吧，你呢</div>
+        </div>
+        {/* 浮动批注卡 1 — 指向你的回复 */}
+        <div style={{
+          position: 'absolute', top: 22, right: 0,
+          background: '#fff', borderRadius: 8, padding: '6px 8px',
+          boxShadow: '0 4px 16px rgba(138,75,255,0.18)',
+          borderLeft: '2.5px solid #8A4BFF',
+          maxWidth: 150, zIndex: 3,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 3 }}>
+            <svg width="8" height="8" viewBox="0 0 16 16" fill="#8A4BFF"><path d="M8 1l2 4 4.5.7-3.3 3.1.8 4.5L8 11.1 3.9 13.3l.8-4.5L1.5 5.7 6 5z"/></svg>
+            <span style={{ fontSize: 8, fontWeight: 700, color: '#8A4BFF' }}>AI 教练</span>
+          </div>
+          <div style={{ fontSize: 9, color: '#E84057', fontWeight: 600, lineHeight: 1.4 }}>回复太快 + 太随意</div>
+          <div style={{ fontSize: 8, color: '#888', marginTop: 2, lineHeight: 1.4 }}>TA 主动找你了，别秒回</div>
+        </div>
+        {/* 浮动批注卡 2 — 指向 TA 的敷衍回复 */}
+        <div style={{
+          position: 'absolute', bottom: -2, left: 0,
+          background: '#fff', borderRadius: 8, padding: '6px 8px',
+          boxShadow: '0 4px 16px rgba(232,64,87,0.15)',
+          borderLeft: '2.5px solid #E84057',
+          maxWidth: 140, zIndex: 3,
+        }}>
+          <div style={{ fontSize: 9, color: '#E84057', fontWeight: 600 }}>敷衍信号</div>
+          <div style={{ fontSize: 8, color: '#888', marginTop: 2, lineHeight: 1.4 }}>三字回复 = 没有聊天欲望</div>
+        </div>
+      </div>
+      {/* 建议回复 */}
+      <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <div style={{ fontSize: 9, fontWeight: 700, color: '#8A4BFF', letterSpacing: 0.3 }}>推荐回复 × 2</div>
+        {[
+          { text: '"哈哈在搞一个新东西，还挺有意思的"', tag: '制造好奇' },
+          { text: '"最近确实有点事，怎么突然想到问我？"', tag: '反问' },
+        ].map((r, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px', background: i === 0 ? 'rgba(138,75,255,0.06)' : '#FAFAFC', borderRadius: 6, borderLeft: i === 0 ? '2px solid #8A4BFF' : '2px solid #DDD' }}>
+            <div style={{ flex: 1, fontSize: 10, color: '#333' }}>{r.text}</div>
+            <span style={{ fontSize: 8, fontWeight: 700, color: '#8A4BFF', flexShrink: 0 }}>{r.tag}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 聊天指导方案 C：分屏诊断风 — 上半对话 + 下半策略面板
+// ═══════════════════════════════════════════════════════════════
+function ChatC() {
+  return (
+    <div style={cardShell}>
+      <AccentBar/>
+      <DraftBanner/>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 8 }}>
+        <span style={{ color: '#8A4BFF' }}><IconChat/></span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#1a1a1a' }}>聊天指导 · 逐条批注</span>
+        <Tag tone="greenish">实时</Tag>
+      </div>
+      {/* 上半：对话 + 内嵌 pill 标注 */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 6 }}>
+        <div style={{ alignSelf: 'flex-start', maxWidth: '78%' }}>
+          <div style={{ padding: '6px 10px', background: '#F0EEF5', borderRadius: '10px 10px 10px 3px', fontSize: 10.5, color: '#333' }}>哈哈好久没聊了</div>
+          <div style={{ marginTop: 3, marginLeft: 4 }}>
+            <span style={{ padding: '1px 5px', borderRadius: 3, background: 'rgba(138,75,255,0.08)', fontSize: 8, fontWeight: 600, color: '#8A4BFF' }}>TA 主动开聊</span>
+          </div>
+        </div>
+        <div style={{ alignSelf: 'flex-end', maxWidth: '78%' }}>
+          <div style={{ padding: '6px 10px', background: '#95EC69', borderRadius: '10px 10px 3px 10px', fontSize: 10.5, color: '#333' }}>是啊！最近怎么样</div>
+          <div style={{ marginTop: 3, display: 'flex', justifyContent: 'flex-end', marginRight: 4 }}>
+            <span style={{ padding: '1px 5px', borderRadius: 3, background: 'rgba(232,64,87,0.08)', fontSize: 8, fontWeight: 600, color: '#E84057' }}>秒回 + 无信息量</span>
+          </div>
+        </div>
+        <div style={{ alignSelf: 'flex-start', maxWidth: '78%' }}>
+          <div style={{ padding: '6px 10px', background: '#F0EEF5', borderRadius: '10px 10px 10px 3px', fontSize: 10.5, color: '#333' }}>还行吧，你呢</div>
+          <div style={{ marginTop: 3, marginLeft: 4 }}>
+            <span style={{ padding: '1px 5px', borderRadius: 3, background: 'rgba(232,64,87,0.08)', fontSize: 8, fontWeight: 600, color: '#E84057' }}>敷衍 · 三字句</span>
+          </div>
+        </div>
+      </div>
+      {/* 分隔线 */}
+      <div style={{ height: 1, background: 'linear-gradient(90deg, transparent, #E5E0F5, transparent)', margin: '6px 0' }}/>
+      {/* 下半：策略面板 */}
+      <div style={{ background: 'linear-gradient(135deg, rgba(138,75,255,0.04), rgba(255,101,194,0.03))', borderRadius: 8, padding: '8px 10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 }}>
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="#8A4BFF"><path d="M8 1l2 4 4.5.7-3.3 3.1.8 4.5L8 11.1 3.9 13.3l.8-4.5L1.5 5.7 6 5z"/></svg>
+          <span style={{ fontSize: 9, fontWeight: 700, color: '#8A4BFF' }}>军师策略</span>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {/* 诊断 */}
+          <div style={{ flex: 1, background: '#fff', borderRadius: 6, padding: '6px 8px', border: '0.5px solid #F0EBFA' }}>
+            <div style={{ fontSize: 8, fontWeight: 700, color: '#E84057', marginBottom: 3 }}>问题</div>
+            <div style={{ fontSize: 9, color: '#555', lineHeight: 1.5 }}>秒回暴露需求感<br/>TA 的聊天欲望在降</div>
+          </div>
+          {/* 建议 */}
+          <div style={{ flex: 1, background: '#fff', borderRadius: 6, padding: '6px 8px', border: '0.5px solid #F0EBFA' }}>
+            <div style={{ fontSize: 8, fontWeight: 700, color: '#8A4BFF', marginBottom: 3 }}>建议</div>
+            <div style={{ fontSize: 9, color: '#555', lineHeight: 1.5 }}>2h 后回<br/>"在搞个新东西，<br/>还挺有意思"</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 主渲染
+// ═══════════════════════════════════════════════════════════════
+function App() {
+  return (
+    <div>
+      <div className="section">
+        <div className="section-title">情感罗盘 · 3 种方案</div>
+        <div className="row">
+          <div className="col">
+            <div className="label">方案 A · Oura 弧 + 雷达</div>
+            <div className="desc">大弧进度条（关系进度 0→100）居上，小雷达 + 五维横条居下</div>
+            <CompassA/>
+          </div>
+          <div className="col">
+            <div className="label">方案 B · WHOOP 环 + 阶段名</div>
+            <div className="desc">圆环进度 + "暧昧初期"阶段标签，下方五维横条带分数</div>
+            <CompassB/>
+          </div>
+          <div className="col">
+            <div className="label">方案 C · 横条进度 + 缩略雷达</div>
+            <div className="desc">横向进度条（三阶段标尺），缩略雷达 + 文字洞察</div>
+            <CompassC/>
+          </div>
+        </div>
+      </div>
+
+      <div className="section">
+        <div className="section-title">聊天指导 · 3 种方案</div>
+        <div className="row">
+          <div className="col">
+            <div className="label">方案 A · 截图批注</div>
+            <div className="desc">灰底模拟截图区 + 引线标注（回复过快 / 敷衍）+ 底部建议区</div>
+            <ChatA/>
+          </div>
+          <div className="col">
+            <div className="label">方案 B · 教练覆盖层</div>
+            <div className="desc">对话降灰，浮动白色批注卡叠加其上，底部双回复选项</div>
+            <ChatB/>
+          </div>
+          <div className="col">
+            <div className="label">方案 C · 分屏诊断</div>
+            <div className="desc">上半对话（每句下方 pill 标注），分隔线后下半策略面板（问题 vs 建议双栏）</div>
+            <ChatC/>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>
