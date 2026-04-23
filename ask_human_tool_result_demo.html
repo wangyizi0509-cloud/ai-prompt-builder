@@ -1,0 +1,1012 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ask Human Tool Result UI Demo</title>
+  <style>
+    :root {
+      --bg: #f2f5f8;
+      --panel: #ffffff;
+      --text: #132238;
+      --muted: #5f6f82;
+      --line: #d8e0e8;
+      --brand: #0f766e;
+      --brand-soft: #d9f4ef;
+      --user: #0a5c9e;
+      --user-soft: #d7ecff;
+      --assistant: #ffffff;
+      --shadow: 0 10px 30px rgba(11, 31, 50, 0.08);
+      --radius: 16px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 20% 0%, #eef7ff 0%, var(--bg) 45%, #edf1f5 100%);
+      color: var(--text);
+      font-family: "Avenir Next", "PingFang SC", "Noto Sans SC", sans-serif;
+      line-height: 1.45;
+    }
+
+    .page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px 16px 60px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #0f766e, #0a5c9e);
+      color: #fff;
+      border-radius: 18px;
+      padding: 22px 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: 0.2px;
+    }
+
+    .hero p {
+      margin: 8px 0 0;
+      font-size: 14px;
+      opacity: 0.95;
+    }
+
+    .controls {
+      margin-top: 14px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .chip {
+      border: 1px solid rgba(255, 255, 255, 0.55);
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+      border-radius: 999px;
+      padding: 7px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+      backdrop-filter: blur(5px);
+    }
+
+    .chip:hover,
+    .chip.active {
+      background: rgba(255, 255, 255, 0.95);
+      color: #0f3054;
+      border-color: transparent;
+    }
+
+    .grid {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 16px;
+    }
+
+    .demo-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .demo-card[data-hidden="1"] {
+      display: none;
+    }
+
+    .demo-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .demo-title h2 {
+      margin: 0;
+      font-size: 15px;
+    }
+
+    .score {
+      font-size: 12px;
+      color: var(--muted);
+      background: #f4f7fb;
+      border: 1px solid var(--line);
+      padding: 3px 8px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .chat {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #f7fafc;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      min-height: 280px;
+    }
+
+    .row {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+    }
+
+    .row.right { justify-content: flex-end; }
+
+    .avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: #e5edf5;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #41556c;
+      font-size: 11px;
+      flex: 0 0 auto;
+    }
+
+    .bubble {
+      border-radius: 14px;
+      padding: 9px 11px;
+      max-width: 88%;
+      font-size: 13px;
+      border: 1px solid transparent;
+    }
+
+    .bubble.assistant {
+      background: var(--assistant);
+      border-color: var(--line);
+    }
+
+    .bubble.user {
+      background: var(--user-soft);
+      border-color: #b7dcff;
+      color: #073c66;
+    }
+
+    .tiny {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .label {
+      display: inline-block;
+      font-size: 10px;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      color: #0f555f;
+      background: #d7f0ee;
+      border: 1px solid #a6d8d2;
+      padding: 2px 6px;
+      border-radius: 999px;
+      margin-bottom: 6px;
+      font-weight: 700;
+    }
+
+    .fields {
+      display: grid;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .field {
+      font-size: 12px;
+      background: #f5f8fb;
+      border: 1px solid #d8e3ef;
+      border-radius: 10px;
+      padding: 7px 9px;
+      color: #204062;
+    }
+
+    .field b {
+      color: #0f2c48;
+      margin-right: 4px;
+    }
+
+    .result-card {
+      border: 1px solid #c9dbec;
+      background: linear-gradient(180deg, #ffffff, #f5f9fc);
+      border-radius: 12px;
+      padding: 10px;
+    }
+
+    .result-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .result-head strong { font-size: 13px; }
+
+    .badge {
+      font-size: 11px;
+      color: #0f4f89;
+      background: #e1effc;
+      border: 1px solid #b8d6f4;
+      padding: 2px 7px;
+      border-radius: 999px;
+    }
+
+    .timeline {
+      border-left: 2px solid #b8ccde;
+      margin: 6px 0 2px 8px;
+      padding-left: 12px;
+      display: grid;
+      gap: 9px;
+    }
+
+    .step {
+      position: relative;
+      font-size: 12px;
+      color: #2b4b67;
+    }
+
+    .step::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #8aa6c0;
+      border: 2px solid #fff;
+      position: absolute;
+      left: -19px;
+      top: 3px;
+      box-shadow: 0 0 0 1px #b8ccde;
+    }
+
+    .step.done::before { background: var(--brand); }
+
+    .collapsible {
+      border: 1px solid #c8d9e9;
+      border-radius: 11px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .collapsible button {
+      border: 0;
+      width: 100%;
+      text-align: left;
+      background: #eef5fb;
+      color: #173e63;
+      padding: 9px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .collapsible-content {
+      padding: 10px;
+      border-top: 1px solid #d6e3f0;
+      display: none;
+    }
+
+    .collapsible.open .collapsible-content { display: block; }
+
+    .task-card-demo {
+      border: 1px solid #b8d2e8;
+      border-radius: 12px;
+      background: linear-gradient(180deg, #fff, #f1f8ff);
+      padding: 10px;
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.2s;
+      width: 100%;
+      color: #143f67;
+    }
+
+    .task-card-demo:hover {
+      border-color: #8cb7db;
+      transform: translateY(-1px);
+    }
+
+    .task-card-demo.is-submitting {
+      border-color: #d4b069;
+      background: linear-gradient(180deg, #fff9ec, #fffbf2);
+    }
+
+    .task-card-demo.is-submitted {
+      border-color: #8ec8a3;
+      background: linear-gradient(180deg, #f0fff5, #f8fffb);
+    }
+
+    .task-title-wrap {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+      font-size: 13px;
+    }
+
+    .task-state {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid #b8d2e8;
+      background: #ecf5ff;
+      color: #275883;
+      white-space: nowrap;
+    }
+
+    .task-state.pending {
+      border-color: #e1c488;
+      background: #fff4dc;
+      color: #73531c;
+    }
+
+    .task-state.done {
+      border-color: #8ec8a3;
+      background: #e9fbef;
+      color: #1a6841;
+    }
+
+    .status-pill {
+      display: inline-block;
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid #b9ccde;
+      background: #eff5fb;
+      color: #335676;
+      margin-right: 6px;
+    }
+
+    .status-pill.pending {
+      border-color: #e1c488;
+      background: #fff4dc;
+      color: #73531c;
+    }
+
+    .status-pill.done {
+      border-color: #8ec8a3;
+      background: #e9fbef;
+      color: #1a6841;
+    }
+
+    .receipt-collapsible {
+      margin-top: -3px;
+    }
+
+    .receipt-collapsible[data-focus="1"] {
+      box-shadow: 0 0 0 2px #9cc3e8 inset;
+    }
+
+    .reset-btn {
+      border: 1px solid #c6d8e8;
+      background: #f4f9ff;
+      color: #1e4f7a;
+      border-radius: 10px;
+      font-size: 12px;
+      padding: 6px 10px;
+      cursor: pointer;
+      width: fit-content;
+    }
+
+    .reset-btn:hover {
+      background: #eaf4ff;
+    }
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 21, 32, 0.42);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+      padding: 16px;
+    }
+
+    .modal-panel {
+      width: min(520px, 100%);
+      background: #fff;
+      border-radius: 14px;
+      border: 1px solid #d9e3ec;
+      box-shadow: var(--shadow);
+      padding: 14px;
+    }
+
+    .modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .modal-head h3 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .x-btn {
+      border: 0;
+      background: #f2f6fa;
+      color: #4a6279;
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+    }
+
+    .form-grid {
+      display: grid;
+      gap: 9px;
+    }
+
+    .form-row label {
+      display: block;
+      font-size: 12px;
+      color: #314f6b;
+      margin-bottom: 4px;
+    }
+
+    .form-row input,
+    .form-row select,
+    .form-row textarea {
+      width: 100%;
+      border: 1px solid #c7d7e6;
+      border-radius: 10px;
+      padding: 8px 10px;
+      font: inherit;
+      font-size: 13px;
+      color: #183856;
+      background: #fff;
+    }
+
+    .form-row textarea {
+      min-height: 76px;
+      resize: vertical;
+    }
+
+    .form-row input:focus,
+    .form-row select:focus,
+    .form-row textarea:focus {
+      outline: none;
+      border-color: #6ea7d6;
+      box-shadow: 0 0 0 2px #dcecff;
+    }
+
+    .form-error {
+      display: none;
+      font-size: 12px;
+      color: #9a2e2e;
+      background: #ffecec;
+      border: 1px solid #f2b0b0;
+      border-radius: 8px;
+      padding: 6px 8px;
+    }
+
+    .form-error.show {
+      display: block;
+    }
+
+    .form-actions {
+      margin-top: 11px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .btn {
+      border: 1px solid transparent;
+      border-radius: 10px;
+      font-size: 13px;
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+
+    .btn-secondary {
+      border-color: #c8d7e6;
+      background: #f6faff;
+      color: #274867;
+    }
+
+    .btn-primary {
+      border-color: #0d6aa8;
+      background: #0f7ac3;
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background: #0e70b4;
+    }
+
+    .hide { display: none !important; }
+
+    .event-line {
+      font-size: 12px;
+      color: #36526f;
+      border: 1px dashed #b1c6d9;
+      border-radius: 9px;
+      padding: 7px 9px;
+      background: #f4f9fd;
+    }
+
+    blockquote {
+      margin: 0;
+      border-left: 3px solid #9db5cc;
+      padding: 7px 10px;
+      color: #1d3d5d;
+      background: #f7fbff;
+      border-radius: 0 8px 8px 0;
+      font-size: 12px;
+    }
+
+    .json {
+      margin-top: 10px;
+      background: #0f1f33;
+      color: #d7e7f8;
+      border-radius: 10px;
+      padding: 9px;
+      font-size: 11px;
+      overflow: auto;
+      max-height: 180px;
+    }
+
+    @media (max-width: 700px) {
+      .hero h1 { font-size: 19px; }
+      .chip { font-size: 12px; }
+      .chat { min-height: 250px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <h1>Ask Human Tool Result 展示 Demo</h1>
+      <p>同一份 tool result，演示 5 种前端呈现。可上方筛选单看某一种。</p>
+      <div class="controls" id="filters">
+        <button class="chip active" data-filter="all">全部方案</button>
+        <button class="chip" data-filter="1">1. 用户气泡 + Tool 徽标</button>
+        <button class="chip" data-filter="2">2. 独立结果卡（推荐）</button>
+        <button class="chip" data-filter="3">3. 时间轴步骤卡</button>
+        <button class="chip" data-filter="4">4. 对话气泡 + 折叠回执</button>
+        <button class="chip" data-filter="5">5. 系统事件条 + 引用块</button>
+      </div>
+    </section>
+
+    <section class="grid" id="demoGrid">
+      <article class="demo-card" data-style="1">
+        <div class="demo-title">
+          <h2>方案 1: 用户气泡 + Tool 徽标</h2>
+          <span class="score">聊天感强 / 语义中等</span>
+        </div>
+        <div class="chat">
+          <div class="row">
+            <span class="avatar">AI</span>
+            <div class="bubble assistant">我需要你补充几个背景信息，便于给你更准确建议。</div>
+          </div>
+          <div class="row right">
+            <div class="bubble user">
+              <div class="label">ASK_HUMAN_RESULT</div>
+              认识 3 个月，同事介绍。最近聊天忽冷忽热，我想确认该不该继续推进。
+              <div class="fields">
+                <div class="field"><b>目标：</b>判断是否继续追</div>
+                <div class="field"><b>近期互动：</b>忽冷忽热</div>
+                <div class="field"><b>关系来源：</b>同事介绍</div>
+              </div>
+              <div class="tiny" style="margin-top:6px;">来自表单提交 · tool result</div>
+            </div>
+          </div>
+          <div class="row">
+            <span class="avatar">AI</span>
+            <div class="bubble assistant">收到，我会先给你一个低风险试探策略。</div>
+          </div>
+        </div>
+      </article>
+
+      <article class="demo-card" data-style="2">
+        <div class="demo-title">
+          <h2>方案 2: 独立结果卡（推荐）</h2>
+          <span class="score">语义清晰 / 审计友好</span>
+        </div>
+        <div class="chat">
+          <div class="row">
+            <span class="avatar">AI</span>
+            <div class="bubble assistant">请填写你的情况，我会按你填写的内容继续分析。</div>
+          </div>
+
+          <div class="result-card">
+            <div class="result-head">
+              <strong>用户填写结果</strong>
+              <span class="badge">tool result</span>
+            </div>
+            <div class="fields">
+              <div class="field"><b>出生年份：</b>1995</div>
+              <div class="field"><b>认识时长：</b>3个月</div>
+              <div class="field"><b>当前问题：</b>对方回复节奏不稳定</div>
+              <div class="field"><b>你想要的结果：</b>判断是否继续推进关系</div>
+            </div>
+            <div class="tiny" style="margin-top:7px;">request_id: ask_human_20260212_001</div>
+          </div>
+
+          <div class="row">
+            <span class="avatar">AI</span>
+            <div class="bubble assistant">我会分成「继续推进」和「止损退出」两条路径给你建议。</div>
+          </div>
+        </div>
+      </article>
+
+      <article class="demo-card" data-style="3">
+        <div class="demo-title">
+          <h2>方案 3: 时间轴步骤卡</h2>
+          <span class="score">流程最清楚 / UI 成本高</span>
+        </div>
+        <div class="chat">
+          <div class="timeline">
+            <div class="step done"><b>Step 1:</b> AI 发起信息采集（ask_human）</div>
+            <div class="step done"><b>Step 2:</b> 用户填写并提交问卷（4 项）</div>
+            <div class="step done">
+              <b>Step 3:</b> 系统接收 tool result
+              <div class="fields" style="margin-top:6px;">
+                <div class="field"><b>关系阶段：</b>认识期</div>
+                <div class="field"><b>主要矛盾：</b>互动不稳定</div>
+                <div class="field"><b>诉求：</b>是否继续</div>
+              </div>
+            </div>
+            <div class="step"><b>Step 4:</b> AI 生成下一步策略</div>
+          </div>
+        </div>
+      </article>
+
+      <article class="demo-card" data-style="4">
+        <div class="demo-title">
+          <h2>方案 4: 对话气泡 + 折叠回执</h2>
+          <span class="score">联动演示: 卡片 -> 填写 -> 回执</span>
+        </div>
+        <div class="chat">
+          <div class="row">
+            <span class="avatar">AI</span>
+            <div class="bubble assistant">我发了一个信息补充卡片，填完后会自动生成回执并继续分析。</div>
+          </div>
+
+          <button type="button" class="task-card-demo" id="demo4TaskCard" data-task-key="ask_human_task_001">
+            <div class="task-title-wrap">
+              <strong>信息补充卡片（ask_human）</strong>
+              <span class="task-state" id="demo4TaskState">待填写</span>
+            </div>
+            <div class="tiny" id="demo4TaskHint">点击填写问卷。提交后会生成折叠回执。</div>
+          </button>
+
+          <div id="demo4ReceiptMount"></div>
+
+          <div class="row hide" id="demo4AiFollowup">
+            <span class="avatar">AI</span>
+            <div class="bubble assistant">收到补充信息，我会按你的背景继续输出下一步策略。</div>
+          </div>
+
+          <div class="tiny">联动逻辑: 任务卡片与回执共用同一 <code>taskKey</code>，提交后点卡片会定位并展开回执。</div>
+          <button type="button" class="reset-btn" id="demo4ResetBtn">重置方案4流程</button>
+        </div>
+
+        <div class="modal-overlay" id="demo4Modal" hidden>
+          <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="demo4ModalTitle">
+            <div class="modal-head">
+              <div>
+                <h3 id="demo4ModalTitle">填写补充信息</h3>
+                <div class="tiny">taskKey: ask_human_task_001</div>
+              </div>
+              <button type="button" class="x-btn" id="demo4CloseModal" aria-label="关闭">×</button>
+            </div>
+
+            <form id="demo4Form">
+              <div class="form-grid">
+                <div class="form-row">
+                  <label for="demo4Age">你的年龄段</label>
+                  <select id="demo4Age" name="age" required>
+                    <option value="">请选择</option>
+                    <option>95后</option>
+                    <option>90后</option>
+                    <option>00后</option>
+                  </select>
+                </div>
+
+                <div class="form-row">
+                  <label for="demo4Channel">相识渠道</label>
+                  <input id="demo4Channel" name="channel" type="text" placeholder="例如：同事介绍" required />
+                </div>
+
+                <div class="form-row">
+                  <label for="demo4Signal">当前互动状态</label>
+                  <select id="demo4Signal" name="signal" required>
+                    <option value="">请选择</option>
+                    <option>聊天稳定</option>
+                    <option>偶尔忽冷忽热</option>
+                    <option>明显降温</option>
+                  </select>
+                </div>
+
+                <div class="form-row">
+                  <label for="demo4Goal">本轮目标</label>
+                  <textarea id="demo4Goal" name="goal" placeholder="例如：判断要不要继续追" required></textarea>
+                </div>
+
+                <div class="form-error" id="demo4FormError">请先完整填写全部字段。</div>
+              </div>
+
+              <div class="form-actions">
+                <button type="button" class="btn btn-secondary" id="demo4CancelModal">取消</button>
+                <button type="submit" class="btn btn-primary">提交问卷</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+      </article>
+
+      <article class="demo-card" data-style="5">
+        <div class="demo-title">
+          <h2>方案 5: 系统事件条 + 引用块</h2>
+          <span class="score">系统感强 / 边界清晰</span>
+        </div>
+        <div class="chat">
+          <div class="event-line">系统事件：用户已完成填写（ask_human）</div>
+          <blockquote>
+            出生：1995 | 认识时长：3个月 | 关系来源：同事介绍
+            <br />
+            诉求：最近聊天忽冷忽热，想判断是否继续推进
+          </blockquote>
+          <div class="row">
+            <span class="avatar">AI</span>
+            <div class="bubble assistant">收到，下面给你一个「继续推进」的低风险行动方案。</div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="demo-card" style="margin-top: 16px;">
+      <div class="demo-title">
+        <h2>示例 Tool Result Payload</h2>
+        <span class="score">可用于前端 mock</span>
+      </div>
+      <pre class="json">{
+  "tool_name": "ask_human",
+  "result_type": "form_submit",
+  "request_id": "ask_human_20260212_001",
+  "submitted_at": "2026-02-12T14:20:31+08:00",
+  "answers": {
+    "birth_year": "1995",
+    "known_duration": "3个月",
+    "intro_channel": "同事介绍",
+    "problem": "最近聊天忽冷忽热",
+    "goal": "判断是否继续推进关系"
+  }
+}</pre>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      var chips = Array.prototype.slice.call(document.querySelectorAll('#filters .chip'));
+      var cards = Array.prototype.slice.call(document.querySelectorAll('.demo-card[data-style]'));
+      var dynamicTimers = [];
+
+      function activateFilter(filter) {
+        chips.forEach(function (chip) {
+          chip.classList.toggle('active', chip.getAttribute('data-filter') === filter);
+        });
+        cards.forEach(function (card) {
+          var styleId = card.getAttribute('data-style');
+          var hidden = filter !== 'all' && styleId !== filter;
+          card.setAttribute('data-hidden', hidden ? '1' : '0');
+        });
+      }
+
+      chips.forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          activateFilter(chip.getAttribute('data-filter'));
+        });
+      });
+
+      function bindCollapse(wrap) {
+        if (!wrap || wrap.dataset.bound === '1') return;
+        wrap.dataset.bound = '1';
+        var button = wrap.querySelector('[data-toggle]');
+        var indicator = wrap.querySelector('[data-indicator]');
+        if (!button) return;
+        button.addEventListener('click', function () {
+          var opened = wrap.classList.toggle('open');
+          if (indicator) indicator.textContent = opened ? '收起' : '展开';
+        });
+      }
+
+      Array.prototype.slice.call(document.querySelectorAll('[data-collapse]')).forEach(bindCollapse);
+
+      function clearDynamicTimers() {
+        dynamicTimers.forEach(function (id) { clearTimeout(id); });
+        dynamicTimers = [];
+      }
+
+      function escapeHtml(text) {
+        return String(text || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      var taskCard = document.getElementById('demo4TaskCard');
+      var taskState = document.getElementById('demo4TaskState');
+      var taskHint = document.getElementById('demo4TaskHint');
+      var receiptMount = document.getElementById('demo4ReceiptMount');
+      var aiFollowup = document.getElementById('demo4AiFollowup');
+      var resetBtn = document.getElementById('demo4ResetBtn');
+
+      var modal = document.getElementById('demo4Modal');
+      var closeModalBtn = document.getElementById('demo4CloseModal');
+      var cancelModalBtn = document.getElementById('demo4CancelModal');
+      var form = document.getElementById('demo4Form');
+      var formError = document.getElementById('demo4FormError');
+
+      var demo4State = {
+        taskKey: 'ask_human_task_001',
+        submitting: false,
+        submitted: false
+      };
+
+      function openModal() {
+        if (!modal) return;
+        modal.hidden = false;
+      }
+
+      function closeModal() {
+        if (!modal) return;
+        modal.hidden = true;
+      }
+
+      function focusReceipt(forceOpen) {
+        var wrap = receiptMount ? receiptMount.querySelector('.receipt-collapsible') : null;
+        if (!wrap) return;
+        wrap.dataset.focus = '1';
+        if (forceOpen) {
+          wrap.classList.add('open');
+          var indicator = wrap.querySelector('[data-indicator]');
+          if (indicator) indicator.textContent = '收起';
+        }
+        wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        var timer = setTimeout(function () {
+          wrap.dataset.focus = '0';
+        }, 1400);
+        dynamicTimers.push(timer);
+      }
+
+      function setTaskCardUi(statusText, hintText, stateClass, cardClass) {
+        if (!taskState || !taskHint || !taskCard) return;
+        taskState.textContent = statusText;
+        taskHint.textContent = hintText;
+        taskState.className = 'task-state' + (stateClass ? (' ' + stateClass) : '');
+        taskCard.classList.remove('is-submitting', 'is-submitted');
+        if (cardClass) taskCard.classList.add(cardClass);
+      }
+
+      function renderReceipt(answers, statusText, statusClass, openByDefault) {
+        if (!receiptMount) return;
+        var fields = [
+          ['年龄段', answers.age],
+          ['相识渠道', answers.channel],
+          ['当前互动', answers.signal],
+          ['本轮目标', answers.goal]
+        ].map(function (row) {
+          return '<div class="field"><b>' + row[0] + '：</b>' + escapeHtml(row[1]) + '</div>';
+        }).join('');
+
+        var html = ''
+          + '<div class="row right">'
+          + '  <div class="bubble user">已提交问卷（4项）</div>'
+          + '</div>'
+          + '<div class="collapsible receipt-collapsible ' + (openByDefault ? 'open' : '') + '" data-collapse data-receipt-key="' + demo4State.taskKey + '">'
+          + '  <button type="button" data-toggle>'
+          + '    <span><span class="status-pill ' + statusClass + '">' + statusText + '</span>查看填写详情</span>'
+          + '    <span data-indicator>' + (openByDefault ? '收起' : '展开') + '</span>'
+          + '  </button>'
+          + '  <div class="collapsible-content">'
+          + '    <div class="fields">' + fields + '</div>'
+          + '    <div class="tiny" style="margin-top:7px;">taskKey: ' + demo4State.taskKey + ' · source: ask_human tool result</div>'
+          + '  </div>'
+          + '</div>';
+
+        receiptMount.innerHTML = html;
+        bindCollapse(receiptMount.querySelector('[data-collapse]'));
+      }
+
+      function startSubmitFlow(answers) {
+        demo4State.submitting = true;
+        demo4State.submitted = true;
+        setTaskCardUi('提交中', '问卷已提交，正在等待 tool result 回传。', 'pending', 'is-submitting');
+        renderReceipt(answers, '提交中', 'pending', true);
+        closeModal();
+        if (formError) formError.classList.remove('show');
+
+        var timer = setTimeout(function () {
+          demo4State.submitting = false;
+          setTaskCardUi('已提交', '点击卡片可回看本次回执详情。', 'done', 'is-submitted');
+          renderReceipt(answers, '已接收', 'done', false);
+          if (aiFollowup) aiFollowup.classList.remove('hide');
+          focusReceipt(false);
+        }, 950);
+        dynamicTimers.push(timer);
+      }
+
+      function resetDemo4() {
+        clearDynamicTimers();
+        demo4State.submitting = false;
+        demo4State.submitted = false;
+        setTaskCardUi('待填写', '点击填写问卷。提交后会生成折叠回执。', '', '');
+        if (receiptMount) receiptMount.innerHTML = '';
+        if (aiFollowup) aiFollowup.classList.add('hide');
+        if (form) form.reset();
+        if (formError) formError.classList.remove('show');
+        closeModal();
+      }
+
+      if (taskCard) {
+        taskCard.addEventListener('click', function () {
+          if (!demo4State.submitted) {
+            openModal();
+            return;
+          }
+          focusReceipt(true);
+        });
+      }
+
+      if (closeModalBtn) closeModalBtn.addEventListener('click', closeModal);
+      if (cancelModalBtn) cancelModalBtn.addEventListener('click', closeModal);
+
+      if (modal) {
+        modal.addEventListener('click', function (e) {
+          if (e.target === modal) closeModal();
+        });
+      }
+
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && modal && !modal.hidden) closeModal();
+      });
+
+      if (form) {
+        form.addEventListener('submit', function (e) {
+          e.preventDefault();
+          var formData = new FormData(form);
+          var answers = {
+            age: (formData.get('age') || '').toString().trim(),
+            channel: (formData.get('channel') || '').toString().trim(),
+            signal: (formData.get('signal') || '').toString().trim(),
+            goal: (formData.get('goal') || '').toString().trim()
+          };
+
+          if (!answers.age || !answers.channel || !answers.signal || !answers.goal) {
+            if (formError) formError.classList.add('show');
+            return;
+          }
+          startSubmitFlow(answers);
+        });
+      }
+
+      if (resetBtn) resetBtn.addEventListener('click', resetDemo4);
+
+      resetDemo4();
+    })();
+  </script>
+</body>
+</html>

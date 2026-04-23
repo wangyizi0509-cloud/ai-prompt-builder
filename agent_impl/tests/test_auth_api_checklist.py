@@ -197,6 +197,23 @@ class TestAuthChecklist:
             assert response.status_code == 401
             assert "Invalid token" in response.json()["detail"]
 
+    def test_get_me_success_with_auth_cookie(self, mock_supabase_functions):
+        """Get Me: auth cookie should work without Authorization header"""
+        with patch("auth_utils.verify_jwt_token") as mock_verify_utils:
+            mock_verify_utils.return_value = {
+                "valid": True,
+                "user_id": MOCK_USER["id"],
+                "email": MOCK_USER["email"],
+                "username": MOCK_USER["username"],
+            }
+
+            response = client.get("/api/auth/me", cookies={"auth_token": MOCK_TOKEN})
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert data["user"] == MOCK_USER
+
     def test_get_me_success(self, mock_supabase_functions):
         """Get Me: Successful retrieval"""
         # We need to mock the dependency to return a valid user
@@ -213,4 +230,3 @@ class TestAuthChecklist:
             assert data["user"] == MOCK_USER
         finally:
             app.dependency_overrides = {}
-

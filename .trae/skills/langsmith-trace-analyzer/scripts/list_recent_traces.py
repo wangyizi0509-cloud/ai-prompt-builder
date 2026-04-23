@@ -24,6 +24,7 @@ def main():
     project_name = project_arg or os.environ.get("LANGSMITH_PROJECT", "crushe-agent-debug")
     
     api_key = os.environ.get("LANGSMITH_API_KEY")
+    if not api_key:
         print("Error: LANGSMITH_API_KEY not found in .env")
         return
 

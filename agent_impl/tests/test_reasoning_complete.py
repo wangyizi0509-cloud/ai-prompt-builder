@@ -9,6 +9,7 @@
 
 import os
 import sys
+import pytest
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
@@ -120,6 +121,7 @@ def test_reasoning_clearing():
     return True
 
 
+@pytest.mark.api_test
 def test_config_integration():
     """测试 4: config.py 集成"""
     print("\n--- 测试 4: config.py 集成 ---")

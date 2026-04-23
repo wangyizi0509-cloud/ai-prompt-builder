@@ -1,0 +1,108 @@
+id: "scene_006"
+type: "scene"
+title: "发了消息 Crush 没回 - 情绪疏导"
+scope: ["strategy"]
+description: >
+  用户发了消息 crush 没有回复，处于焦虑状态。
+  验证 AI 的情绪处理能力和给出合理等待策略，
+  而不是立刻让用户再发一条或给出新的行动计划。
+
+test_account: "test205@example.com"
+
+user_profile:
+  name: "小涛"
+  description: "大四学生，性格比较敏感，容易想太多，焦虑型"
+
+crush_profile:
+  name: "小芳"
+  description: "学姐，研一，平时比较忙，学业压力大"
+
+setup:
+  skip_onboarding: true
+  inject_layer1:
+    user_info: "用户叫小涛，大四男生，性格比较敏感，容易想太多"
+    crush_info: "crush叫小芳，是学姐，研一，平时比较忙，学业压力大"
+    relation_info: "认识两周，通过社团认识，加了微信，私信过三次，回复都比较积极"
+
+turns:
+  - turn: 1
+    role: "user"
+    message: "我给她发消息已经12小时了她还没回，是不是不喜欢我"
+
+  - turn: 1
+    role: "assert"
+    checks:
+      - type: "response_not_contains"
+        value: ["再发一条", "主动催一下", "行动计划", "新计划"]
+        description: "12小时未读不应立刻建议催消息或给新计划"
+      - type: "response_contains"
+        value: ["理解", "可能", "忙", "不一定", "正常", "12", "研究生", "学业"]
+        description: "应该给出理性的情绪疏导，解释可能原因"
+
+  - turn: 1
+    role: "judge"
+    dimensions:
+      - key: "empathy_tone"
+        criteria: >
+          用户在焦虑，12小时没有回复就开始觉得"是不是不喜欢我"，这是焦虑型依附的典型表现。
+
+          评估 AI 的情感处理：
+          1. 是否先承认"等消息确实会让人焦虑"，而不是立刻说"别想太多"
+          2. 是否给出合理的解释（研一学姐学业压力大，12小时不回很正常）
+          3. 是否帮用户降低焦虑（指出"认识两周、三次私信都积极"这个背景说明关系还不错）
+          4. 是否没有过度安慰（不是说"她肯定喜欢你"，而是"不要往最坏的方向想"）
+          满分5分。直接说"别想太多"然后就转话题扣2分。
+
+      - key: "strategy_quality"
+        criteria: >
+          在情绪安抚之后，AI 的等待策略是否合理：
+          1. 是否建议一个合理的等待时间（12小时 → 应该建议等到24-48小时）
+          2. 是否告诉用户在等待期间可以做什么（而不是干等）
+          3. 是否给出了"再行动"的触发条件（超过多久没回可以怎么做）
+          满分5分。
+
+  - turn: 2
+    role: "user"
+    message: "那我要等多久，要是她一直不回怎么办"
+
+  - turn: 2
+    role: "assert"
+    checks:
+      - type: "response_contains"
+        value: ["24", "48", "小时", "天", "如果", "等"]
+        description: "应该给出具体的等待时间建议，而不是模糊的'多等等'"
+
+  - turn: 2
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          用户在追问等待策略，AI 需要给出：
+          1. 具体的等待时间建议（而非"随便等"或"看情况"）
+          2. 不同情况下的应对预案：
+             - 48小时内回了怎么处理
+             - 超过3天没回可以怎么做（比如找个自然的理由联系）
+          3. 如何判断"对方真的不感兴趣"的信号（而不是靠猜）
+          不能只说"别担心看缘分"或"等着就好"这种无效回答。
+          满分5分。没有具体时间建议扣2分，没有应对预案扣2分。
+
+  - turn: 3
+    role: "user"
+    message: "她刚才回了，说昨天太忙了没看到，还问我发的那个视频好不好看"
+
+  - turn: 3
+    role: "judge"
+    dimensions:
+      - key: "empathy_tone"
+        criteria: >
+          用户刚从焦虑状态得到了一个好消息（对方回了还主动聊天）。
+          AI 是否给出了真实的情绪回应：
+          1. 是否先表达真实的欣慰/高兴（"看吧！"或类似的情绪反应）
+          2. 是否顺势给出下一步的建议（趁热打铁继续聊）
+          3. 语气是否轻松愉快，而不是继续严肃分析
+          满分5分。
+
+evaluation:
+  pass_threshold: 3.5
+  must_pass_assertions: true
+  notes: "情绪处理是这个 case 的核心，第一轮的 empathy_tone < 3.0 时标记为严重问题"

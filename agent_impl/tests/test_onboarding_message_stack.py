@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.errors import GraphInterrupt, Interrupt
 
@@ -138,6 +139,11 @@ def test_onboarding_supervisor_maps_graph_interrupt(monkeypatch):
     assert getattr(interrupts[0], "value", {}).get("type") == "inquiry_card"
 
 
+@pytest.mark.xfail(
+    reason="superseded by onboarding_v2 (独立 REST 流程)；create_initial_state "
+    "默认 onboarding_completed=True 后，onboarding_agent_node 会直接跳过 supervisor。",
+    strict=False,
+)
 def test_onboarding_node_emits_runtime_interrupt_from_supervisor(monkeypatch):
     class DummyLLM:
         pass

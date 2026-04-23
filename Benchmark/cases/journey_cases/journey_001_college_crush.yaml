@@ -1,0 +1,207 @@
+id: "journey_001"
+type: "journey"
+title: "完整旅程 - 大学生暗恋同班同学"
+scope: ["strategy", "feature"]
+description: >
+  模拟大学生从第一次使用小话，到建立完整追求策略、遭遇挫折、再到出现突破性进展的完整旅程。
+  约 8-10 轮对话，验证 AI 在整个旅程中的连贯性、策略深度和情绪适配。
+estimated_duration_minutes: 15
+
+test_account: "test220@example.com"
+
+user_profile:
+  name: "阿远"
+  description: "大三男生，内向，暗恋同班同学小晴两个月，不太善于主动，容易想太多"
+
+crush_profile:
+  name: "小晴"
+  description: "同班女同学，外向爱笑，喜欢唱歌，经常参加社团活动，偶尔主动找阿远搭话"
+
+turns:
+  # =========== 第一阶段：onboarding ===========
+
+  - turn: 1
+    role: "user"
+    message: "我喜欢一个女生，想让你帮我追她"
+
+  - turn: 1
+    role: "assert"
+    checks:
+      - type: "inquiry_card_triggered"
+        description: "首次使用应触发 onboarding 问卷"
+
+  - turn: 2
+    role: "user"
+    is_resume: true
+    resume_strategy: "fill_from_sample"
+    sample_answers:
+      "你叫什么名字": "阿远"
+      "你喜欢的人是谁": "同班同学小晴"
+      "你们认识多久了": "一学期，大概两个月"
+      "目前的关系": "同班同学，课间偶尔聊天，加了微信但很少私信"
+      "她的性格": "外向，爱笑，喜欢唱歌，经常参加活动"
+      "你的性格": "比较内向，不太善于主动"
+
+  - turn: 2
+    role: "assert"
+    checks:
+      - type: "onboarding_completed"
+        description: "resume 后应完成 onboarding"
+      - type: "no_interrupt"
+        description: "完成后不应再卡住"
+      - type: "response_contains"
+        value: ["阿远", "小晴", "了解", "帮"]
+        description: "AI 应给出对情况的初步回应"
+
+  # =========== 第二阶段：现状分析 ===========
+
+  - turn: 3
+    role: "user"
+    message: "你觉得她现在对我是什么感觉，她有没有可能喜欢我"
+
+  - turn: 3
+    role: "assert"
+    checks:
+      - type: "has_status_report"
+        description: "应该触发 status_agent 做现状分析"
+
+  - turn: 3
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          基于已知信息（同班两个月，课间偶尔聊天，很少私信，crush 外向爱笑），
+          评估 AI 的现状分析：
+          1. 是否给出了有依据的判断（基于互动频率和质量），而不是"说不好"
+          2. 是否点出了当前信息不足，需要进一步了解
+          3. 是否建议了如何获取更多信息来做出更准确的判断
+          满分5分。
+
+  # =========== 第三阶段：行动计划 ===========
+
+  - turn: 4
+    role: "user"
+    message: "我想这周主动找她说话，你帮我出个计划"
+
+  - turn: 4
+    role: "assert"
+    checks:
+      - type: "has_action_plan"
+        description: "应产出行动计划"
+      - type: "response_contains"
+        value: ["计划", "建议", "课间", "社团", "唱歌", "话题"]
+        description: "计划应利用 crush 喜好（唱歌/社团）作为话题切入点"
+
+  - turn: 4
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          行动计划评估：
+          1. 是否利用了已知信息（小晴喜欢唱歌、参加活动）作为话题或切入点
+          2. 是否有具体的话术示例
+          3. 是否考虑了阿远内向的特点（给内向的人设计的计划不能太激进）
+          满分5分。
+
+  # =========== 第四阶段：进展反馈 ===========
+
+  - turn: 5
+    role: "user"
+    message: "我今天按你说的找她聊了，她回应挺积极的，聊了挺久"
+
+  - turn: 5
+    role: "judge"
+    dimensions:
+      - key: "empathy_tone"
+        criteria: >
+          用户汇报了进展，这是好消息。AI 是否：
+          1. 先给出真实的高兴/祝贺反应（"太好了！"之类的情绪回应）
+          2. 再推进到下一阶段策略
+          3. 没有平淡地直接进入分析（这是很多 AI 的问题）
+          满分5分。
+      - key: "strategy_quality"
+        criteria: >
+          有了积极进展，AI 是否趁势推进：
+          1. 是否建议了下一步行动方向（不能只说"很好继续保持"）
+          2. 是否利用了"聊得挺久"这个信号来调整策略方向
+          满分5分。
+
+  # =========== 第五阶段：朋友圈互动 ===========
+
+  - turn: 6
+    role: "user"
+    message: "她今天朋友圈发了一张唱歌的照片，我要不要点赞评论"
+
+  - turn: 6
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          评估 AI 的朋友圈互动策略建议：
+          1. 是否建议了具体的评论内容（而不是只说"可以评论"）
+          2. 是否结合了"唱歌"这个 crush 的喜好（因为在她喜欢的事上回应会更有效）
+          3. 是否考虑了当前关系阶段（课间聊过几次，不能太肉麻）
+          满分5分。
+
+  # =========== 第六阶段：突破性进展 ===========
+
+  - turn: 7
+    role: "user"
+    message: "我评论了，她回了个笑脸，然后主动私信我说下周有歌唱比赛，问我要不要去看"
+
+  - turn: 7
+    role: "judge"
+    dimensions:
+      - key: "empathy_tone"
+        criteria: >
+          这是重大突破！对方主动私信邀约。AI 是否：
+          1. 先给出真实的惊喜/兴奋反应（"这个太好了！"）
+          2. 语气是喜悦和鼓励的，而不是平淡地进入分析
+          满分5分。惊喜反应是必须的，没有直接扣2分。
+      - key: "strategy_quality"
+        criteria: >
+          面对对方主动邀约歌唱比赛，AI 的建议是否：
+          1. 把握住了时机（如何回应才能显得有兴趣而不是敷衍）
+          2. 利用了"歌唱比赛"这个场景设计后续（比赛结束后可以聊什么）
+          3. 给出了具体的回复话术
+          满分5分。
+
+  # =========== 第七阶段：约会前的焦虑 ===========
+
+  - turn: 8
+    role: "user"
+    message: "去看比赛的事定了，但我有点紧张，不知道当天应该怎么表现"
+
+  - turn: 8
+    role: "judge"
+    dimensions:
+      - key: "empathy_tone"
+        criteria: >
+          用户表达了紧张感。AI 是否：
+          1. 先理解和接受这种紧张感（"紧张很正常"，而不是"别紧张"）
+          2. 给出了具体的缓解紧张的建议（而不是空话）
+          满分5分。
+      - key: "strategy_quality"
+        criteria: >
+          比赛当天的行为指南：
+          1. 是否给出了具体的当天行为建议（聊什么、做什么）
+          2. 是否建议了如何在比赛结束后自然地推进关系（比如一起去吃东西）
+          3. 整体策略是否考虑了阿远内向的特点（不要给太激进的建议）
+          满分5分。
+
+evaluation:
+  pass_threshold: 3.5
+  must_pass_assertions: true
+  journey_summary_judge: true
+  summary_criteria: >
+    综合评估这整个旅程（8轮对话）中 AI 作为恋爱军师的整体表现：
+
+    1. 策略连贯性：后续建议是否基于前面的积累（比如一直利用"唱歌"这个切入点）
+    2. 关键节点处理：每个重要节点（进展/挫折/突破）是否都给出了正确的情绪回应
+    3. 个性化程度：整个旅程是否体现了对阿远（内向）和小晴（外向爱唱歌）画像的理解
+    4. 旅程进展：AI 是否帮助用户从"偶尔课间聊天"真实推进到了"对方主动私信邀约"
+
+    满分5分。策略完全通用没有利用画像扣2分。关键节点情绪回应失位扣1分。
+  notes: >
+    这是最全面的测试，耗时约 15 分钟。建议只在 full 或重要版本发布前运行。
+    journey_summary_judge 在所有 turns 执行完后对整个旅程做一次综合评分。

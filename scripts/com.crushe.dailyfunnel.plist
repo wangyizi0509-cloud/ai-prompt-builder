@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.crushe.dailyfunnel</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/ant/Crushe/模型策略/.venv/bin/python3</string>
+        <string>/Users/ant/Crushe/模型策略/scripts/funnel_daily_report.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/ant/Crushe/模型策略</string>
+
+    <!-- 每天北京时间 10:00 运行 -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>10</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- 如果到点时电脑处于睡眠/关机，醒来/开机后立即补跑一次 -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- 日志 -->
+    <key>StandardOutPath</key>
+    <string>/Users/ant/Crushe/模型策略/agent_impl/logs/funnel_daily_report.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/ant/Crushe/模型策略/agent_impl/logs/funnel_daily_report.err.log</string>
+</dict>
+</plist>

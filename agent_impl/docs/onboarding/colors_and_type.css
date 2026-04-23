@@ -1,0 +1,251 @@
+/* ═══════════════════════════════════════════════════════════════════
+   CRUSHE.AI — Colors & Type Tokens
+   Source: Figma "好好说话 (1).fig" · /page2 (AI emotional coach)
+   ═══════════════════════════════════════════════════════════════════ */
+
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=DM+Sans:wght@500;700&display=swap");
+
+:root {
+  /* ───── BRAND · primary violet spectrum ─────
+     Dominant brand color. Used for CTAs, primary icons, "Crush" accents,
+     active nav, send buttons, tab highlights, link text. */
+  --crushe-violet:            rgb(138, 75, 255);   /* #8A4BFF — primary  */
+  --crushe-violet-hover:      rgb(157, 92, 254);
+  --crushe-violet-soft:       rgb(189, 163, 255);
+  --crushe-violet-softer:     rgb(201, 171, 255);
+  --crushe-violet-tint:       rgb(223, 189, 255);  /* chip/tint fills    */
+  --crushe-violet-wash:       rgb(248, 237, 255);  /* hero wash          */
+  --crushe-violet-ice:        rgb(253, 253, 255);  /* near-white tint    */
+
+  /* ───── BRAND · pink / magenta accent ─────
+     Used in hero aura, avatar backgrounds, secondary gradient stops,
+     "VS" pill, mini-hearts, micro-accents. */
+  --crushe-pink:              rgb(255, 101, 194);  /* #FF65C2            */
+  --crushe-pink-soft:         rgb(237, 164, 249);
+  --crushe-pink-tint:         rgb(255, 181, 248);
+  --crushe-pink-wash:         rgb(255, 240, 253);
+  --crushe-magenta-deep:      rgb(143, 32, 121);   /* rare text accent   */
+
+  /* ───── ACCENT · periwinkle (shadow/secondary) ─────
+     ONLY ever seen as a soft shadow color on cards. Never as a fill. */
+  --crushe-periwinkle-shadow:   rgba(105, 124, 255, 0.10);
+  --crushe-periwinkle-shadow-2: rgba(105, 124, 255, 0.08);
+
+  /* ───── ACCENT · info blue ─────
+     Used in the "补充信息-分析更加精准" banner (fill icy blue, text+CTA
+     deep blue). Rarely seen elsewhere. */
+  --crushe-blue:              rgb(11, 94, 254);
+  --crushe-blue-wash-1:       rgb(208, 244, 255);
+  --crushe-blue-wash-2:       rgb(225, 244, 254);
+  --crushe-blue-chip:         rgb(215, 230, 255);
+
+  /* ───── ACCENT · warn amber ─────
+     "Complete your info" soft nudge, ⓘ icon stroke. */
+  --crushe-amber:             rgb(255, 168, 81);
+
+  /* ───── NEUTRALS · text + surface ───── */
+  --crushe-ink:               rgb(0, 0, 0);        /* primary text       */
+  --crushe-ink-near:          rgb(22, 22, 22);     /* #161616            */
+  --crushe-ink-2:             rgb(51, 51, 51);     /* secondary text     */
+  --crushe-ink-3:             rgb(80, 82, 92);     /* supporting         */
+  --crushe-ink-muted:         rgb(102, 102, 102);
+  --crushe-ink-subtle:        rgb(153, 153, 153);  /* #999 — labels      */
+  --crushe-ink-low:           rgba(23, 2, 33, 0.60); /* subtitles        */
+
+  --crushe-line:              rgb(229, 229, 229);  /* card borders       */
+  --crushe-line-2:            rgb(216, 216, 216);
+  --crushe-line-3:            rgb(217, 217, 217);  /* input placeholder  */
+  --crushe-surface-dim:       rgb(247, 247, 247);  /* field bg, chip bg  */
+  --crushe-surface:           rgb(255, 255, 255);  /* page + card        */
+  --crushe-surface-pure:      rgb(255, 254, 255);
+
+  /* ───── GRADIENTS · the Crushe hero aura ───── */
+  /* Always layered as TWO radial gradients at 30% opacity. Never solid. */
+  --crushe-aura-violet: radial-gradient(circle,
+                          rgba(159, 108, 255, 0.42) 0%,
+                          rgba(199, 169, 255, 0)   100%);
+  --crushe-aura-pink:   radial-gradient(circle,
+                          rgba(255, 101, 194, 0.33) 0%,
+                          rgba(255, 169, 218, 0)   100%);
+
+  /* avatar / card gradients */
+  --crushe-card-avatar: linear-gradient(180deg,
+                          rgb(255, 240, 249) 0%,
+                          rgb(246, 240, 255) 100%);
+  --crushe-card-info:   linear-gradient(180deg,
+                          rgb(208, 244, 255) 0%,
+                          rgb(225, 244, 254) 100%);
+
+  /* ───── SEMANTIC · foreground / background ───── */
+  --fg-1: var(--crushe-ink);              /* primary text */
+  --fg-2: var(--crushe-ink-2);            /* body text    */
+  --fg-3: var(--crushe-ink-muted);        /* meta         */
+  --fg-subtle: var(--crushe-ink-subtle);  /* spaced labels */
+  --fg-low: var(--crushe-ink-low);        /* subtitles    */
+  --fg-accent: var(--crushe-violet);
+  --fg-invert: var(--crushe-surface);
+
+  --bg-1: var(--crushe-surface);
+  --bg-2: var(--crushe-surface-dim);
+  --bg-accent: var(--crushe-violet);
+  --bg-accent-soft: var(--crushe-violet-wash);
+  --bg-accent-tint: var(--crushe-violet-tint);
+
+  --border-1: var(--crushe-line);
+  --border-2: var(--crushe-line-3);
+
+  /* ───── SHADOWS ─────
+     Crushe shadow system is SOFT + VIOLET-TINTED, never grey. */
+  --shadow-card:        0 10px 50px 0 rgba(105, 124, 255, 0.10);
+  --shadow-card-lift:   0 10px 50px 0 rgba(105, 124, 255, 0.08);
+  --shadow-fab:         0 8px 24px 0 rgba(138, 75, 255, 0.28);
+
+  /* ───── RADII ─────
+     9px is the "chip" radius; 15px is the "card" radius; 20–25px for sheets. */
+  --r-chip:   9px;
+  --r-button: 9px;
+  --r-card:   15px;
+  --r-sheet:  25px;
+  --r-hero:   40px;  /* app-icon / splash hero */
+  --r-pill:   999px;
+
+  /* ───── SPACING ─────
+     Crushe screens are a 375pt mobile canvas with consistent 21pt side
+     gutters. Stacks are 12/15/20/30. */
+  --s-1:  4px;
+  --s-2:  8px;
+  --s-3:  12px;
+  --s-4:  15px;   /* dominant card padding */
+  --s-5:  20px;
+  --s-6:  21px;   /* iOS gutter */
+  --s-8:  30px;
+
+  /* ───── TYPOGRAPHY ─────
+     Original: PingFang SC (iOS system CJK). For cross-platform parity we
+     map to Noto Sans SC (Google Fonts). Latin fallback: Inter.
+     DM Sans covers the rare Latin display ("CRUSHE" splash). */
+  --font-sans:    "Noto Sans SC", "PingFang SC", "Inter",
+                  -apple-system, BlinkMacSystemFont, "Helvetica Neue",
+                  "Microsoft YaHei", sans-serif;
+  --font-display: "DM Sans", "Noto Sans SC", "PingFang SC", sans-serif;
+
+  --fw-reg: 400;
+  --fw-med: 500;
+  --fw-sem: 600;
+  --fw-bold: 700;
+
+  --fs-12: 12px; --lh-12: 12px;
+  --fs-14: 14px; --lh-14: 14px;   /* body default */
+  --fs-16: 16px; --lh-16: 16px;
+  --fs-18: 18px; --lh-18: 18px;
+  --fs-21: 21px; --lh-21: 21px;   /* page title */
+  --fs-24: 24px; --lh-24: 24px;
+  --fs-28: 28px; --lh-28: 28px;
+  --fs-33: 33px; --lh-33: 33px;   /* splash wordmark */
+
+  /* Chinese typography runs with LOOSE letter-spacing (−0.273px) for body
+     and WIDE tracking for small-caps / taglines. */
+  --ls-body:   -0.273px;
+  --ls-spaced: 3.5px;
+}
+
+/* ─────────────────────────────────────────────────
+   Semantic typography classes (map directly to Figma)
+   ───────────────────────────────────────────────── */
+
+html, body {
+  font-family: var(--font-sans);
+  color: var(--fg-1);
+  background: var(--bg-1);
+  -webkit-font-smoothing: antialiased;
+}
+
+.t-wordmark {
+  font-family: var(--font-display);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-33);
+  line-height: var(--lh-33);
+  letter-spacing: var(--ls-body);
+  color: var(--fg-1);
+}
+.t-tagline {                       /* 让语言更加触动人心 */
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  letter-spacing: var(--ls-spaced);
+  color: var(--fg-subtle);
+}
+.t-page-title {                    /* 哈喽！欢迎回来 · 创建Crush */
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-21);
+  line-height: var(--lh-21);
+  letter-spacing: var(--ls-body);
+  color: var(--fg-1);
+}
+.t-section {                       /* 热门情感问题: */
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-16);
+  line-height: var(--lh-16);
+  letter-spacing: var(--ls-body);
+  color: var(--fg-1);
+}
+.t-body {                          /* default body */
+  font-weight: var(--fw-med);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  letter-spacing: var(--ls-body);
+  color: var(--fg-1);
+}
+.t-body-reg {
+  font-weight: var(--fw-reg);
+  font-size: var(--fs-14);
+  line-height: 20px;
+  color: var(--fg-2);
+}
+.t-subtle {                        /* subtitle under page title */
+  font-weight: var(--fw-med);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  letter-spacing: var(--ls-body);
+  color: var(--fg-low);
+}
+.t-meta {                          /* micro caption */
+  font-weight: var(--fw-med);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  letter-spacing: var(--ls-body);
+  color: var(--fg-subtle);
+}
+.t-button {                        /* CTA labels */
+  font-weight: var(--fw-med);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  color: var(--fg-invert);
+}
+.t-chip {                          /* small pill labels */
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  letter-spacing: var(--ls-body);
+}
+.t-num {                           /* percentages, counters */
+  font-family: var(--font-display);
+  font-weight: var(--fw-bold);
+}
+
+/* Hero aura utility — drop inside any card/screen for the signature bg */
+.crushe-aura {
+  position: absolute; inset: 0; opacity: 0.3; pointer-events: none;
+  overflow: hidden;
+}
+.crushe-aura::before,
+.crushe-aura::after {
+  content: ""; position: absolute; border-radius: 50%;
+}
+.crushe-aura::before {
+  left: -40px; top: 0; width: 400px; height: 407px;
+  background: var(--crushe-aura-violet);
+}
+.crushe-aura::after {
+  left: 160px; top: 86px; width: 195px; height: 199px;
+  background: var(--crushe-aura-pink);
+}

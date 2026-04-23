@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from fastapi import BackgroundTasks
 
 
-@pytest.mark.asyncio
-async def test_chat_synthetic_resume_when_no_pending_interrupt(monkeypatch):
+def test_chat_synthetic_resume_when_no_pending_interrupt(monkeypatch):
     from api.chat import ChatRequest, chat as chat_endpoint
     from api import sdk_client as sdk_client_module
 
@@ -35,7 +36,7 @@ async def test_chat_synthetic_resume_when_no_pending_interrupt(monkeypatch):
     monkeypatch.setattr(sdk_client_module, "run_assistant", _fake_run_assistant)
 
     req = ChatRequest(session_id="sess", resume_payload={"answers": {"q1": "A"}})
-    out = await chat_endpoint(req, BackgroundTasks(), current_user={"user_id": "u1"})
+    out = asyncio.run(chat_endpoint(req, BackgroundTasks(), current_user={"user_id": "u1"}))
 
     assert captured.get("thread_id") == "thread_test_chat_synth_resume"
     assert captured.get("command") is None

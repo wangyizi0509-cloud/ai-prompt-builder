@@ -1,0 +1,82 @@
+id: "scene_003"
+type: "scene"
+title: "制定行动计划 - 约饭场景"
+scope: ["feature", "strategy", "workflow"]
+description: >
+  用户明确要求 AI 帮制定约 crush 吃饭的计划。
+  验证工作流是否正确路由到 plan_agent，以及产出的计划是否具体可执行、利用了 crush 画像。
+
+test_account: "test202@example.com"
+
+user_profile:
+  name: "阿涛"
+  description: "25岁上班族，工作两年，性格外向，会说话"
+
+crush_profile:
+  name: "小美"
+  description: "同事，比阿涛小一岁，外向活泼，喜欢吃日料，经常在朋友圈晒美食"
+
+setup:
+  skip_onboarding: true
+  inject_layer1:
+    user_info: "用户叫阿涛，25岁上班族，工作两年，外向，会说话"
+    crush_info: "crush叫小美，同事，比阿涛小一岁，外向活泼，喜欢吃日料，爱在朋友圈晒美食"
+    relation_info: "认识三个月，同部门，经常一起午餐，有共同话题，没有单独约过正式饭局"
+
+turns:
+  - turn: 1
+    role: "user"
+    message: "我想这周约她出去吃个饭，你帮我出个计划吧"
+
+  - turn: 1
+    role: "assert"
+    checks:
+      - type: "has_action_plan"
+        description: "应该产出行动计划，state.layer2_memory.action_plan_history 非空"
+      - type: "response_contains"
+        value: ["计划", "建议", "约", "日料", "吃饭", "话术", "说"]
+        description: "回复应包含具体的约饭计划，并利用到 crush 喜好（日料）"
+
+  - turn: 1
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          用户要约 crush 吃饭，背景：同事认识三个月，经常一起午餐，crush 喜欢日料。
+
+          评估行动计划质量：
+          1. 是否有具体的时机建议（什么时候提、怎么引出）
+          2. 是否利用了"日料"这个信息点（这是关键加分项，不用就是浪费了已知信息）
+          3. 是否考虑了风险（同事关系，不能太突兀，降低压力感）
+          4. 是否有具体的话术示例（不是"你可以约她"这种，而是具体说什么）
+          5. 整个计划是否可以直接拿去用
+          满分5分。没有用日料信息扣2分，没有话术扣1分，没考虑风险扣1分。
+      - key: "workflow_correctness"
+        criteria: >
+          这是一个明确的行动规划请求，工作流应该：
+          1. main_agent_decide 判断需要调用 plan_agent（call_plan）
+          2. plan_agent 被调用并产出 action_plan（state.layer2_memory.action_plan_history 非空）
+          3. main_agent_respond 整合计划内容回复用户
+
+          如果 action_plan_history 为空，说明工作流没有正确路由到 plan_agent，严重扣分。
+          满分5分。
+
+  - turn: 2
+    role: "user"
+    message: "好，那我用哪句话开口最自然"
+
+  - turn: 2
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          用户要一句具体的开口话术。评估 AI 给出的话术：
+          1. 是否自然（不像在背稿子，听起来是正常人说的话）
+          2. 是否结合了已知信息（比如用日料、美食这个共同话题切入）
+          3. 是否降低了被拒绝的压力感（比如语气轻松，不显得太正式）
+          满分5分。
+
+evaluation:
+  pass_threshold: 3.5
+  must_pass_assertions: true
+  notes: "has_action_plan 断言是核心，必须通过。工作流没有路由到 plan_agent 是严重问题"

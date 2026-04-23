@@ -1,0 +1,110 @@
+id: "scene_005"
+type: "scene"
+title: "多轮追问 - Crush 画像逐步完善"
+scope: ["strategy", "feature"]
+description: >
+  用户分多次补充 crush 的信息（截图、口述描述、行为细节），
+  验证 AI 能随着信息积累给出越来越有针对性的分析，
+  而不是每次都给通用建议。
+
+test_account: "test204@example.com"
+
+user_profile:
+  name: "阿远"
+  description: "大四男生，内向，不善于主动"
+
+crush_profile:
+  name: "小芳"
+  description: "研一学姐，平时比较忙，但对阿远态度不错"
+
+setup:
+  skip_onboarding: true
+  inject_layer1:
+    user_info: "用户叫阿远，大四男生，性格内向，不太善于主动"
+    crush_info: "crush叫小芳，是研一学姐，通过社团认识"
+    relation_info: "认识一个月，在同一个社团，加了微信，偶尔在群里互动，私信过两三次"
+
+turns:
+  - turn: 1
+    role: "user"
+    message: "我想跟你说说关于小芳的情况，你帮我判断一下她对我什么态度"
+
+  - turn: 1
+    role: "assert"
+    checks:
+      - type: "response_contains"
+        value: ["说", "介绍", "情况", "了解", "听"]
+        description: "AI 应积极引导用户描述情况，而不是立刻给判断"
+
+  - turn: 2
+    role: "user"
+    message: "她每次在群里发消息我回了她都会回我，但我私信她有时候回得比较慢，要隔几个小时"
+
+  - turn: 2
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          基于目前已知信息（群里互动积极但私信慢），评估 AI 的分析：
+          1. 是否指出"群聊回复积极"和"私信慢"这两个信号可能的不同解读
+          2. 是否提出需要更多信息才能判断（因为信息还不足）
+          3. 是否给出下一步获取更多信息的方向
+          不应该在信息不足时就给出确定的结论。
+          满分5分。
+
+  - turn: 3
+    role: "user"
+    message: "她上周给我发了一条消息，说有一个讲座你要去吗，我说要去，然后她就说好那一起"
+    images:
+      - screenshot_type: "private_chat_screenshot"
+        ocr_result: |
+          小芳: 阿远 下周四有个心理学讲座你知道吗
+          阿远: 知道 你要去吗
+          小芳: 在考虑 你去吗
+          阿远: 我去
+          小芳: 好那一起去吧
+          阿远: 好的
+          小芳: 到时候我们可以提前去占个好位子
+          阿远: 嗯嗯好
+
+  - turn: 3
+    role: "assert"
+    checks:
+      - type: "response_contains"
+        value: ["主动", "讲座", "一起", "积极", "信号"]
+        description: "AI 应识别出小芳主动邀约是积极信号"
+
+  - turn: 3
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          结合前面的信息和这段截图，现在的整体画像是：
+          小芳群里互动积极、私信偶尔慢、但主动邀约去讲座并建议提前占位子。
+
+          评估 AI 的综合分析：
+          1. 是否将这段截图的信号与之前的信息结合起来看（综合判断）
+          2. 是否识别出"主动提议提前去占位子"是超出普通同学范畴的信号
+          3. 是否更新了对 crush 态度的判断（从之前的"不确定"到现在应该更乐观）
+          4. 是否给出了利用"讲座"这个机会的具体行动建议
+          满分5分。
+
+  - turn: 4
+    role: "user"
+    message: "讲座结束之后我应该怎么做"
+
+  - turn: 4
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          讲座是一个很好的约会雏形，评估 AI 的建议：
+          1. 是否给出了讲座后顺势推进的具体方案（如一起出来后吃个饭，或聊聊讲座内容）
+          2. 是否考虑到两人的关系阶段（认识一个月，还是学姐，不能太急）
+          3. 话术是否自然（不显得刻意）
+          满分5分。
+
+evaluation:
+  pass_threshold: 3.5
+  must_pass_assertions: true
+  notes: "核心考察的是 AI 能否随着信息积累更新判断，而不是每次给一样的通用建议"

@@ -1,0 +1,109 @@
+id: "scene_002"
+type: "scene"
+title: "上传聊天截图分析"
+scope: ["feature", "strategy"]
+description: >
+  用户上传了 crush 的聊天截图，验证 AI 能正确处理截图内容，
+  并结合 crush 画像给出有针对性的分析，而不是通用建议。
+
+test_account: "test201@example.com"
+
+user_profile:
+  name: "小宇"
+  description: "大三男生，性格偏外向，喜欢打篮球"
+
+crush_profile:
+  name: "小雪"
+  description: "同班女同学，偶尔主动聊天，喜欢看电影，经常在朋友圈发风景照"
+
+setup:
+  skip_onboarding: true
+  inject_layer1:
+    user_info: "用户叫小宇，大三男生，外向，喜欢打篮球"
+    crush_info: "crush叫小雪，同班女同学，偶尔主动聊天，喜欢看电影，经常发朋友圈"
+    relation_info: "认识两个月，同班，课间偶尔聊天，没有单独约过"
+
+turns:
+  - turn: 1
+    role: "user"
+    message: "我想把我们最近的聊天发给你看看，你帮我分析一下"
+
+  - turn: 1
+    role: "assert"
+    checks:
+      - type: "response_contains"
+        value: ["截图", "发一下", "图片", "看看", "发给我"]
+        description: "AI 应引导用户上传截图，而不是直接给建议"
+      - type: "no_interrupt"
+        description: "引导截图不应触发 interrupt"
+
+  - turn: 2
+    role: "user"
+    message: "好的，这是截图"
+    images:
+      - screenshot_type: "private_chat_screenshot"
+        ocr_result: |
+          小雪: 今天体育课你去了吗
+          小宇: 去了 你呢
+          小雪: 我也去了 你在哪个场地
+          小宇: 篮球场那边
+          小雪: 哦 下次可以一起
+          小宇: 好啊
+          小雪: 好嘞～ 对了你知道下周有什么活动吗
+          小宇: 不太清楚 你问到什么了吗
+          小雪: 有人说有个社团招新 我在考虑要不要去
+          小宇: 什么社团
+          小雪: 电影社 你有兴趣吗
+          小宇: 还行 我可以陪你去看看
+
+  - turn: 2
+    role: "assert"
+    checks:
+      - type: "response_contains"
+        value: ["截图", "聊天", "小雪", "电影", "主动"]
+        description: "AI 应分析这段聊天内容，提及 crush 的名字和关键信息点"
+      - type: "response_not_contains"
+        value: ["发给我", "截图发一下", "需要你上传"]
+        description: "截图已上传，不应再要求上传"
+
+  - turn: 2
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          这段聊天包含明显的积极信号：
+          小雪主动搭话（问体育课）、主动建议"下次可以一起"、
+          询问小宇是否对电影社有兴趣（暗示想一起参加活动）。
+
+          评估 AI 的分析质量：
+          1. 是否识别出"下次可以一起"和"电影社"问题是主动靠近的信号（关键点，必须识别）
+          2. 是否结合了 crush 画像（喜欢看电影），解释为何电影社是一个好切入点
+          3. 是否给出了具体的下一步建议（如如何回应电影社邀请、如何推进）
+          4. 分析是否有深度（不只是"她好像对你有意思"这种表面结论）
+          满分5分。没有识别关键信号扣2分，没结合画像扣1分，没有行动建议扣1分。
+      - key: "empathy_tone"
+        criteria: >
+          用户期待地分享了聊天记录，心情应该是有点兴奋又有点不确定。
+          AI 的语气是否：
+          1. 先给一个情绪回应（如"这段聊天看起来不错！"），而不是直接进入分析
+          2. 整体感觉是在帮用户，充满期待感，而不是在"评判"
+          满分5分。
+
+  - turn: 3
+    role: "user"
+    message: "那我要怎么回复她关于电影社的问题"
+
+  - turn: 3
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          用户问如何回复关于电影社的问题。AI 需要给出：
+          1. 具体的回复话术（不是"你可以说去啊"这种废话，要有温度和具体内容）
+          2. 利用到"电影社"这个切入点推进关系（比如一起报名、顺势约活动）
+          3. 回复建议要自然，不像在背台词
+          满分5分。
+
+evaluation:
+  pass_threshold: 3.5
+  must_pass_assertions: true

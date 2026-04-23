@@ -1,0 +1,246 @@
+id: "real_002"
+type: "real_journey"
+title: "Aliuman - 15岁同校同学，被判定在"友好但无感区"，正在接受行动指南"
+scope: ["strategy", "feature"]
+source_user: "Aliuman"
+description: >
+  基于真实用户数据构建。女生追男生（同校同学），15岁。
+  关系被小话判定为"友好但无感区"（类似兄弟陷阱初期），
+  需求感过强，回消息太快太密，话题浮于表面。
+  当前进度：小话已给出三阶段规划，正在为她制定详细的阶段一行动指南。
+  模拟AI扮演这个女生，完成从截图分析到接受第一步行动指南的流程。
+
+estimated_duration_minutes: 8
+test_account: "test207@example.com"
+
+# ==================== 画像 ====================
+user_profile:
+  nickname: "Aliuman"
+  gender: "女"
+  age: 15
+  personality: "情绪价值型（开心果），活泼，但容易需求感过强，秒回消息"
+  background: >
+    初中/高中学生，和crush同校同学（强关联环境）。
+    性格外向爱玩，情感萌新（第一次喜欢人）。
+    喜欢分享日常，但分享方式太主动，缺乏神秘感。
+    crush谈过一段感情，比她有经验。
+  emotional_state: "着急想追到他，但不知道从哪里入手"
+  persona_type: "B - 情绪价值/有趣（开心果）"
+
+crush_profile:
+  nickname: "小白（化名）"
+  gender: "男"
+  age: 15
+  personality: "偏被动，聊天回复随意，对Aliuman没有主动好奇心"
+  background: >
+    同校同学，通过同学关系认识，有一段感情经历。
+    聊天中几乎从不主动开启话题，被动回应Aliuman的消息。
+    分享过狗狗、日常图片等，但回复都比较简短随意。
+    互动内容停留在表面（图片互发，没有情感深度）。
+    聊天画面：Aliuman发消息"可以加你抖音吗"（并撤回）、"波比知道我在干啥不"、
+    "是因为我送的吗"——这些都是需求感过强的表现。
+  attitude_toward_user: "无明显好感，把Aliuman当普通朋友/联系人"
+  life_state: "C - 闲暇/自由（学生）"
+
+relation_info:
+  met_via: "强关联环境 - 同校同学"
+  interaction_level: "B - 点赞之交/偶尔闲聊"
+  current_stage: "友好但无感区（陷阱深度40%，刚开始）"
+  key_problem: >
+    Aliuman需求感太强：
+    - 主动撤回消息（"可以加你抖音吗"撤回显得更慌）
+    - 回消息太快太密（他12:07回，她12:59和13:21连发三条）
+    - 话题全是图片互发，没有深度
+    - 没有展示自己"开心果"的魅力
+  screenshots_available:
+    - file: "8b253c1fa0c145df0995425366417bfe.jpg"
+      desc: "聊天截图：双方对话，包含波比的狗照片互发，crush回复冷淡随意"
+
+# ==================== 产品操作流程说明 ====================
+product_flow_guide: >
+  【模拟用户AI必读】
+
+  1. 第一条消息触发 onboarding，用 Aliuman 的身份和口吻填写。
+  2. onboarding 完成后，小话会给出分析。先对报告表示认同或反应，
+     然后直接问"那我要怎么追到他"（Aliuman 在真实对话中就是这么问的）。
+  3. 看到小话给出阶段规划后，表示同意并要求详细的第一步指南。
+  4. 接受第一步指南后，按照 turns 中的后续轮次继续推进。
+  5. Aliuman 的语气：活泼、直接、有点急，像微信发消息给朋友。
+
+  【截图使用说明】
+  在 turn 3 中上传：
+  Benchmark/caseBaseDate/用户发送的截图/8b253c1fa0c145df0995425366417bfe.jpg
+  （这张是她们两人的聊天记录截图）
+
+# ==================== 对话流程 ====================
+turns:
+  # --- Onboarding ---
+  - turn: 1
+    role: "user_ai"
+    instruction: "以Aliuman身份发第一条消息，直接说喜欢一个同学，语气活泼直接"
+    sample_message: "我喜欢我们班的一个男生"
+
+  - turn: 1
+    role: "assert"
+    checks:
+      - type: "inquiry_card_triggered"
+        description: "新用户必须触发 onboarding"
+
+  - turn: 2
+    role: "user_ai"
+    instruction: "填写 onboarding 问卷，按Aliuman画像填写"
+    is_resume: true
+    resume_strategy: "fill_from_sample"
+    sample_answers:
+      "你的性别": "女"
+      "你的年龄": "15"
+      "情感经验值": "A - 萌新，没经验"
+      "核心人设": "B - 情绪价值/有趣"
+      "长期关系愿景": "B - 轻松恋爱"
+      "和crush的差距": "A - 差不多"
+      "Crush昵称": "小白"
+      "Crush性别": "男"
+      "Crush年龄": "15"
+      "认识渠道": "D - 同校同学"
+      "他的生活状态": "C - 闲暇/自由"
+      "目前互动程度": "B - 点赞之交/偶尔闲聊"
+      "最头疼的问题": "D - 关系停滞/卡在友谊区"
+
+  - turn: 2
+    role: "assert"
+    checks:
+      - type: "onboarding_completed"
+      - type: "no_interrupt"
+
+  # --- 上传截图 + 直接问追法 ---
+  - turn: 3
+    role: "user_ai"
+    instruction: >
+      上传聊天截图，然后直接问怎么追。Aliuman风格：直接、急、不绕弯子。
+    sample_message: "这是我们的聊天记录，你看一下，我要怎么才可以追到他"
+    images:
+      - screenshot_type: "private_chat_screenshot"
+        file_path: "Benchmark/caseBaseDate/用户发送的截图/8b253c1fa0c145df0995425366417bfe.jpg"
+        user_description: "这是我们平时聊天，他好像不是很有兴趣的样子"
+
+  - turn: 3
+    role: "assert"
+    checks:
+      - type: "response_contains"
+        value: ["需求感", "主动", "话题", "神秘", "吸引", "回消息"]
+        description: "分析应识别出需求感过强和话题浮浅的核心问题"
+
+  - turn: 3
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          用户上传了截图，截图显示：双方聊天内容停留在图片互发（狗、日常），
+          Aliuman回复频率高，crush反应被动。
+
+          评估分析质量：
+          1. 是否识别出"需求感过强"和"话题无深度"这两个核心问题
+          2. 是否给出了"吸引力建设"的正确方向（而不是继续主动追）
+          3. 是否结合了Aliuman的"开心果"人设（她的优势还没发挥出来）
+          满分5分。
+
+  # --- 接受规划，要求第一步指南 ---
+  - turn: 4
+    role: "user_ai"
+    instruction: >
+      小话给出了三阶段规划后，Aliuman直接表示同意，要求第一步具体怎么做。
+    sample_message: "可以，那第一步我具体怎么做"
+
+  - turn: 4
+    role: "assert"
+    checks:
+      - type: "has_action_plan"
+        description: "应产出行动计划/指南"
+      - type: "response_contains"
+        value: ["不要主动", "停止", "朋友圈", "消息", "节奏", "冷却"]
+        description: "第一步应该是降低需求感、停止主动追，而不是新的主动出击"
+
+  - turn: 4
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          阶段一行动指南评估。对于一个需求感过强的用户，正确的第一步应该是：
+          停止主动发起日常聊天、控制回复节奏、转移到朋友圈展示自己的有趣生活。
+
+          评估指南质量：
+          1. 是否有明确的"禁止"清单（什么不能做）
+          2. 是否给出了朋友圈内容的具体方向（发什么来展示开心果人设）
+          3. 是否给出了"通关里程碑"（什么时候才能进入下一阶段）
+          4. 语气是否贴合15岁用户（不要太成人化）
+          满分5分。没有禁止清单扣1分，没有里程碑扣1分，语气过于成人化扣1分。
+
+  # --- 追问执行障碍 ---
+  - turn: 5
+    role: "user_ai"
+    instruction: >
+      Aliuman有点担心：如果我停止主动，他是不是就真的不找我了？
+      体现她需求感强、不确定感重的特点。
+    sample_message: "那如果我不找他他也不找我，我们不就凉了？"
+
+  - turn: 5
+    role: "judge"
+    dimensions:
+      - key: "empathy_tone"
+        criteria: >
+          用户表达了执行障碍（怕凉）。这是很多初次追人的女生的典型担心。
+          评估小话的回应：
+          1. 是否先理解这个担心（而不是直接说"不会凉的"然后讲道理）
+          2. 是否给出了"为什么不主动反而更好"的逻辑解释（让她真正信服）
+          3. 语气是否像在陪她一起想，而不是在说教
+          满分5分。
+
+      - key: "strategy_quality"
+        criteria: >
+          对于"不找他会不会凉"的担心，正确的策略解释是：
+          关系目前本来就是"普通朋友/无感"阶段，暂停主动不是让关系变冷，
+          而是打破"她追他逃"的惯性，让他有机会产生"她怎么不来了"的好奇心。
+          评估解释是否说清楚了这个核心逻辑。
+          满分5分。
+
+  # --- 模拟 crush 的行动 ---
+  - turn: 6
+    role: "crush_ai"
+    instruction: >
+      【模拟 crush 的AI】
+      假设 Aliuman 执行了3天静默观察，今天 crush 给她发了一条消息：
+      "刚才看到那个搞笑视频了吗"（crush 主动联系，属于里程碑）
+      Aliuman 把这个情况汇报给小话，问怎么回。
+    user_message_to_product: >
+      他今天主动找我了！发了条"刚才看到那个搞笑视频了吗"
+      我应该怎么回！！
+    crush_simulated_message: "刚才看到那个搞笑视频了吗"
+
+  - turn: 6
+    role: "assert"
+    checks:
+      - type: "response_contains"
+        value: ["延迟", "简短", "不要", "秒回", "节奏", "回复"]
+        description: "小话应提醒不要秒回，给出节奏建议和具体回复内容"
+
+  - turn: 6
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          这是阶段一里程碑达成（crush 主动联系）！
+          正确的回应策略是：延迟回复 + 简短有趣 + 不主动拓展（让他继续追问）。
+          评估小话的建议：
+          1. 是否提醒了不要秒回（这是最关键的）
+          2. 给出的回复话术是否简短、有点神秘感（不是"哈哈哈"这种无意义回复）
+          3. 是否建议了如何用这次机会进入阶段二
+          满分5分。没有提醒控制回复时机扣2分。
+
+evaluation:
+  pass_threshold: 3.5
+  must_pass_assertions: true
+  notes: >
+    核心考察点：
+    1. 是否能识别"需求感过强"并给出"降温"策略（而非鼓励继续主动）
+    2. 行动指南的第一步是否明确、可执行
+    3. 对"执行担心"的处理：理解+解释，不说教

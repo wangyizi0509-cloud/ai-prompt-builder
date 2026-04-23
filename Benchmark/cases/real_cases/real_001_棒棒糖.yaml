@@ -1,0 +1,276 @@
+id: "real_001"
+type: "real_journey"
+title: "棒棒糖 - 排球场认识的暧昧男生，关系在"兄弟"和"有意思"之间摇摆"
+scope: ["strategy", "feature"]
+source_user: "棒棒糖"
+description: >
+  基于真实用户数据构建。女生主动追男生场景。
+  用户和crush通过排球认识，crush有明显好感信号但一直没有表态，
+  用户一次"逼问"导致crush防御退缩，关系卡住。
+  当前进度：小话已给出规划，用户准备执行。
+  模拟AI需要扮演这个女生来使用产品。
+
+estimated_duration_minutes: 10
+test_account: "test206@example.com"
+
+# ==================== 画像 ====================
+user_profile:
+  nickname: "棒棒糖"
+  gender: "女"
+  age: 18
+  personality: "嘴笨，和男生接触多，容易处成哥们，踏实靠谱型"
+  background: >
+    东北在校学生，打排球认识crush，自我描述嘴笨、以前完全没处过对象。
+    会开玩笑，但不擅长用女性视角表达好感，习惯用兄弟模式相处。
+    感情极速升温（一开始对crush没感觉，最近才反应过来）。
+  emotional_state: "有点着急，想让他主动说出口，同时又怕破坏现有关系"
+  persona_type: "A - 踏实靠谱/安全感（守护者）"
+  gap_perception: "B - 他比我好"
+
+crush_profile:
+  nickname: "帝总（代号，真名不明）"
+  gender: "男"
+  age: 18
+  personality: "平时话少，单独和棒棒糖在一起时才话多；看起来对所有人都挺好，但和她单独时有特殊感"
+  background: >
+    同校打排球认识，最初主动找她单独打球。
+    有以下明确好感信号：
+    - 单独打球时扣球时不扣她（初期），后来教她动作并总在她周围转
+    - 零下天气主动要把手套给她
+    - 单独在一起话多，见到其他人时却不打招呼（害羞/回避）
+    - 突然表示"想处对象（不是和帝总那种）"
+    - 聊天时说"男的女的都可以"（模糊试探）
+    - 每次她接球无论好坏都说"好球"
+    但有防御反应：被棒棒糖"兄弟式逼问"后立刻撤退说"到此为止了"。
+  attitude_toward_user: "有好感但未明确，对关系定义有防御/回避倾向"
+  life_state: "C - 闲暇/自由"
+
+relation_info:
+  met_via: "现实线下 - 同校打排球"
+  interaction_level: "D - 已有肢体接触/暧昧（给手套、身体靠近、独处话多）"
+  current_stage: "暧昧摇摆期，好感明确但方向未定"
+  key_incident: >
+    棒棒糖给crush做了圣诞帽头像后聊天，两人聊得开心，
+    但棒棒糖用半开玩笑方式逼问"你说想处对象是不是说的我"，
+    crush立刻防御退缩："拒绝回答""到此为止了"。
+    此后关系卡住，棒棒糖很着急想知道接下来怎么做。
+  screenshots_available:
+    - file: "dced26b76c7826ab2d2d7ee1b7a06f75.jpg"
+      desc: "聊天截图：棒棒糖发波比梗图，crush回表情包，发狗的照片互动"
+    - file: "eec1408930a9193ce1cdac57126fe8df.jpg"
+      desc: "聊天截图：'是因为我送的吗' + crush发'好感度加满'表情包 + '正在发动最强大脑'"
+    - file: "32abf758a163e13210f585c7d812a271.jpg"
+      desc: "聊天截图：相册翻出的照片，'哇嗯怎么这么好看嗬' + crush回萌宠图"
+
+# ==================== 产品操作流程说明（给模拟用户AI看）====================
+product_flow_guide: >
+  【模拟用户AI必读：如何使用小话产品】
+
+  1. 注册/登录后，第一条消息发任意内容触发 onboarding 问卷。
+  2. 收到 inquiry_card（问卷弹出）后，按照 user_profile 和 crush_profile 的信息填写，
+     尽量真实、口语化地描述（像真人用微信发消息那样，不要太正式）。
+  3. onboarding 完成后，小话会给出初步分析报告，此时必须执行【观看报告流程】：
+     先不急着追问，先回一句对报告的反应（比如"哇说得好准" 或 "我也觉得" 之类），
+     然后可以针对报告中的某一条提问或表达感受。
+  4. 之后按照本 case 的 turns 顺序推进。
+  5. 如果小话给了行动计划，要模拟"接受计划"并追问执行细节（"那我具体怎么做"）。
+  6. 模拟用户可以偶尔随机提一个自己关心的问题，不用完全按脚本走。
+
+  【截图使用说明】
+  在 turn 3 中需要上传聊天截图，使用以下文件路径：
+  Benchmark/caseBaseDate/用户发送的截图/eec1408930a9193ce1cdac57126fe8df.jpg
+  （这张图是：棒棒糖问"是因为我送的吗"，crush发"好感度加满"表情包后又发"正在发动最强大脑"）
+
+# ==================== 对话流程 ====================
+turns:
+  # --- Onboarding ---
+  - turn: 1
+    role: "user_ai"
+    instruction: >
+      以棒棒糖的身份发第一条消息。
+      她刚注册，有点紧张又期待，语气像在微信给朋友发消息。
+      口语化，可以有点"嘴笨"感。
+    sample_message: "我是棒棒糖，我喜欢一个男生，我不知道他是不是喜欢我"
+
+  - turn: 1
+    role: "assert"
+    checks:
+      - type: "inquiry_card_triggered"
+        description: "新用户第一条消息必须触发 onboarding 问卷"
+
+  - turn: 2
+    role: "user_ai"
+    instruction: >
+      收到问卷后，用棒棒糖的口吻填写。
+      关键信息：女生，18岁，没处过对象（萌新），踏实靠谱型，觉得crush比自己好。
+      Crush：同校男生，通过排球认识，认识约2个月，已经有肢体接触/单独相处（暧昧）。
+      最头疼的问题：忽冷忽热/猜不透心思（他发暧昧信号但就是不说）。
+    is_resume: true
+    resume_strategy: "fill_from_sample"
+    sample_answers:
+      "你的性别": "女"
+      "你的年龄": "18"
+      "情感经验值": "A - 萌新，没处过对象"
+      "核心人设": "A - 踏实靠谱/安全感"
+      "长期关系愿景": "A - 长期稳定"
+      "和crush的差距": "B - 他比我好"
+      "Crush昵称": "小K（化名）"
+      "Crush性别": "男"
+      "Crush年龄": "18"
+      "认识渠道": "D - 强关联环境，同校打排球认识"
+      "目前互动程度": "D - 已有肢体接触/暧昧"
+      "他的生活状态": "C - 闲暇自由"
+      "最头疼的问题": "C - 忽冷忽热/猜不透心思"
+
+  - turn: 2
+    role: "assert"
+    checks:
+      - type: "onboarding_completed"
+        description: "填完问卷后应完成 onboarding"
+      - type: "no_interrupt"
+        description: "onboarding 完成后不应再卡住"
+
+  # --- 报告反应 + 追问 ---
+  - turn: 3
+    role: "user_ai"
+    instruction: >
+      小话给出了初步分析报告后，棒棒糖先表达对报告的感受，
+      然后主动补充关键背景：她用"兄弟式逼问"导致对方退缩的事件。
+      同时上传那张"好感度加满"的聊天截图。
+      语气：有点委屈又有点着急，像在跟朋友倾诉。
+    sample_message: >
+      哇你说的还挺准的，我确实经常拿他和别人开玩笑，他肯定觉得我把他当哥们了
+      对了我有截图，我发给你看一下，就是他之前说想处对象然后我问他是不是我的时候
+      他当时说"拒绝回答""到此为止了"，然后就没下文了，我现在不知道该咋办
+    images:
+      - screenshot_type: "private_chat_screenshot"
+        file_path: "Benchmark/caseBaseDate/用户发送的截图/eec1408930a9193ce1cdac57126fe8df.jpg"
+        user_description: "这是我问他'是因为我送的吗'的时候，他先发了个'好感度加满'表情，然后发了个'正在发动最强大脑'，然后就没回我了"
+
+  - turn: 3
+    role: "assert"
+    checks:
+      - type: "response_contains"
+        value: ["截图", "逼问", "防御", "退缩", "压力", "暧昧", "信号", "好感"]
+        description: "小话应分析截图和逼问事件，识别出 crush 有好感但被压力逼退的模式"
+      - type: "no_interrupt"
+        description: "正常分析不应卡住"
+
+  - turn: 3
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          用户上传了聊天截图，截图显示：
+          crush发了"好感度加满"表情包，然后发"正在发动最强大脑"（考虑中/尴尬），
+          这是一个在被逼问后又退缩的典型行为。
+
+          评估小话的分析质量：
+          1. 是否识别出"好感度加满"表情包是好感信号，而不是拒绝
+          2. 是否解释了为什么 crush 随后防御退缩（被逼问压力太大）
+          3. 是否给出了具体的当前策略方向（而不只是说"慢慢来"）
+          4. 是否利用了排球场景这个特殊关系背景来制定策略
+          满分5分。没有识别好感信号扣2分，只给通用建议扣2分。
+      - key: "empathy_tone"
+        criteria: >
+          用户在担心"聊崩了还有没有希望"，情绪有点焦虑。
+          小话是否先给了一个安慰（有希望！）再进入分析，而不是直接分析。
+          满分5分。
+
+  # --- 索要行动计划 ---
+  - turn: 4
+    role: "user_ai"
+    instruction: >
+      棒棒糖看完分析后，请求具体的行动计划。
+      语气：有点下定决心，但还是有点不确定，口语化。
+    sample_message: "那我接下来应该怎么做，你帮我出个计划吧，我明天就要去打球了他也在"
+
+  - turn: 4
+    role: "assert"
+    checks:
+      - type: "has_action_plan"
+        description: "应该产出行动计划"
+      - type: "response_contains"
+        value: ["打球", "排球", "球场", "自然", "不要", "主动", "状态"]
+        description: "计划应该结合排球场景，给出明天打球时的具体行为建议"
+
+  - turn: 4
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          用户明天就要去打球了，crush也在。这是一个具体的行动机会。
+
+          评估行动计划质量：
+          1. 是否结合了排球场景（在球场上具体怎么做，而不是通用建议）
+          2. 是否考虑了之前"逼问"造成的尴尬（如何自然恢复）
+          3. 计划的策略方向是否正确（应该是"状态正常、不提那件事、制造特殊感"而非继续逼问）
+          4. 是否有具体到明天打球时的话术或行为示例
+          满分5分。完全没提排球场景扣2分，仍然建议主动追问扣2分。
+      - key: "workflow_correctness"
+        criteria: >
+          用户请求了具体行动计划，工作流应该调用 plan_agent 产出 action_plan。
+          state.layer2_memory.action_plan_history 应非空。
+          满分5分。
+
+  # --- 执行细节追问 + crush反应模拟 ---
+  - turn: 5
+    role: "user_ai"
+    instruction: >
+      棒棒糖问打球时最难处理的一个具体问题：
+      如果打球时两人眼神对上了但又不知道说什么，该怎么办。
+      体现她"嘴笨"的特点。
+    sample_message: "我最怕的就是我们眼神对上了但是我嘴笨不知道说啥，你教我一句话"
+
+  - turn: 5
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          用户要求一句具体的话术，且说明了自己"嘴笨"。评估小话给出的话术：
+          1. 是否简短、自然（嘴笨的人能说出来的）
+          2. 是否结合了排球场景（不能是通用搭讪话）
+          3. 语气是否有点轻松，而不是正式表白
+          满分5分。给一段话而不是一句话扣1分，脱离排球场景扣2分。
+
+  # --- 模拟 crush 的后续反应 ---
+  - turn: 6
+    role: "crush_ai"
+    instruction: >
+      【这轮由模拟 crush 的AI来扮演】
+      假设棒棒糖执行了小话的建议，打球时正常状态，没有主动提那件事。
+      crush 今天打球结束后主动给棒棒糖发消息："今天你接球比以前准了"
+
+      现在棒棒糖把这条消息截图发给小话，问怎么回复。
+    user_message_to_product: >
+      他今天打完球给我发消息了说"今天你接球比以前准了"，
+      这是什么意思啊他是在夸我吗，我应该怎么回
+    crush_simulated_message: "今天你接球比以前准了"
+
+  - turn: 6
+    role: "assert"
+    checks:
+      - type: "response_contains"
+        value: ["回复", "怎么回", "说", "可以", "建议", "话术"]
+        description: "小话应给出具体的回复建议"
+
+  - turn: 6
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          crush 主动发消息夸棒棒糖打球进步了，这是一个很好的互动机会。
+          评估小话的回复建议：
+          1. 是否识别出这是 crush 主动搭话的积极信号
+          2. 建议的回复话术是否有点小俏皮（匹配排球场景，而不是"谢谢"这种死板回复）
+          3. 是否给出了如何接话并延续对话的方向
+          满分5分。建议只回"谢谢"或类似简单词扣2分。
+
+evaluation:
+  pass_threshold: 3.5
+  must_pass_assertions: true
+  notes: >
+    这个 case 的核心考察点：
+    1. 小话能否识别"逼问导致退缩"这个模式并给出正确的修复策略
+    2. 行动计划是否能结合排球这个具体场景
+    3. 情绪安抚是否在策略之前

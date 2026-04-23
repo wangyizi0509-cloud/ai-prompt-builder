@@ -11,6 +11,7 @@ import os
 import sys
 import hashlib
 import json
+import asyncio
 import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -133,22 +134,22 @@ class TestExtractMessagesFromState:
 class TestPersistTurnMessages:
     """测试消息持久化辅助函数"""
 
-    @pytest.mark.asyncio
-    async def test_skip_anonymous(self):
+    def test_skip_anonymous(self):
         """匿名用户不持久化"""
         from api.conversation_persist import persist_turn_messages
         # 不应抛出异常
-        await persist_turn_messages(
-            user_id=None,
-            thread_id="t1",
-            turn_id="turn1",
-            user_message="hello",
-            pending_responses=[],
-            final_state={},
+        asyncio.run(
+            persist_turn_messages(
+                user_id=None,
+                thread_id="t1",
+                turn_id="turn1",
+                user_message="hello",
+                pending_responses=[],
+                final_state={},
+            )
         )
 
-    @pytest.mark.asyncio
-    async def test_basic_persist(self):
+    def test_basic_persist(self):
         """测试基本的消息持久化"""
         mock_conv = {"id": "conv-1", "thread_id": "t1", "user_id": "u1"}
         mock_turn = {"id": "turn-1", "turn_seq": 1, "turn_id": "tid1", "conversation_id": "conv-1"}
@@ -159,13 +160,15 @@ class TestPersistTurnMessages:
                     with patch("supabase_service.conversation.append_messages", new_callable=AsyncMock, return_value=2) as mock_append:
                         from api.conversation_persist import persist_turn_messages
 
-                        await persist_turn_messages(
-                            user_id="u1",
-                            thread_id="t1",
-                            turn_id="tid1",
-                            user_message="你好",
-                            pending_responses=[{"content": "你好呀", "from": "assistant"}],
-                            final_state={},
+                        asyncio.run(
+                            persist_turn_messages(
+                                user_id="u1",
+                                thread_id="t1",
+                                turn_id="tid1",
+                                user_message="你好",
+                                pending_responses=[{"content": "你好呀", "from": "assistant"}],
+                                final_state={},
+                            )
                         )
 
                         mock_append.assert_called_once()
@@ -173,9 +176,11 @@ class TestPersistTurnMessages:
                         msgs = call_args.kwargs.get("messages") or call_args[1].get("messages", []) if len(call_args) > 1 else call_args.kwargs.get("messages", [])
                         # 应包含 user + assistant 两条消息
                         assert len(msgs) >= 2
+                        assistant_msg = next((m for m in msgs if m.get("role") == "assistant" and m.get("kind") == "chat_text"), None)
+                        assert assistant_msg is not None
+                        assert assistant_msg.get("content") == "你好呀"
 
-    @pytest.mark.asyncio
-    async def test_interrupt_persist(self):
+    def test_interrupt_persist(self):
         """中断事件应被写入"""
         mock_conv = {"id": "conv-1", "thread_id": "t1", "user_id": "u1"}
         mock_turn = {"id": "turn-1", "turn_seq": 1, "turn_id": "tid1", "conversation_id": "conv-1"}
@@ -186,14 +191,16 @@ class TestPersistTurnMessages:
                     from api.conversation_persist import persist_turn_messages
 
                     card = {"questions": [{"id": "q1", "question": "测试?"}], "intro": "请回答"}
-                    await persist_turn_messages(
-                        user_id="u1",
-                        thread_id="t1",
-                        turn_id="tid1",
-                        user_message="问题",
-                        pending_responses=[],
-                        final_state={},
-                        inquiry_card=card,
+                    asyncio.run(
+                        persist_turn_messages(
+                            user_id="u1",
+                            thread_id="t1",
+                            turn_id="tid1",
+                            user_message="问题",
+                            pending_responses=[],
+                            final_state={},
+                            inquiry_card=card,
+                        )
                     )
 
                     mock_append.assert_called_once()
@@ -202,6 +209,200 @@ class TestPersistTurnMessages:
                     # 应包含 interrupt_inquiry 类型
                     kinds = [m.get("kind") for m in msgs]
                     assert "interrupt_inquiry" in kinds
+
+    def test_assistant_chat_text_metadata_is_persisted(self):
+        """assistant 文本消息应保留 metadata，供刷新后重建 UI"""
+        mock_conv = {"id": "conv-1", "thread_id": "t1", "user_id": "u1"}
+        mock_turn = {"id": "turn-1", "turn_seq": 1, "turn_id": "tid1", "conversation_id": "conv-1"}
+
+        with patch("supabase_service.conversation.upsert_conversation", new_callable=AsyncMock, return_value=mock_conv):
+            with patch("supabase_service.conversation.get_or_create_turn", new_callable=AsyncMock, return_value=mock_turn):
+                with patch("supabase_service.conversation.append_messages", new_callable=AsyncMock, return_value=1) as mock_append:
+                    from api.conversation_persist import persist_turn_messages
+
+                    asyncio.run(
+                        persist_turn_messages(
+                            user_id="u1",
+                            thread_id="t1",
+                            turn_id="tid1",
+                            user_message="hello",
+                            pending_responses=[
+                                {
+                                    "from": "onboarding",
+                                    "content": "请先阅读使用指南",
+                                    "phase": "guide_gate",
+                                    "showGuideButton": True,
+                                    "messageKey": "guide_gate",
+                                }
+                            ],
+                            final_state={},
+                        )
+                    )
+
+                    call_args = mock_append.call_args
+                    msgs = call_args.kwargs.get("messages") or call_args[1].get("messages", []) if len(call_args) > 1 else call_args.kwargs.get("messages", [])
+                    assistant_msg = next((m for m in msgs if m.get("role") == "assistant" and m.get("kind") == "chat_text" and m.get("content") == "请先阅读使用指南"), None)
+                    assert assistant_msg is not None
+                    assert assistant_msg.get("metadata", {}).get("showGuideButton") is True
+                    assert assistant_msg.get("metadata", {}).get("messageKey") == "guide_gate"
+
+    def test_inquiry_receipt_payload_is_persisted_without_resume(self):
+        """本地 onboarding 提交也应持久化 inquiry_receipt，刷新后可恢复"""
+        mock_conv = {"id": "conv-1", "thread_id": "t1", "user_id": "u1"}
+        mock_turn = {"id": "turn-1", "turn_seq": 1, "turn_id": "tid1", "conversation_id": "conv-1"}
+
+        with patch("supabase_service.conversation.upsert_conversation", new_callable=AsyncMock, return_value=mock_conv):
+            with patch("supabase_service.conversation.get_or_create_turn", new_callable=AsyncMock, return_value=mock_turn):
+                with patch("supabase_service.conversation.append_messages", new_callable=AsyncMock, return_value=1) as mock_append:
+                    from api.conversation_persist import persist_turn_messages
+
+                    asyncio.run(
+                        persist_turn_messages(
+                            user_id="u1",
+                            thread_id="t1",
+                            turn_id="tid1",
+                            user_message="怎么称呼你？：1",
+                            pending_responses=[],
+                            final_state={
+                                "inquiry_answers": {"ob_user_name": "1"},
+                                "inquiry_card": {
+                                    "questions": [{"id": "ob_user_name", "question": "怎么称呼你？"}],
+                                },
+                            },
+                            is_resume=False,
+                            inquiry_receipt_payload={
+                                "taskKey": "inquiry_ob_user_name",
+                                "summary": "已提交问卷（1项）",
+                                "details": [{"label": "怎么称呼你？", "value": "1"}],
+                            },
+                        )
+                    )
+
+                    call_args = mock_append.call_args
+                    msgs = call_args.kwargs.get("messages") or call_args[1].get("messages", []) if len(call_args) > 1 else call_args.kwargs.get("messages", [])
+                    receipt_msg = next((m for m in msgs if m.get("kind") == "inquiry_receipt"), None)
+                    assert receipt_msg is not None
+                    assert receipt_msg.get("metadata", {}).get("summary") == "已提交问卷（1项）"
+                    assert receipt_msg.get("metadata", {}).get("taskKey") == "inquiry_ob_user_name"
+                    assert receipt_msg.get("metadata", {}).get("details") == [{"label": "怎么称呼你？", "value": "1"}]
+
+    def test_report_ready_with_same_task_key_is_deferred_to_pending_responses(self):
+        """聊天区正式卡片应优先按 pending_responses 顺序落库，report_ready 不应抢先写入"""
+        mock_conv = {"id": "conv-1", "thread_id": "t1", "user_id": "u1"}
+        mock_turn = {"id": "turn-1", "turn_seq": 1, "turn_id": "tid1", "conversation_id": "conv-1"}
+
+        with patch("supabase_service.conversation.upsert_conversation", new_callable=AsyncMock, return_value=mock_conv):
+            with patch("supabase_service.conversation.get_or_create_turn", new_callable=AsyncMock, return_value=mock_turn):
+                with patch("supabase_service.conversation.append_messages", new_callable=AsyncMock, return_value=5) as mock_append:
+                    from api.conversation_persist import persist_turn_messages
+
+                    asyncio.run(
+                        persist_turn_messages(
+                            user_id="u1",
+                            thread_id="t1",
+                            turn_id="tid1",
+                            user_message="开始分析",
+                            process_events=[
+                                {"event_type": "reasoning", "content": "先看看情况"},
+                                {"event_type": "report_ready", "report_kind": "status_report", "task_key": "status_7"},
+                                {"event_type": "reasoning", "content": "继续推进"},
+                            ],
+                            pending_responses=[
+                                {
+                                    "content": "这是基于你提供的信息生成的现状分析报告：",
+                                    "from": "assistant",
+                                    "phase": "status_preface",
+                                },
+                                {
+                                    "type": "system_task",
+                                    "taskType": "status",
+                                    "taskKey": "status_7",
+                                    "title": "现状分析报告已生成",
+                                },
+                            ],
+                            final_state={},
+                        )
+                    )
+
+                    call_args = mock_append.call_args
+                    msgs = call_args.kwargs.get("messages") or call_args[1].get("messages", []) if len(call_args) > 1 else call_args.kwargs.get("messages", [])
+                    kinds = [m.get("kind") for m in msgs]
+                    assert kinds.count("system_task") == 1
+                    assert kinds == ["chat_text", "reasoning_event", "reasoning_event", "chat_text", "system_task"]
+                    system_task = next(m for m in msgs if m.get("kind") == "system_task")
+                    assert system_task.get("metadata", {}).get("taskKey") == "status_7"
+                    assert system_task.get("part_index") == 4
+
+    def test_duplicate_ai_message_is_not_persisted_when_final_chat_text_matches(self):
+        """同轮 ai_intermediate 与最终 chat_text 文案相同，只保留正式 chat_text"""
+        mock_conv = {"id": "conv-1", "thread_id": "t1", "user_id": "u1"}
+        mock_turn = {"id": "turn-1", "turn_seq": 1, "turn_id": "tid1", "conversation_id": "conv-1"}
+
+        with patch("supabase_service.conversation.upsert_conversation", new_callable=AsyncMock, return_value=mock_conv):
+            with patch("supabase_service.conversation.get_or_create_turn", new_callable=AsyncMock, return_value=mock_turn):
+                with patch("supabase_service.conversation.append_messages", new_callable=AsyncMock, return_value=2) as mock_append:
+                    from api.conversation_persist import persist_turn_messages
+
+                    asyncio.run(
+                        persist_turn_messages(
+                            user_id="u1",
+                            thread_id="t1",
+                            turn_id="tid1",
+                            user_message="hello",
+                            process_events=[
+                                {"event_type": "ai_message", "content": "同一段总结文案"},
+                            ],
+                            pending_responses=[
+                                {"content": "同一段总结文案", "from": "assistant", "phase": "final"},
+                            ],
+                            final_state={},
+                        )
+                    )
+
+                    call_args = mock_append.call_args
+                    msgs = call_args.kwargs.get("messages") or call_args[1].get("messages", []) if len(call_args) > 1 else call_args.kwargs.get("messages", [])
+                    assert [m.get("kind") for m in msgs] == ["chat_text", "chat_text"]
+                    assistant_msgs = [m for m in msgs if m.get("role") == "assistant"]
+                    assert len(assistant_msgs) == 1
+                    assert assistant_msgs[0].get("content") == "同一段总结文案"
+
+    def test_resume_inquiry_receipt_precedes_process_events(self):
+        """resume 提交问卷时，receipt 必须排在 reasoning/tool 之前，刷新后顺序才稳定"""
+        mock_conv = {"id": "conv-1", "thread_id": "t1", "user_id": "u1"}
+        mock_turn = {"id": "turn-1", "turn_seq": 2, "turn_id": "tid2", "conversation_id": "conv-1"}
+
+        with patch("supabase_service.conversation.upsert_conversation", new_callable=AsyncMock, return_value=mock_conv):
+            with patch("supabase_service.conversation.get_or_create_turn", new_callable=AsyncMock, return_value=mock_turn):
+                with patch("supabase_service.conversation.append_messages", new_callable=AsyncMock, return_value=4) as mock_append:
+                    from api.conversation_persist import persist_turn_messages
+
+                    asyncio.run(
+                        persist_turn_messages(
+                            user_id="u1",
+                            thread_id="t1",
+                            turn_id="tid2",
+                            user_message=None,
+                            process_events=[
+                                {"event_type": "reasoning", "content": "先消化用户刚提交的补充信息"},
+                                {"event_type": "tool_call", "status": "done", "tool_name": "task_manager", "tool_call_id": "tool-1", "result_summary": "created"},
+                            ],
+                            pending_responses=[],
+                            final_state={
+                                "inquiry_answers": {"background": "我们认识三个月"},
+                            },
+                            is_resume=True,
+                            inquiry_receipt_payload={
+                                "taskKey": "inquiry_background",
+                                "summary": "已提交问卷（1项）",
+                                "details": [{"label": "背景信息", "value": "我们认识三个月"}],
+                            },
+                        )
+                    )
+
+                    call_args = mock_append.call_args
+                    msgs = call_args.kwargs.get("messages") or call_args[1].get("messages", []) if len(call_args) > 1 else call_args.kwargs.get("messages", [])
+                    assert [m.get("kind") for m in msgs] == ["inquiry_receipt", "reasoning_event", "tool_event"]
+                    assert [m.get("part_index") for m in msgs] == [0, 1, 2]
 
 
 # ---------------------------------------------------------------------------

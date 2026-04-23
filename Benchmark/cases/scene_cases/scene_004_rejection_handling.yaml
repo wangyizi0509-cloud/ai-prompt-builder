@@ -1,0 +1,101 @@
+id: "scene_004"
+type: "scene"
+title: "行动被拒后的情绪安慰 + 策略调整"
+scope: ["strategy"]
+description: >
+  用户按照 AI 的建议约吃饭，结果被拒了。
+  验证 AI 是否先做情绪安抚，再给出合理的策略调整，
+  而不是立刻输出新的行动方案（这是很多 AI 的典型错误）。
+
+test_account: "test203@example.com"
+
+user_profile:
+  name: "小涛"
+  description: "职场人士，工作两年，性格偏内向，容易想太多"
+
+crush_profile:
+  name: "小美"
+  description: "同事，外向活泼，平时比较忙"
+
+setup:
+  skip_onboarding: true
+  inject_layer1:
+    user_info: "用户叫小涛，职场人士，工作两年，性格偏内向，容易想太多"
+    crush_info: "crush叫小美，同事，比小涛小一岁，外向活泼，工作比较忙"
+    relation_info: "认识三个月，同部门，经常一起午餐，有共同话题"
+  inject_layer2:
+    action_plan: "本周行动计划：趁午餐时机，自然地提议下班后一起去附近新开的日料店尝尝"
+
+turns:
+  - turn: 1
+    role: "user"
+    message: "我昨天约她吃饭了，但她说她最近很忙，下次吧"
+
+  - turn: 1
+    role: "assert"
+    checks:
+      - type: "response_contains"
+        value: ["没关系", "理解", "还好", "正常", "不一定", "可能", "忙"]
+        description: "第一条回复应先给情绪安慰，帮助用户理性看待"
+      - type: "response_not_contains"
+        value: ["新的计划", "你应该", "下次要", "行动方案"]
+        description: "第一条回复不应立刻给新的行动方案，先处理情绪"
+
+  - turn: 1
+    role: "judge"
+    dimensions:
+      - key: "empathy_tone"
+        criteria: >
+          用户刚被拒了，心里可能有点难受或者焦虑。这个时候最需要被理解，而不是立刻被灌鸡汤。
+
+          评估 AI 第一条回复的情感处理：
+          1. 是否先承认"等待或被拒是会让人有点失落的"，而不是立刻说"没事的别担心"
+          2. 是否给出了合理的解读（"下次吧"不一定是拒绝，可能真的忙）
+          3. 分析是否有依据（基于三个月认识、经常午餐这个背景），而不是乱猜
+          4. 语气是否像一个懂你的朋友，而不是一个安慰机器
+
+          满分5分。直接说"没事，正常"然后就给新计划扣3分。没有依据地安慰扣1分。
+
+  - turn: 2
+    role: "user"
+    message: "那你觉得她是真的忙还是不想去"
+
+  - turn: 2
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          用户在追问 AI 的判断。AI 需要：
+          1. 给出有依据的判断（根据已有信息：三个月认识，经常一起午餐，外向活泼的性格）
+          2. 不是"也许是真忙也许不是"这种两边倒的废话
+          3. 告诉用户如何观察（接下来几天她的行为可以说明什么）
+          4. 语气保持平和，不要放大焦虑
+          满分5分。给出有依据的概率判断 +2，给出观察方法 +2，语气平和 +1。
+
+  - turn: 3
+    role: "user"
+    message: "好吧，那我接下来怎么办"
+
+  - turn: 3
+    role: "assert"
+    checks:
+      - type: "response_contains"
+        value: ["等", "观察", "不用", "先", "保持", "自然"]
+        description: "策略建议应该是'等待观察'而不是立刻再出击"
+
+  - turn: 3
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          用户主动要策略了，AI 需要：
+          1. 给出具体的下一步行动（不是"保持联系"这种废话）
+          2. 策略要平衡"不能太急"和"不能就此放弃"
+          3. 与"下次吧"这个回应有连续性（比如后续如何自然跟进，而不是重置为零）
+          4. 有没有给出一个"再行动"的触发条件（比如观察 X 天后可以这样做）
+          满分5分。只说"保持联系"扣2分，没有触发条件扣1分。
+
+evaluation:
+  pass_threshold: 3.5
+  must_pass_assertions: true
+  notes: "第一条回复的情绪处理是核心，empathy_tone < 3.0 时标记为严重问题"

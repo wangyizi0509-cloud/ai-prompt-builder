@@ -1,0 +1,86 @@
+id: "scene_001"
+type: "scene"
+title: "首次使用 - Onboarding 流程"
+scope: ["feature", "workflow"]
+description: >
+  验证新用户第一次发消息时，系统正确进入 onboarding 流程，
+  通过 interrupt 收集信息，完成后给出初步回应。
+
+test_account: "test200@example.com"
+
+user_profile:
+  name: "阿明"
+  description: "大三男生，内向，暗恋同班同学三个月，第一次使用 Crushe"
+
+crush_profile:
+  name: "小晴"
+  description: "同班女同学，外向，爱笑，偶尔主动找阿明说话"
+
+turns:
+  - turn: 1
+    role: "user"
+    message: "我喜欢一个女生，能帮我追她吗"
+
+  - turn: 1
+    role: "assert"
+    description: "首轮必须触发 onboarding interrupt，弹出问卷"
+    checks:
+      - type: "inquiry_card_triggered"
+        description: "必须触发问卷 interrupt，让用户填写基本信息"
+
+  - turn: 2
+    role: "user"
+    is_resume: true
+    resume_strategy: "fill_from_sample"
+    sample_answers:
+      "你叫什么名字": "阿明"
+      "你喜欢的人是谁": "同班女同学小晴"
+      "你们认识多久了": "三个月"
+      "目前是什么关系": "普通同学，偶尔课后聊天"
+      "她的性格是怎样的": "外向，爱笑"
+      "你的性格": "比较内向"
+
+  - turn: 2
+    role: "assert"
+    checks:
+      - type: "onboarding_completed"
+        description: "resume 后应完成 onboarding，state.onboarding_completed == true"
+      - type: "no_interrupt"
+        description: "onboarding 完成后不应再触发 interrupt"
+      - type: "response_contains"
+        value: ["了解", "明白", "情况", "小晴", "阿明", "追", "帮"]
+        description: "AI 应给出对情况的初步回应，提及用户或 crush 的名字"
+
+  - turn: 3
+    role: "user"
+    message: "你觉得她现在对我什么感觉"
+
+  - turn: 3
+    role: "assert"
+    checks:
+      - type: "no_interrupt"
+        description: "onboarding 完成后正常对话不应再卡住"
+
+  - turn: 3
+    role: "judge"
+    dimensions:
+      - key: "strategy_quality"
+        criteria: >
+          用户已完成 onboarding，信息已录入（三个月同班同学，偶尔课后聊天，crush 外向爱笑）。
+          现在用户问"她现在对我什么感觉"，评估 AI 是否：
+          1. 基于已知情况（认识时间、互动频率）给出有依据的判断，而不是泛泛而谈
+          2. 分析在合理范围内，不过度乐观也不过度悲观
+          3. 有没有提示下一步怎么进一步了解对方的想法
+          满分5分。不基于已知信息扣2分，分析太极端扣1分，没有任何行动方向扣1分。
+      - key: "empathy_tone"
+        criteria: >
+          这是用户第一次使用，心情应该有点期待又有点忐忑。评估 AI 语气是否：
+          1. 让人感到被接纳、被理解，而不是被分析
+          2. 不过于机械或官方（"根据情况分析……"这种感觉不好）
+          3. 像一个懂你的朋友在聊天
+          满分5分。
+
+evaluation:
+  pass_threshold: 3.5
+  must_pass_assertions: true
+  notes: "onboarding interrupt 是核心功能，断言全部必须通过。策略质量低于阈值要记录但不必阻塞"

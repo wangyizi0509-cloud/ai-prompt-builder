@@ -260,6 +260,7 @@ def test_status_tool_retries_with_fallback_namespace_on_checkpoint_iter_error(mo
     fake_subgraph = _FakeSubgraph()
     monkeypatch.setattr(main_agent_module, "get_status_subgraph", lambda checkpointer=None: fake_subgraph)
     monkeypatch.setattr(main_agent_module, "build_all_tools_for_agent", lambda role, state_getter=None: [])
+    monkeypatch.setattr(main_agent_module, "get_stream_writer", lambda: None)
 
     tools = main_agent_module._build_all_tools(
         lambda: {},
