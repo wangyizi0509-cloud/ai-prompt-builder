@@ -1,0 +1,14 @@
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+]
+ignore = [
+    "E501",  # line too long — 暂不强制，避免大量历史代码报错
+    "E402",  # module level import not at top — 项目有 sys.path 操作需要
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["E", "F"]
+"scripts/*" = ["E", "F"]

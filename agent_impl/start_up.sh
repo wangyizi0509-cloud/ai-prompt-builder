@@ -21,6 +21,10 @@ fi
 # 生产级验证模式端口
 PORT=${LANGGRAPH_PORT:-8123}
 export DEBUG_MODE=1
+LOG_DIR="logs"
+mkdir -p "$LOG_DIR"
+LANGGRAPH_LOG="$LOG_DIR/langgraph_up.log"
+FASTAPI_LOG="$LOG_DIR/fastapi_up.log"
 
 echo "🚀 启动 LangGraph 服务 (Docker Stack)..."
 # 使用 langgraph up 启动生产级环境
@@ -28,9 +32,9 @@ export PATH="$PATH:$(python3 -m site --user-base)/bin"
 LANGGRAPH_PID=""
 if [ -n "$RUN_PREFIX" ] || command -v langgraph >/dev/null 2>&1; then
   if [ -n "$RUN_PREFIX" ]; then
-    $RUN_PREFIX langgraph up --port $PORT --wait &
+    nohup $RUN_PREFIX langgraph up --port $PORT --wait >> "$LANGGRAPH_LOG" 2>&1 &
   else
-    langgraph up --port $PORT --wait &
+    nohup langgraph up --port $PORT --wait >> "$LANGGRAPH_LOG" 2>&1 &
   fi
   LANGGRAPH_PID=$!
 else
@@ -45,9 +49,9 @@ echo "🚀 启动 FastAPI 服务 (连接到 http://localhost:$PORT)..."
 # 强制环境变量以确保连接到正确的端口
 export LANGGRAPH_LOCAL_URL="http://127.0.0.1:$PORT"
 if [ -n "$RUN_PREFIX" ]; then
-  $RUN_PREFIX python server.py &
+  nohup $RUN_PREFIX python server.py >> "$FASTAPI_LOG" 2>&1 &
 else
-  python3 server.py &
+  nohup python3 server.py >> "$FASTAPI_LOG" 2>&1 &
 fi
 FASTAPI_PID=$!
 
@@ -56,6 +60,7 @@ if [ -n "$LANGGRAPH_PID" ]; then
   echo "LangGraph PID: $LANGGRAPH_PID"
 fi
 echo "FastAPI PID: $FASTAPI_PID"
+echo "FastAPI 日志: $FASTAPI_LOG"
 echo "访问地址: http://localhost:8000"
 LAN_IP="$(python3 - <<'PY'
 import socket
@@ -74,7 +79,3 @@ if [ -n "$LAN_IP" ]; then
   echo "iOS/真机访问: http://$LAN_IP:8000"
 fi
 echo "LangSmith Studio: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:$PORT"
-
-trap '[[ -n "$LANGGRAPH_PID" ]] && kill "$LANGGRAPH_PID" 2>/dev/null; kill "$FASTAPI_PID" 2>/dev/null' EXIT
-
-wait
