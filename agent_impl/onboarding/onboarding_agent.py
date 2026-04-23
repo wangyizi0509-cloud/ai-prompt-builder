@@ -662,6 +662,8 @@ def _build_guide_gate_pending_responses() -> list[dict[str, Any]]:
             "from": "onboarding",
             "content": GUIDE_GATE_REMINDER_CONTENT,
             "phase": "guide_gate",
+            "showGuideButton": True,
+            "messageKey": "guide_gate",
         }
     ]
 

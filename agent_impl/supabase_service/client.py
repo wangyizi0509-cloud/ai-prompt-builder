@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any, List
 from supabase import create_client, Client, ClientOptions
 from datetime import datetime
 from pathlib import Path
+import time
 import uuid
 import logging
 from dotenv import load_dotenv
@@ -17,6 +18,8 @@ LOCAL_AUTH_ENABLED = os.getenv("LOCAL_AUTH", "false").lower() == "true"
 SUPABASE_POSTGREST_TIMEOUT = float(os.getenv("SUPABASE_POSTGREST_TIMEOUT", "20"))
 SUPABASE_STORAGE_TIMEOUT = int(float(os.getenv("SUPABASE_STORAGE_TIMEOUT", "20")))
 SUPABASE_FUNCTION_TIMEOUT = int(float(os.getenv("SUPABASE_FUNCTION_TIMEOUT", "10")))
+SUPABASE_RETRY_COUNT = int(os.getenv("SUPABASE_RETRY_COUNT", "2"))
+SUPABASE_RETRY_BASE_DELAY = float(os.getenv("SUPABASE_RETRY_BASE_DELAY", "0.35"))
 
 supabase: Optional[Client] = None
 
@@ -84,6 +87,51 @@ def is_supabase_configured() -> bool:
     return supabase is not None
 
 
+def _is_transient_supabase_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    transient_markers = (
+        "timed out",
+        "timeout",
+        "connection refused",
+        "connecttimeout",
+        "readtimeout",
+        "remoteprotocolerror",
+        "temporary failure",
+        "connection reset",
+    )
+    return any(marker in text for marker in transient_markers)
+
+
+def execute_supabase(action, *, op_name: str, retries: int | None = None):
+    """
+    对关键 Supabase 读写做轻量重试，避免瞬时网络抖动直接把数据误判为不存在。
+    action: 无参 callable，内部负责构造并 execute 请求。
+    """
+    max_retries = SUPABASE_RETRY_COUNT if retries is None else max(0, retries)
+    last_exc: Exception | None = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            return action()
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= max_retries or not _is_transient_supabase_error(exc):
+                raise
+            delay = SUPABASE_RETRY_BASE_DELAY * (attempt + 1)
+            logger.warning(
+                "Supabase %s transient failure on attempt %s/%s: %s; retrying in %.2fs",
+                op_name,
+                attempt + 1,
+                max_retries + 1,
+                exc,
+                delay,
+            )
+            time.sleep(delay)
+
+    if last_exc is not None:
+        raise last_exc
+
+
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
@@ -123,11 +171,14 @@ async def create_user(email: str, password: str, username: str) -> Dict[str, Any
     try:
         password_hash = hash_password(password)
         
-        response = supabase.table('users').insert({
-            'email': email,
-            'password_hash': password_hash,
-            'username': username
-        }).execute()
+        response = execute_supabase(
+            lambda: supabase.table('users').insert({
+                'email': email,
+                'password_hash': password_hash,
+                'username': username
+            }).execute(),
+            op_name="create_user",
+        )
         
         user_data = response.data[0] if response.data else None
         if not user_data:
@@ -177,7 +228,10 @@ async def authenticate_user(email: str, password: str) -> Dict[str, Any]:
         return {"success": False, "error": "Supabase not configured"}
     
     try:
-        response = supabase.table('users').select('*').eq('email', email).execute()
+        response = execute_supabase(
+            lambda: supabase.table('users').select('*').eq('email', email).execute(),
+            op_name="authenticate_user",
+        )
         
         if not response.data:
             return {
@@ -221,7 +275,10 @@ async def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
         return None
     
     try:
-        response = supabase.table('users').select('id, email, username, created_at').eq('id', user_id).execute()
+        response = execute_supabase(
+            lambda: supabase.table('users').select('id, email, username, created_at').eq('id', user_id).execute(),
+            op_name="get_user_by_id",
+        )
         
         if response.data:
             return response.data[0]
@@ -243,7 +300,10 @@ async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
         return None
     
     try:
-        response = supabase.table('users').select('id, email, username, created_at').eq('email', email).execute()
+        response = execute_supabase(
+            lambda: supabase.table('users').select('id, email, username, created_at').eq('email', email).execute(),
+            op_name="get_user_by_email",
+        )
         
         if response.data:
             return response.data[0]
@@ -270,10 +330,13 @@ async def create_user_thread(user_id: str, thread_id: str) -> Dict[str, Any]:
         return {"success": False, "error": "Supabase not configured"}
     
     try:
-        response = supabase.table('user_threads').insert({
-            'user_id': user_id,
-            'thread_id': thread_id
-        }).execute()
+        response = execute_supabase(
+            lambda: supabase.table('user_threads').insert({
+                'user_id': user_id,
+                'thread_id': thread_id
+            }).execute(),
+            op_name="create_user_thread",
+        )
         
         thread_data = response.data[0] if response.data else None
         if not thread_data:
@@ -309,7 +372,10 @@ async def get_thread_by_user(user_id: str) -> Optional[Dict[str, Any]]:
         return None
     
     try:
-        response = supabase.table('user_threads').select('*').eq('user_id', user_id).execute()
+        response = execute_supabase(
+            lambda: supabase.table('user_threads').select('*').eq('user_id', user_id).execute(),
+            op_name="get_thread_by_user",
+        )
         
         if response.data:
             return response.data[0]
@@ -328,7 +394,10 @@ async def get_user_by_thread(thread_id: str) -> Optional[Dict[str, Any]]:
         return None
     
     try:
-        response = supabase.table('user_threads').select('*').eq('thread_id', thread_id).execute()
+        response = execute_supabase(
+            lambda: supabase.table('user_threads').select('*').eq('thread_id', thread_id).execute(),
+            op_name="get_user_by_thread",
+        )
         
         if response.data:
             return response.data[0]

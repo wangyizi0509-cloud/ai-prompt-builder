@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from supabase_service.client import supabase, is_supabase_configured
+from supabase_service.client import execute_supabase, supabase, is_supabase_configured
 
 logger = logging.getLogger(__name__)
 
@@ -58,33 +58,42 @@ async def upsert_conversation(user_id: str, thread_id: str) -> Optional[Dict[str
     try:
         # 先查是否存在
         resp = (
-            supabase.table("conversations")
-            .select("*")
-            .eq("user_id", user_id)
-            .eq("thread_id", thread_id)
-            .execute()
+            execute_supabase(
+                lambda: supabase.table("conversations")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("thread_id", thread_id)
+                .execute(),
+                op_name="upsert_conversation.select_existing",
+            )
         )
         if resp.data:
             return resp.data[0]
 
         # 先清除该用户其他 default 标记（保证 partial unique 约束）
         try:
-            supabase.table("conversations").update({"is_default": False}).eq("user_id", user_id).eq("is_default", True).execute()
+            execute_supabase(
+                lambda: supabase.table("conversations").update({"is_default": False}).eq("user_id", user_id).eq("is_default", True).execute(),
+                op_name="upsert_conversation.clear_default",
+            )
         except Exception:
             pass
 
         # 插入新会话
         now = datetime.now(timezone.utc).isoformat()
         insert_resp = (
-            supabase.table("conversations")
-            .insert({
-                "user_id": user_id,
-                "thread_id": thread_id,
-                "is_default": True,
-                "created_at": now,
-                "updated_at": now,
-            })
-            .execute()
+            execute_supabase(
+                lambda: supabase.table("conversations")
+                .insert({
+                    "user_id": user_id,
+                    "thread_id": thread_id,
+                    "is_default": True,
+                    "created_at": now,
+                    "updated_at": now,
+                })
+                .execute(),
+                op_name="upsert_conversation.insert",
+            )
         )
         if insert_resp.data:
             return insert_resp.data[0]
@@ -94,11 +103,14 @@ async def upsert_conversation(user_id: str, thread_id: str) -> Optional[Dict[str
         logger.warning("upsert_conversation error: %s, retrying select", e)
         try:
             resp = (
-                supabase.table("conversations")
-                .select("*")
-                .eq("user_id", user_id)
-                .eq("thread_id", thread_id)
-                .execute()
+                execute_supabase(
+                    lambda: supabase.table("conversations")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .eq("thread_id", thread_id)
+                    .execute(),
+                    op_name="upsert_conversation.retry_select",
+                )
             )
             if resp.data:
                 return resp.data[0]
@@ -113,22 +125,28 @@ async def get_default_conversation(user_id: str) -> Optional[Dict[str, Any]]:
         return None
     try:
         resp = (
-            supabase.table("conversations")
-            .select("*")
-            .eq("user_id", user_id)
-            .eq("is_default", True)
-            .execute()
+            execute_supabase(
+                lambda: supabase.table("conversations")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("is_default", True)
+                .execute(),
+                op_name="get_default_conversation.default",
+            )
         )
         if resp.data:
             return resp.data[0]
         # 如果没有 default，返回最新的会话
         resp = (
-            supabase.table("conversations")
-            .select("*")
-            .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
+            execute_supabase(
+                lambda: supabase.table("conversations")
+                .select("*")
+                .eq("user_id", user_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute(),
+                op_name="get_default_conversation.latest",
+            )
         )
         return resp.data[0] if resp.data else None
     except Exception as e:
@@ -142,10 +160,13 @@ async def get_conversation_by_id(conversation_id: str) -> Optional[Dict[str, Any
         return None
     try:
         resp = (
-            supabase.table("conversations")
-            .select("*")
-            .eq("id", conversation_id)
-            .execute()
+            execute_supabase(
+                lambda: supabase.table("conversations")
+                .select("*")
+                .eq("id", conversation_id)
+                .execute(),
+                op_name="get_conversation_by_id",
+            )
         )
         return resp.data[0] if resp.data else None
     except Exception as e:
@@ -159,10 +180,13 @@ async def get_conversation_by_thread(thread_id: str) -> Optional[Dict[str, Any]]
         return None
     try:
         resp = (
-            supabase.table("conversations")
-            .select("*")
-            .eq("thread_id", thread_id)
-            .execute()
+            execute_supabase(
+                lambda: supabase.table("conversations")
+                .select("*")
+                .eq("thread_id", thread_id)
+                .execute(),
+                op_name="get_conversation_by_thread",
+            )
         )
         return resp.data[0] if resp.data else None
     except Exception as e:
@@ -184,22 +208,28 @@ async def get_or_create_turn(conversation_id: str, turn_id: str) -> Optional[Dic
 
     try:
         resp = (
-            supabase.table("conversation_turns")
-            .select("*")
-            .eq("conversation_id", conversation_id)
-            .eq("turn_id", turn_id)
-            .execute()
+            execute_supabase(
+                lambda: supabase.table("conversation_turns")
+                .select("*")
+                .eq("conversation_id", conversation_id)
+                .eq("turn_id", turn_id)
+                .execute(),
+                op_name="get_or_create_turn.select_existing",
+            )
         )
         if resp.data:
             return resp.data[0]
 
         insert_resp = (
-            supabase.table("conversation_turns")
-            .insert({
-                "conversation_id": conversation_id,
-                "turn_id": turn_id,
-            })
-            .execute()
+            execute_supabase(
+                lambda: supabase.table("conversation_turns")
+                .insert({
+                    "conversation_id": conversation_id,
+                    "turn_id": turn_id,
+                })
+                .execute(),
+                op_name="get_or_create_turn.insert",
+            )
         )
         if insert_resp.data:
             return insert_resp.data[0]
@@ -209,11 +239,14 @@ async def get_or_create_turn(conversation_id: str, turn_id: str) -> Optional[Dic
         logger.warning("get_or_create_turn error: %s, retrying select", e)
         try:
             resp = (
-                supabase.table("conversation_turns")
-                .select("*")
-                .eq("conversation_id", conversation_id)
-                .eq("turn_id", turn_id)
-                .execute()
+                execute_supabase(
+                    lambda: supabase.table("conversation_turns")
+                    .select("*")
+                    .eq("conversation_id", conversation_id)
+                    .eq("turn_id", turn_id)
+                    .execute(),
+                    op_name="get_or_create_turn.retry_select",
+                )
             )
             if resp.data:
                 return resp.data[0]
@@ -273,10 +306,13 @@ async def append_messages(
         }
 
         try:
-            supabase.table("conversation_messages").upsert(
-                row,
-                on_conflict="conversation_id,turn_id,kind,role,part_index",
-            ).execute()
+            execute_supabase(
+                lambda: supabase.table("conversation_messages").upsert(
+                    row,
+                    on_conflict="conversation_id,turn_id,kind,role,part_index",
+                ).execute(),
+                op_name="append_messages.upsert",
+            )
             written += 1
         except Exception as e:
             logger.error("append_messages upsert error: %s (turn_id=%s, part=%s)", e, turn_id, part_index)
@@ -284,7 +320,10 @@ async def append_messages(
     # 更新 conversations.last_message_at
     try:
         now = datetime.now(timezone.utc).isoformat()
-        supabase.table("conversations").update({"last_message_at": now, "updated_at": now}).eq("id", conversation_id).execute()
+        execute_supabase(
+            lambda: supabase.table("conversations").update({"last_message_at": now, "updated_at": now}).eq("id", conversation_id).execute(),
+            op_name="append_messages.update_last_message_at",
+        )
     except Exception as e:
         logger.warning("Failed to update last_message_at: %s", e)
 
@@ -326,7 +365,10 @@ async def get_messages(
 
         # 取 limit+1 判断 has_more
         query = query.order("seq", desc=True).limit(limit + 1)
-        resp = query.execute()
+        resp = execute_supabase(
+            lambda: query.execute(),
+            op_name="get_messages",
+        )
         rows = resp.data or []
 
         has_more = len(rows) > limit
@@ -363,11 +405,12 @@ async def get_messages_count(conversation_id: str) -> int:
     if not is_supabase_configured():
         return 0
     try:
-        resp = (
-            supabase.table("conversation_messages")
+        resp = execute_supabase(
+            lambda: supabase.table("conversation_messages")
             .select("id", count="exact")
             .eq("conversation_id", conversation_id)
-            .execute()
+            .execute(),
+            op_name="get_messages_count",
         )
         return resp.count or 0
     except Exception as e:
@@ -384,7 +427,10 @@ async def delete_conversation(conversation_id: str) -> bool:
     if not is_supabase_configured():
         return False
     try:
-        supabase.table("conversations").delete().eq("id", conversation_id).execute()
+        execute_supabase(
+            lambda: supabase.table("conversations").delete().eq("id", conversation_id).execute(),
+            op_name="delete_conversation",
+        )
         return True
     except Exception as e:
         logger.error("delete_conversation error: %s", e, exc_info=True)
@@ -396,7 +442,10 @@ async def delete_all_user_conversations(user_id: str) -> bool:
     if not is_supabase_configured():
         return False
     try:
-        supabase.table("conversations").delete().eq("user_id", user_id).execute()
+        execute_supabase(
+            lambda: supabase.table("conversations").delete().eq("user_id", user_id).execute(),
+            op_name="delete_all_user_conversations",
+        )
         return True
     except Exception as e:
         logger.error("delete_all_user_conversations error: %s", e, exc_info=True)

@@ -2,7 +2,7 @@ import os
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
-from fastapi import HTTPException, Depends, status
+from fastapi import HTTPException, Depends, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 
@@ -14,7 +14,7 @@ JWT_SECRET = os.getenv("JWT_SECRET")
 if JWT_SECRET and JWT_SECRET == "your-secret-key-change-this-in-production":
     logger.warning("JWT_SECRET is using default value. Please change it in production.")
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 def is_jwt_configured() -> bool:
@@ -66,14 +66,33 @@ def verify_jwt_token(token: str) -> Dict[str, Any]:
         }
 
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
+def _get_token_from_request(
+    credentials: HTTPAuthorizationCredentials | None,
+    request: Request,
+) -> str | None:
+    if credentials and credentials.credentials:
+        return credentials.credentials
+    return request.cookies.get("auth_token")
+
+
+async def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+) -> Dict[str, Any]:
     if not is_jwt_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail='Authentication service not configured'
         )
-    
-    token = credentials.credentials
+
+    token = _get_token_from_request(credentials, request)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail='Not authenticated',
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     result = verify_jwt_token(token)
     
     if not result['valid']:
@@ -90,14 +109,17 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     }
 
 
-async def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))) -> Optional[Dict[str, Any]]:
-    if not credentials:
+async def get_optional_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
+) -> Optional[Dict[str, Any]]:
+    token = _get_token_from_request(credentials, request)
+    if not token:
         return None
-    
+
     if not is_jwt_configured():
         return None
-    
-    token = credentials.credentials
+
     result = verify_jwt_token(token)
     
     if not result['valid']:

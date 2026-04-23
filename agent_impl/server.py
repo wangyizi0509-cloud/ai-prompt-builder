@@ -126,7 +126,8 @@ class AuthRedirectMiddleware:
 app = FastAPI(title="Crushe AI Agent")
 
 # Auth middleware (inner) – added first so CORS wraps around it.
-_auth_disabled = os.getenv("DISABLE_AUTH", "0") == "1"
+# 本期 onboarding v2 默认无登录：DISABLE_AUTH 缺省即视为 "1"，显式设置为 "0" 才恢复鉴权。
+_auth_disabled = os.getenv("DISABLE_AUTH", "1") == "1"
 if not _auth_disabled:
     from auth_utils import is_jwt_configured
     if is_jwt_configured():
@@ -135,7 +136,7 @@ if not _auth_disabled:
     else:
         logger.warning("JWT_SECRET not configured — AuthRedirectMiddleware skipped")
 else:
-    logger.info("DISABLE_AUTH=1 — AuthRedirectMiddleware skipped")
+    logger.info("DISABLE_AUTH=1 — AuthRedirectMiddleware skipped（本期 onboarding v2 默认无登录）")
 
 # CORS middleware (outer) – handles OPTIONS preflight before auth checks.
 app.add_middleware(
@@ -167,6 +168,45 @@ from api import api_router
 logger.info("API routers loaded")
 app.include_router(api_router)
 
+# ---- Onboarding v2 routes (Agent D) ---------------------------------------
+# 两个独立 REST 端点（不走 api_router 的 env_flag 机制，直接在这里挂）。
+# 路由模块里已经各自声明 `prefix="/api/onboarding"`，这里不需要再加 prefix。
+# Agent B/C 的文件可能尚未产出，因此做惰性导入 + 降级，避免拖垮主进程。
+try:
+    from api.onboarding_analyze import router as onboarding_analyze_router
+    app.include_router(onboarding_analyze_router)
+    logger.info("Onboarding v2 analyze router mounted")
+except ImportError as exc:
+    logger.warning(
+        "Onboarding v2 analyze router not mounted (Agent B may not have delivered api/onboarding_analyze.py yet): %s",
+        exc,
+    )
+
+try:
+    from api.onboarding_report import router as onboarding_report_router
+    app.include_router(onboarding_report_router)
+    logger.info("Onboarding v2 report router mounted")
+except ImportError as exc:
+    logger.warning(
+        "Onboarding v2 report router not mounted (Agent C may not have delivered api/onboarding_report.py yet): %s",
+        exc,
+    )
+
+# ---- Analytics / track route ----------------------------------------------
+try:
+    from api.track import router as track_router
+    app.include_router(track_router)
+    logger.info("Analytics track router mounted at /api/track")
+except ImportError as exc:
+    logger.warning("Analytics track router not mounted: %s", exc)
+
+try:
+    from api.analytics import router as analytics_router
+    app.include_router(analytics_router)
+    logger.info("Analytics dashboard router mounted at /api/analytics")
+except ImportError as exc:
+    logger.warning("Analytics dashboard router not mounted: %s", exc)
+
 
 def _resolve_port() -> int:
     """Resolve runtime port from env (required on PaaS like Zeabur)."""
@@ -191,6 +231,16 @@ async def health_check():
 @app.get("/api/health")
 async def api_health_check():
     return {"status": "healthy"}
+
+
+@app.get("/", include_in_schema=False)
+async def _root_redirect_to_splash():
+    """Onboarding v2：根路径一律跳转到 splash.html。
+
+    保留 /auth.html 的静态服务（供未来恢复登录时使用），
+    也保留对 frontend/ 下其他页面（/index.html 等）的直接访问。
+    """
+    return RedirectResponse(url="/splash.html", status_code=302)
 
 
 frontend_path = os.path.join(current_dir, "frontend")

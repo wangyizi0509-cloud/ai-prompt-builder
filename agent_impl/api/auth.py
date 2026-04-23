@@ -45,8 +45,10 @@ from supabase_service.client import (
 logger = get_logger("auth")
 
 def _is_registration_allowed() -> bool:
-    """判断是否允许注册（测试环境默认放开）。"""
+    """判断是否允许注册（测试与本地 DEBUG 默认放开）。"""
     if os.getenv("PYTEST_CURRENT_TEST"):
+        return True
+    if os.getenv("DEBUG_MODE", "0") == "1":
         return True
     return os.getenv("ALLOW_REGISTRATION", "false").lower() == "true"
 

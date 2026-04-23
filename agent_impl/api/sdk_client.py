@@ -20,6 +20,46 @@ from utils.logger import get_logger
 logger = get_logger("sdk_client")
 import time
 
+
+def _looks_like_inquiry_card(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    questions = value.get("questions")
+    return isinstance(questions, list) and len(questions) > 0
+
+
+def _extract_inquiry_card_from_interrupt_value(value: Any) -> dict[str, Any] | None:
+    if _looks_like_inquiry_card(value):
+        return value
+    if isinstance(value, dict):
+        nested = value.get("inquiry_card")
+        if _looks_like_inquiry_card(nested):
+            return nested
+    return None
+
+
+def _restore_pending_inquiry_card(state_snapshot: Any, values: dict[str, Any]) -> dict[str, Any]:
+    if values.get("inquiry_card"):
+        return values
+
+    tasks = state_snapshot.get("tasks") if isinstance(state_snapshot, dict) else getattr(state_snapshot, "tasks", None)
+    if not isinstance(tasks, (list, tuple)):
+        return values
+
+    for task in tasks:
+        interrupts = task.get("interrupts") if isinstance(task, dict) else getattr(task, "interrupts", None)
+        if not isinstance(interrupts, (list, tuple)):
+            continue
+        for interrupt in interrupts:
+            payload = interrupt.get("value") if isinstance(interrupt, dict) else getattr(interrupt, "value", None)
+            inquiry_card = _extract_inquiry_card_from_interrupt_value(payload)
+            if inquiry_card:
+                restored = dict(values)
+                restored["inquiry_card"] = inquiry_card
+                logger.info("threads.get_state: restored inquiry_card from pending interrupt")
+                return restored
+    return values
+
 def get_client():
     """获取 LangGraph SDK 客户端"""
     return get_sync_client(url=LANGGRAPH_URL, api_key=LANGGRAPH_API_KEY)
@@ -53,26 +93,28 @@ async def ensure_thread_exists(session_id: str, user_id: str = None) -> str:
                 client.threads.get(thread_id)
                 logger.debug(f"Thread {thread_id} exists in LangGraph. Returning.")
                 return thread_id
-            except Exception:
-                logger.warning(f"Thread {thread_id} NOT found in LangGraph. Will create new.")
-    
-    # 2. 如果没有绑定或绑定失效，根据 session_id 生成
+            except Exception as exc:
+                # 关键：无论是 checkpointer 被清掉还是瞬时错误，都沿用 DB 里
+                # 已绑定的 thread_id 在 LangGraph 重建，避免把写入和 DB 绑定
+                # 分叉到两个 thread_id（会导致用户刷新后看到空历史）。
+                logger.warning(
+                    f"Thread {thread_id} not accessible in LangGraph ({exc}); "
+                    f"recreating under same id to keep DB binding canonical."
+                )
+                client.threads.create(thread_id=thread_id, if_exists="do_nothing")
+                return thread_id
+
+    # 2. 没有 user_id 或 DB 无绑定：首次为该 session 生成 thread_id
     thread_id = session_to_thread_id(session_id)
     logger.debug(f"Using session-mapped thread_id: {thread_id}")
-    
-    try:
-        client.threads.get(thread_id)
-        logger.debug(f"Thread {thread_id} already exists in LangGraph.")
-    except Exception:
-        logger.info(f"Creating new thread {thread_id} in LangGraph.")
-        client.threads.create(thread_id=thread_id)
-    
-    # 3. 如果有 user_id，建立或更新绑定关系
+    client.threads.create(thread_id=thread_id, if_exists="do_nothing")
+
+    # 3. 如果有 user_id，首次建立绑定关系
     if user_id:
         logger.info(f"Binding user {user_id} to thread {thread_id} in DB.")
         from supabase_service.client import get_or_create_user_thread
         await get_or_create_user_thread(user_id, thread_id)
-    
+
     return thread_id
 
 
@@ -91,6 +133,7 @@ def get_thread_state(thread_id: str):
             v_attr = getattr(state_snapshot, "values", None)
             values = v_attr if isinstance(v_attr, dict) else (v_attr() if callable(v_attr) else v_attr)
         if isinstance(values, dict):
+            values = _restore_pending_inquiry_card(state_snapshot, values)
             msg_count = len(values.get("messages", [])) if isinstance(values.get("messages"), list) else 0
             keys = list(values.keys())
             logger.info(f"threads.get_state: thread={thread_id} state_keys={keys} messages={msg_count}")
@@ -132,7 +175,7 @@ def update_thread_state(thread_id: str, updates: dict):
 def run_assistant(
     thread_id: str,
     input_state: Any = None,
-    stream_mode: str = "values",
+    stream_mode: str | list = "updates",
     *,
     command: dict | None = None,
 ):
@@ -142,10 +185,17 @@ def run_assistant(
     对于 resume：传 command={"resume": payload}（从 interrupt 恢复）。
     """
     client = get_client()
+    # 确保 custom 模式始终包含，以便接收 get_stream_writer() 的事件
+    if isinstance(stream_mode, list):
+        modes = list(stream_mode)
+    else:
+        modes = [stream_mode] if stream_mode else ["updates"]
+    if "custom" not in modes:
+        modes.append("custom")
     kwargs: dict[str, Any] = {
         "thread_id": thread_id,
         "assistant_id": ASSISTANT_ID,
-        "stream_mode": stream_mode,
+        "stream_mode": modes,
     }
     if command is not None:
         kwargs["command"] = command

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 router = APIRouter()
@@ -25,15 +25,14 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 async def _require_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ):
     """强制登录态。未登录返回 401。"""
-    if credentials is None:
-        raise HTTPException(status_code=401, detail="Authentication required")
     from auth_utils import get_optional_user
-    user = await get_optional_user(credentials)
+    user = await get_optional_user(request, credentials)
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+        raise HTTPException(status_code=401, detail="Authentication required")
     return user
 
 
@@ -119,6 +118,12 @@ async def get_conversation_messages(
 
     # 读取消息
     result = await get_messages(conversation_id, limit=limit, before_seq=before_seq)
+
+    # 为历史消息补充 DisplayNode 展示字段，使前端可统一渲染
+    if result.get("messages"):
+        from api.conversation_persist import enrich_history_messages
+        enrich_history_messages(result["messages"])
+
     return {"success": True, **result}
 
 

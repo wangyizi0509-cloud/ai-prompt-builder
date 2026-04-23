@@ -8,6 +8,7 @@ class ToolResult(TypedDict, total=False):
     output: str
     state_patch: dict
     error: NotRequired[str]
+    deferred_interrupt: NotRequired[dict]
 
 
 LIST_APPEND_KEYS: set[str] = {"tool_patch_log"}
