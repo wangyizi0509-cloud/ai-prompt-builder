@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    <meta name="theme-color" content="#F6EDFF">
+    <title>诊断报告 · Crushe AI</title>
+
+    <!-- Google Fonts：对齐 index.html 的字体策略 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=DM+Sans:wght@500;700&display=swap" rel="stylesheet">
+
+    <!-- 报告页专属样式 -->
+    <link rel="stylesheet" href="/styles/report.css">
+</head>
+<body>
+    <!-- 主容器：SPA 风格单入口，由 report_page.js 决定渲染什么 -->
+    <main id="rp-root" class="rp-app" aria-live="polite">
+        <!-- 初始占位：页面首开时先展示 loading，JS 接管后会被替换 -->
+        <div class="rp-splash-state">
+            <div class="rp-spinner" aria-hidden="true"></div>
+            <div class="rp-splash-state-title">正在加载诊断报告…</div>
+            <div class="rp-splash-state-desc">读取你的问答记录</div>
+        </div>
+    </main>
+
+    <script src="/scripts/tracker.js"></script>
+    <script src="/scripts/report_page.js"></script>
+</body>
+</html>

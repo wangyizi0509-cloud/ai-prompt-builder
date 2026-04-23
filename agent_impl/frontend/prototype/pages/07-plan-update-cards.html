@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>P07 更新卡片组件</title>
+    <link rel="stylesheet" href="../styles/tokens.css" />
+    <link rel="stylesheet" href="../styles/base.css" />
+    <link rel="stylesheet" href="../styles/components.css" />
+  </head>
+  <body>
+    <div class="demo-center">
+      <section class="phone-shell" style="min-height: 560px;">
+        <div class="phone-screen" style="min-height: 560px; background: #f4f4f6;">
+          <div class="status-row">
+            <span>10:08</span>
+            <div class="status-icons">
+              <span class="signal-icon"></span>
+              <span class="wifi-icon"></span>
+              <span class="dot-icon"></span>
+            </div>
+          </div>
+
+          <article class="update-card mt-40" data-update-card>
+            <div class="update-top">
+              <div>
+                <b>行动指南</b><span class="badge-updated">已更新</span>
+              </div>
+              <div class="row gap-8">
+                <span class="text-muted">已更新3条</span>
+                <button class="chev-btn" aria-label="toggle">›</button>
+              </div>
+            </div>
+            <div class="update-body">
+              <span class="icon">◔</span>
+              <span>根据你的回复更新规划，规划中有根据你的回复更新规划规划中有...</span>
+            </div>
+            <div class="text-muted mt-8 hidden" data-extra-body style="font-size: 13px; line-height: 1.4;">
+              1. 本周主动联系节奏更新为每日 1 次。<br />
+              2. 语气建议切换为轻松而不追问。<br />
+              3. 若 2 天未回复，进入冷却观察策略。
+            </div>
+          </article>
+
+          <article class="update-card" data-update-card>
+            <div class="update-top">
+              <div>
+                <b>规划分析</b><span class="badge-updated">已更新</span>
+              </div>
+              <div class="row gap-8">
+                <span class="text-muted">已更新3条</span>
+                <button class="chev-btn" aria-label="toggle">›</button>
+              </div>
+            </div>
+            <div class="update-body">
+              <span class="icon">▣</span>
+              <span>根据你的回复更新规划，规划中有根据你的回复更新规划规划中有...</span>
+            </div>
+            <div class="text-muted mt-8 hidden" data-extra-body style="font-size: 13px; line-height: 1.4;">
+              1. 当前关系阶段评估从“试探期”调整为“建立稳定对话期”。<br />
+              2. 行为风险点：高频确认关系会提高压力。<br />
+              3. 优先动作：先积累 3 次高质量互动。
+            </div>
+          </article>
+
+          <div class="footer-note">P07 · Figma 2181:1327 · <a href="../index.html">返回目录</a></div>
+        </div>
+      </section>
+    </div>
+
+    <script type="module">
+      import { PAGE_IDS } from "../scripts/flow.js";
+      import { initCommonPage } from "../scripts/bindings.js";
+
+      initCommonPage(PAGE_IDS.P07);
+
+      document.querySelectorAll("[data-update-card]").forEach((card) => {
+        const toggle = card.querySelector(".chev-btn");
+        const extra = card.querySelector("[data-extra-body]");
+        toggle.addEventListener("click", () => {
+          card.classList.toggle("expanded");
+          extra.classList.toggle("hidden");
+        });
+      });
+    </script>
+  </body>
+</html>

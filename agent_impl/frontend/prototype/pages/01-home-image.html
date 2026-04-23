@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>P01 图片首页默认态</title>
+    <link rel="stylesheet" href="../styles/tokens.css" />
+    <link rel="stylesheet" href="../styles/base.css" />
+    <link rel="stylesheet" href="../styles/components.css" />
+  </head>
+  <body>
+    <div class="demo-center">
+      <section class="phone-shell">
+        <div class="phone-screen stack" style="padding-bottom: 20px;">
+          <div class="status-row">
+            <span>10:08</span>
+            <div class="status-icons">
+              <span class="signal-icon"></span>
+              <span class="wifi-icon"></span>
+              <span class="dot-icon"></span>
+            </div>
+          </div>
+
+          <div class="row justify-between">
+            <button class="ghost-btn">☰</button>
+            <div class="segment">
+              <button class="active">规划</button>
+              <button>快问</button>
+            </div>
+            <button class="ghost-btn">◌</button>
+          </div>
+
+          <div class="hero-wrap mt-16" style="position: relative;">
+            <img class="hero-avatar" src="../assets/xiaohua.png" alt="头像" />
+            <div id="upload-tip" class="tip-bubble" style="position: absolute; right: 8px; top: 38px; width: 145px; cursor: pointer;">
+              上传<b>Crush截图</b><br />
+              分析更加精准哦!
+            </div>
+            <h2 class="hot-title mt-16">哈喽！欢迎回来</h2>
+            <p class="hot-sub">快来说说最近进展，我来助你一臂之力</p>
+          </div>
+
+          <article class="block-card hot-card mt-16">
+            <ul class="hot-list">
+              <li>为什么他总是忽冷忽热?</li>
+              <li>聊天时如何破冰?</li>
+              <li>分手后还能做朋友吗?</li>
+            </ul>
+            <div class="helper-strip">已帮助<b>2500人</b>解决情感问题</div>
+          </article>
+
+          <div class="carousel-indicator mt-16">
+            <span class="main"></span>
+            <span class="side"></span>
+          </div>
+
+          <div class="input-mode-chips mt-16">
+            <button class="mode-chip">💬 回复风格</button>
+            <button class="mode-chip">✂ 深度分析</button>
+            <button id="go-upload" class="mode-chip" style="cursor: pointer;">⤴ 信息补充</button>
+          </div>
+
+          <div class="composer mt-12" id="composer-trigger" style="cursor: text;">
+            <img src="../assets/chat_upload_icon.png" alt="icon" width="32" height="32" />
+            <input id="home-placeholder" type="text" placeholder="请输入您的情感问题..." readonly />
+            <button class="send-btn" disabled>➤</button>
+          </div>
+
+          <div class="footer-note">P01 · Figma 301:4279 · <a href="../index.html">返回目录</a></div>
+        </div>
+      </section>
+    </div>
+
+    <script type="module">
+      import { getState, setState } from "../scripts/mock-store.js";
+      import { PAGE_IDS, goToPage } from "../scripts/flow.js";
+      import { initCommonPage } from "../scripts/bindings.js";
+
+      initCommonPage(PAGE_IDS.P01);
+
+      const input = document.querySelector("#home-placeholder");
+      const state = getState();
+      if (state.draftText) {
+        input.value = state.draftText;
+      }
+
+      document.querySelector("#composer-trigger").addEventListener("click", () => {
+        goToPage(PAGE_IDS.P02, { uploadIntent: false });
+      });
+
+      document.querySelector("#go-upload").addEventListener("click", () => {
+        goToPage(PAGE_IDS.P03, { uploadIntent: true });
+      });
+
+      document.querySelector("#upload-tip").addEventListener("click", () => {
+        goToPage(PAGE_IDS.P03, { uploadIntent: true });
+      });
+
+      setState({ currentPage: PAGE_IDS.P01 });
+    </script>
+  </body>
+</html>

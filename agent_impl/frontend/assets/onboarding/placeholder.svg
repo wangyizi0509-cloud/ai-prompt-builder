@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 220" width="360" height="220" role="img" aria-label="产品功能示例图占位">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F8EDFF"/>
+      <stop offset="100%" stop-color="#FFF0F9"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#8A4BFF"/>
+      <stop offset="100%" stop-color="#FF65C2"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="360" height="220" fill="url(#bg)"/>
+  <rect x="14" y="14" width="332" height="192" rx="12" fill="#FFFFFF" stroke="#E5E0F5" stroke-width="0.8"/>
+  <text x="32" y="48" font-family="'Noto Sans SC','PingFang SC',sans-serif" font-size="14" font-weight="700" fill="#8A4BFF">CRUSHE · 功能示例</text>
+  <text x="32" y="68" font-family="'Noto Sans SC','PingFang SC',sans-serif" font-size="11" fill="#999">设计稿待替换的占位示意</text>
+  <g transform="translate(32, 92)">
+    <rect x="0" y="0" width="100" height="10" rx="5" fill="#F0EEF5"/>
+    <rect x="0" y="0" width="68" height="10" rx="5" fill="url(#bar)"/>
+    <text x="108" y="9" font-family="'DM Sans','Noto Sans SC',sans-serif" font-size="10" font-weight="700" fill="#8A4BFF">68</text>
+  </g>
+  <g transform="translate(32, 112)">
+    <rect x="0" y="0" width="100" height="10" rx="5" fill="#F0EEF5"/>
+    <rect x="0" y="0" width="40" height="10" rx="5" fill="url(#bar)"/>
+    <text x="108" y="9" font-family="'DM Sans','Noto Sans SC',sans-serif" font-size="10" font-weight="700" fill="#C00000">40</text>
+  </g>
+  <g transform="translate(32, 132)">
+    <rect x="0" y="0" width="100" height="10" rx="5" fill="#F0EEF5"/>
+    <rect x="0" y="0" width="24" height="10" rx="5" fill="#C00000"/>
+    <text x="108" y="9" font-family="'DM Sans','Noto Sans SC',sans-serif" font-size="10" font-weight="700" fill="#C00000">24</text>
+  </g>
+  <rect x="180" y="92" width="150" height="98" rx="8" fill="#FAFAFC" stroke="#E5E0F5" stroke-width="0.5"/>
+  <polyline points="192,170 214,158 238,166 262,150 286,140 310,128" fill="none" stroke="#8A4BFF" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="310" cy="128" r="3.5" fill="#FF65C2"/>
+  <text x="192" y="108" font-family="'Noto Sans SC','PingFang SC',sans-serif" font-size="11" font-weight="700" fill="#333">趋势预测</text>
+  <text x="192" y="124" font-family="'Noto Sans SC','PingFang SC',sans-serif" font-size="9" fill="#999">T+7 · 关键节点</text>
+</svg>

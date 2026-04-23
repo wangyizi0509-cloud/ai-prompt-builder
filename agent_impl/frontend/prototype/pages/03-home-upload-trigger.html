@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>P03 图片触发态</title>
+    <link rel="stylesheet" href="../styles/tokens.css" />
+    <link rel="stylesheet" href="../styles/base.css" />
+    <link rel="stylesheet" href="../styles/components.css" />
+  </head>
+  <body>
+    <div class="demo-center">
+      <section class="phone-shell">
+        <div class="phone-screen stack" style="padding-bottom: 20px;">
+          <div class="status-row">
+            <span>10:08</span>
+            <div class="status-icons">
+              <span class="signal-icon"></span>
+              <span class="wifi-icon"></span>
+              <span class="dot-icon"></span>
+            </div>
+          </div>
+
+          <div class="row justify-between">
+            <button class="ghost-btn">☰</button>
+            <div class="segment">
+              <button class="active">规划</button>
+              <button>快问</button>
+            </div>
+            <button class="ghost-btn">◌</button>
+          </div>
+
+          <div class="hero-wrap mt-16">
+            <img class="hero-avatar" src="../assets/xiaohua.png" alt="头像" />
+            <h2 class="hot-title mt-16">哈喽！欢迎回来</h2>
+            <p class="hot-sub">快来说说最近进展，我来助你一臂之力</p>
+          </div>
+
+          <article class="block-card hot-card mt-16">
+            <ul class="hot-list">
+              <li>为什么他总是忽冷忽热?</li>
+              <li>聊天时如何破冰?</li>
+              <li>分手后还能做朋友吗?</li>
+            </ul>
+            <div class="helper-strip">已帮助<b>2500人</b>解决情感问题</div>
+          </article>
+
+          <div class="input-mode-chips mt-12">
+            <button class="mode-chip">💬 回复风格</button>
+            <button class="mode-chip">✂ 深度分析</button>
+            <button class="mode-chip active">⤴ 信息补充</button>
+          </div>
+
+          <article class="block-card mt-12" style="padding: 14px;">
+            <input id="upload-input" type="file" accept="image/*" multiple class="hidden" />
+            <label class="upload-area" for="upload-input">点击上传</label>
+            <div id="upload-preview" class="thumb-row mt-12"></div>
+            <p class="upload-hint">已选择 <span id="upload-count">0</span> 张截图，发送后进入咨询弹层。</p>
+          </article>
+
+          <div class="composer mt-12">
+            <img src="../assets/chat_upload_icon.png" alt="icon" width="32" height="32" />
+            <input id="upload-draft" type="text" placeholder="请输入您的情感问题..." />
+            <button id="send-upload" class="send-btn">➤</button>
+          </div>
+          <div id="loading-upload" class="loading-tag hidden"><span class="spinner"></span>模拟提交中...</div>
+
+          <div class="footer-note">P03 · Figma 301:4522 · <a href="../index.html">返回目录</a></div>
+        </div>
+      </section>
+    </div>
+
+    <script type="module">
+      import { getState, setState } from "../scripts/mock-store.js";
+      import { submitUpload } from "../scripts/mock-api.js";
+      import { PAGE_IDS, goToPage } from "../scripts/flow.js";
+      import {
+        initCommonPage,
+        updateLoadingTag,
+        wireDraftInput,
+        wireUploadInput,
+      } from "../scripts/bindings.js";
+
+      initCommonPage(PAGE_IDS.P03);
+      wireDraftInput("#upload-draft");
+      wireUploadInput({
+        inputSelector: "#upload-input",
+        previewSelector: "#upload-preview",
+        countSelector: "#upload-count",
+      });
+
+      document.querySelector("#send-upload").addEventListener("click", async () => {
+        const state = getState();
+        if (!state.uploadedImages || state.uploadedImages.length === 0) {
+          window.alert("请先选择至少一张截图");
+          return;
+        }
+
+        setState({
+          draftText: document.querySelector("#upload-draft").value.trim(),
+          uploadIntent: true,
+          uploadCount: state.uploadedImages.length,
+        });
+
+        updateLoadingTag("#loading-upload", true);
+        try {
+          await submitUpload({
+            uploadedImages: state.uploadedImages,
+            count: state.uploadedImages.length,
+            draftText: state.draftText,
+          });
+          goToPage(PAGE_IDS.P04);
+        } finally {
+          updateLoadingTag("#loading-upload", false);
+        }
+      });
+    </script>
+  </body>
+</html>

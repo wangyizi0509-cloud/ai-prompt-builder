@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>P05 咨询弹层阶段2 空态</title>
+    <link rel="stylesheet" href="../styles/tokens.css" />
+    <link rel="stylesheet" href="../styles/base.css" />
+    <link rel="stylesheet" href="../styles/components.css" />
+  </head>
+  <body>
+    <div class="demo-center">
+      <section class="phone-shell">
+        <div class="phone-screen" style="padding-bottom: 0;">
+          <div class="status-row">
+            <span>10:08</span>
+            <div class="status-icons">
+              <span class="signal-icon"></span>
+              <span class="wifi-icon"></span>
+              <span class="dot-icon"></span>
+            </div>
+          </div>
+
+          <div class="row justify-between">
+            <button class="ghost-btn">☰</button>
+            <div class="tip-bubble" style="padding: 8px 12px; border-radius: 20px; font-size: 12px; color: #56566a;">
+              小红...<br /><span class="text-muted">咨询对象</span>
+            </div>
+          </div>
+
+          <div class="sheet-overlay"></div>
+
+          <section class="sheet">
+            <header class="sheet-header">
+              <h2 class="sheet-title">情感咨询</h2>
+              <div class="row gap-16">
+                <button class="icon-btn">◌</button>
+                <button class="icon-btn" data-close-home>×</button>
+              </div>
+            </header>
+
+            <div class="chat-ask mt-8">
+              <div class="chat-row">
+                <img class="avatar-mini" src="../assets/xiaohua.png" alt="avatar" />
+                <div class="ask-text">她回复的速度大致如何?</div>
+              </div>
+              <div class="reply-bubble" id="speed-bubble" style="max-width: 90px;">秒回</div>
+            </div>
+
+            <div class="chat-ask mt-8">
+              <div class="chat-row">
+                <img class="avatar-mini" src="../assets/xiaohua.png" alt="avatar" />
+                <div class="ask-text">补充聊天截图，分析更加精准哦！</div>
+              </div>
+              <div id="thumb-strip-2" class="thumb-row mt-8" style="margin-left: 32px;"></div>
+            </div>
+
+            <section class="chat-ask mt-12">
+              <div class="chat-row">
+                <img class="avatar-mini" src="../assets/xiaohua.png" alt="avatar" />
+                <div class="ask-text">补充其他未提到的信息?</div>
+              </div>
+              <div class="text-area-block mt-8" style="margin-left: 32px;">
+                <textarea id="extra-empty" placeholder="请输入其他信息"></textarea>
+              </div>
+            </section>
+
+            <div class="composer mt-16">
+              <img src="../assets/chat_upload_icon.png" alt="icon" width="32" height="32" />
+              <input placeholder="请输入您的情感问题..." />
+              <button id="send-step2-empty" class="send-btn">➤</button>
+            </div>
+            <div id="loading-step2-empty" class="loading-tag hidden"><span class="spinner"></span>模拟提交中...</div>
+          </section>
+
+          <div class="footer-note" style="bottom: 8px; color: rgba(255,255,255,0.8);">P05 · Figma 2181:2034 · <a href="../index.html">返回目录</a></div>
+        </div>
+      </section>
+    </div>
+
+    <script type="module">
+      import { getState, setState } from "../scripts/mock-store.js";
+      import { submitConsultStep2 } from "../scripts/mock-api.js";
+      import { PAGE_IDS, goToPage } from "../scripts/flow.js";
+      import {
+        initCommonPage,
+        buildThumbList,
+        updateLoadingTag,
+        wireCloseToHome,
+        wireExtraInput,
+      } from "../scripts/bindings.js";
+
+      initCommonPage(PAGE_IDS.P05);
+      wireCloseToHome();
+      buildThumbList("#thumb-strip-2", { includeMore: true });
+      wireExtraInput("#extra-empty");
+
+      const state = getState();
+      if (state.speed) {
+        document.querySelector("#speed-bubble").textContent = state.speed;
+      }
+
+      document.querySelector("#send-step2-empty").addEventListener("click", async () => {
+        const text = document.querySelector("#extra-empty").value.trim();
+        setState({ extraInfo: text });
+
+        updateLoadingTag("#loading-step2-empty", true);
+        try {
+          await submitConsultStep2({ extraInfo: text });
+          goToPage(PAGE_IDS.P06);
+        } finally {
+          updateLoadingTag("#loading-step2-empty", false);
+        }
+      });
+    </script>
+  </body>
+</html>

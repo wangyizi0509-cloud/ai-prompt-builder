@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>P02 文字输入态</title>
+    <link rel="stylesheet" href="../styles/tokens.css" />
+    <link rel="stylesheet" href="../styles/base.css" />
+    <link rel="stylesheet" href="../styles/components.css" />
+  </head>
+  <body>
+    <div class="demo-center">
+      <section class="phone-shell">
+        <div class="phone-screen stack" style="padding-bottom: 0;">
+          <div class="status-row">
+            <span>10:08</span>
+            <div class="status-icons">
+              <span class="signal-icon"></span>
+              <span class="wifi-icon"></span>
+              <span class="dot-icon"></span>
+            </div>
+          </div>
+
+          <div class="row justify-between">
+            <button class="ghost-btn">☰</button>
+            <div class="segment">
+              <button class="active">规划</button>
+              <button>快问</button>
+            </div>
+            <button class="ghost-btn">◌</button>
+          </div>
+
+          <article class="block-card hot-card mt-20">
+            <ul class="hot-list">
+              <li>为什么他总是忽冷忽热?</li>
+              <li>聊天时如何破冰?</li>
+              <li>分手后还能做朋友吗?</li>
+            </ul>
+            <div class="helper-strip">已帮助<b>2500人</b>解决情感问题</div>
+          </article>
+
+          <div class="composer mt-32">
+            <textarea id="draft-input" rows="4" placeholder="请输入你的问题..." style="min-height: 78px;"></textarea>
+            <button id="send-text" class="send-btn">➤</button>
+          </div>
+          <div id="loading-text" class="loading-tag hidden">
+            <span class="spinner"></span>模拟提交中...
+          </div>
+
+          <div style="margin-top: auto; background: #cfd0d8; height: 320px; border-top: 1px solid #c4c4cf;"></div>
+          <div class="footer-note" style="bottom: 10px;">P02 · Figma 301:4420 · <a href="../index.html">返回目录</a></div>
+        </div>
+      </section>
+    </div>
+
+    <script type="module">
+      import { getState, setState } from "../scripts/mock-store.js";
+      import { submitHomeInput } from "../scripts/mock-api.js";
+      import { PAGE_IDS, goToPage } from "../scripts/flow.js";
+      import { initCommonPage, updateLoadingTag, wireDraftInput } from "../scripts/bindings.js";
+
+      initCommonPage(PAGE_IDS.P02);
+      wireDraftInput("#draft-input");
+
+      const sendBtn = document.querySelector("#send-text");
+      const input = document.querySelector("#draft-input");
+
+      const syncEnabled = () => {
+        sendBtn.disabled = !input.value.trim();
+      };
+      syncEnabled();
+      input.addEventListener("input", syncEnabled);
+
+      sendBtn.addEventListener("click", async () => {
+        const text = input.value.trim();
+        if (!text) return;
+
+        setState({ draftText: text, uploadIntent: false });
+        sendBtn.disabled = true;
+        updateLoadingTag("#loading-text", true);
+
+        try {
+          await submitHomeInput({ text });
+          goToPage(PAGE_IDS.P04);
+        } finally {
+          updateLoadingTag("#loading-text", false);
+          const state = getState();
+          sendBtn.disabled = !state.draftText;
+        }
+      });
+    </script>
+  </body>
+</html>

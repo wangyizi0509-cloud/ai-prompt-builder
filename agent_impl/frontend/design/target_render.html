@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Crushe · Target Renderer (PM Final)</title>
+  <link rel="stylesheet" href="colors_and_type.css">
+  <style>
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;background:#fff;font-family:"Noto Sans SC","PingFang SC","Inter",sans-serif}
+    /* Remove the fake iOS device frame: we only want Frame inner 375×812 so the
+       screenshots line up with our real pages. */
+    /* Keep default prototype Frame styling untouched; instead we strip the
+       frame's border/shadow/radius via override. */
+    .stage { display:flex; align-items:flex-start; justify-content:flex-start; }
+    .stage > .wrap { transform:none; }
+    /* Hide iPhone chrome so 375×812 screenshots match real phone pages */
+    #phone > div { border-radius:0 !important; box-shadow:none !important; }
+    /* Hide status bar & home indicator (absolute positioned inside Frame) */
+    #phone svg[viewBox="0 0 16 10"],
+    #phone svg[viewBox="0 0 14 10"],
+    #phone svg[viewBox="0 0 26 12"]{display:none}
+  </style>
+</head>
+<body>
+  <div id="phone"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin></script>
+
+  <script type="text/babel" src="shared.jsx"></script>
+  <script type="text/babel" src="page1-splash.jsx"></script>
+  <script type="text/babel" src="page2-freedesc.jsx"></script>
+  <script type="text/babel" src="page3-opening-hook.jsx"></script>
+  <script type="text/babel" src="page4-question.jsx"></script>
+  <script type="text/babel" src="page5-card-hook.jsx"></script>
+  <script type="text/babel" src="page6-closing.jsx"></script>
+  <script type="text/babel" src="page7-report.jsx"></script>
+
+  <script type="text/babel" data-presets="env,react">
+    // Read ?p=phase query param to pick the PM-final variant per phase.
+    const params = new URLSearchParams(location.search);
+    const phase = params.get('p') || '1';
+    const sub = params.get('s') || ''; // sub variant (question q1/q3/etc, card hook scene)
+    const noop = () => {};
+
+    // Demo helpers
+    function Q1Demo(){ const [sel,setSel]=React.useState('colleague');
+      return <QuestionCard Q={window.QUESTIONS[0]} qIdx={0} total={5} selected={sel} onSelect={setSel} onBack={noop}/>; }
+    function Q3MultiDemo(){ const [sel,setSel]=React.useState(['confess','chatting']);
+      return <QuestionCard Q={window.QUESTIONS[2]} qIdx={2} total={5} selected={sel} onSelect={setSel} onConfirm={noop} onBack={noop}/>; }
+    function Q3MultiOtherDemo(){ const [sel,setSel]=React.useState(['confess','other']); const [o,setO]=React.useState('');
+      return <QuestionCard Q={window.QUESTIONS[2]} qIdx={2} total={5} selected={sel} onSelect={setSel}
+        onConfirm={noop} onBack={noop} otherText={o} onOtherChange={setO}/>; }
+    function Q5Demo(){ const [sel,setSel]=React.useState('closer');
+      return <QuestionCard Q={window.QUESTIONS[4]} qIdx={4} total={5} selected={sel} onSelect={setSel} onBack={noop}/>; }
+
+    function CardHookDemo({scene}){
+      const H = (() => {
+        if (scene === 'A3_combo_confess_high') return { ...window.HOOKS_A3.combo_confess_high, qIdx:2, total:5, qLabel:'Q3 · 组合 · 完全明牌' };
+        if (scene === 'A3_confess')           return { ...window.HOOKS_A3.confess,            qIdx:2, total:5, qLabel:'Q3 · 表白过' };
+        if (scene === 'A4_friendzoned')       return { ...window.HOOKS_A4.friendzoned,        qIdx:3, total:5, qLabel:'Q4 · 好人卡' };
+        return { ...window.HOOKS_A3.combo_confess_high, qIdx:2, total:5, qLabel:'Q3 · 组合 · 完全明牌' };
+      })();
+      return <CardHook_V1_Report hookData={H} onNext={noop} onBack={noop}/>;
+    }
+
+    const PAGES = {
+      '1': <Splash_FINAL onNext={noop}/>,
+      '2': <FreeDesc_V3_Guided onNext={noop} onBack={noop}/>,
+      '3': <OpeningHook_V1_QuickRead onNext={noop} onBack={noop}/>,
+      '4a': <Q1Demo/>,
+      '4b': <Q3MultiDemo/>,
+      '4c': <Q3MultiOtherDemo/>,
+      '4d': <Q5Demo/>,
+      '5a': <CardHookDemo scene="A3_combo_confess_high"/>,
+      '5b': <CardHookDemo scene="A3_confess"/>,
+      '5c': <CardHookDemo scene="A4_friendzoned"/>,
+      '6a': <Closing_V1_Summary onNext={noop} onBack={noop}/>,
+      '6b': <Closing_V2_Loading onNext={noop}/>,
+      '7':  <Report_V1_SoftLong onPay={noop} onBack={noop}/>,
+    };
+
+    const key = phase + (sub ? sub : '');
+    const el = PAGES[key] || PAGES['1'];
+    ReactDOM.createRoot(document.getElementById('phone')).render(el);
+  </script>
+</body>
+</html>

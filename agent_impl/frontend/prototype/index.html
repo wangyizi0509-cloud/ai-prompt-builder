@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Crush 原型导航</title>
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/base.css" />
+    <link rel="stylesheet" href="./styles/components.css" />
+  </head>
+  <body>
+    <main class="index-wrap">
+      <h1 class="index-title">Crush 独立交互原型</h1>
+      <p class="index-sub">纯前端 mock，覆盖 6 个整屏状态 + 1 个更新卡片组件。不会发出真实后端请求。</p>
+
+      <section class="index-grid">
+        <article class="index-card">
+          <h3>P01 图片首页默认态</h3>
+          <p>Figma: 301:4279</p>
+          <a class="pill-link" href="./pages/01-home-image.html">打开页面</a>
+        </article>
+        <article class="index-card">
+          <h3>P02 文字输入态</h3>
+          <p>Figma: 301:4420</p>
+          <a class="pill-link" href="./pages/02-home-text-input.html">打开页面</a>
+        </article>
+        <article class="index-card">
+          <h3>P03 图片触发态</h3>
+          <p>Figma: 301:4522</p>
+          <a class="pill-link" href="./pages/03-home-upload-trigger.html">打开页面</a>
+        </article>
+        <article class="index-card">
+          <h3>P04 咨询弹层阶段1</h3>
+          <p>Figma: 2181:1548</p>
+          <a class="pill-link" href="./pages/04-consult-step1.html">打开页面</a>
+        </article>
+        <article class="index-card">
+          <h3>P05 咨询弹层阶段2（空）</h3>
+          <p>Figma: 2181:2034</p>
+          <a class="pill-link" href="./pages/05-consult-step2-empty.html">打开页面</a>
+        </article>
+        <article class="index-card">
+          <h3>P06 咨询弹层阶段2（已填）</h3>
+          <p>Figma: 2181:2143</p>
+          <a class="pill-link" href="./pages/06-consult-step2-filled.html">打开页面</a>
+        </article>
+        <article class="index-card">
+          <h3>P07 更新卡片组件</h3>
+          <p>Figma: 2181:1327</p>
+          <a class="pill-link" href="./pages/07-plan-update-cards.html">打开页面</a>
+        </article>
+      </section>
+
+      <div class="index-actions">
+        <button id="continue-demo" class="primary-btn">继续上次演示</button>
+        <button id="reset-demo" class="secondary-btn">重置 Mock 状态</button>
+      </div>
+
+      <section class="index-card mt-20">
+        <h3>当前状态快照</h3>
+        <p><b>currentPage:</b> <span id="state-page">-</span></p>
+        <p><b>draftText:</b> <span id="state-draft">-</span></p>
+        <p><b>uploadedImages:</b> <span id="state-uploads">0</span></p>
+        <p><b>tone:</b> <span id="state-tone">-</span></p>
+        <p><b>speed:</b> <span id="state-speed">-</span></p>
+        <p><b>extraInfo:</b> <span id="state-extra">-</span></p>
+      </section>
+    </main>
+
+    <script type="module">
+      import { getState, subscribe } from "./scripts/mock-store.js";
+      import { wireContinueButton, wireResetButton } from "./scripts/bindings.js";
+
+      wireContinueButton("#continue-demo");
+      wireResetButton("#reset-demo");
+
+      const ui = {
+        page: document.querySelector("#state-page"),
+        draft: document.querySelector("#state-draft"),
+        uploads: document.querySelector("#state-uploads"),
+        tone: document.querySelector("#state-tone"),
+        speed: document.querySelector("#state-speed"),
+        extra: document.querySelector("#state-extra"),
+      };
+
+      function paint(state) {
+        ui.page.textContent = state.currentPage || "-";
+        ui.draft.textContent = state.draftText ? state.draftText.slice(0, 40) : "-";
+        ui.uploads.textContent = String((state.uploadedImages || []).length);
+        ui.tone.textContent = state.tone || "-";
+        ui.speed.textContent = state.speed || "-";
+        ui.extra.textContent = state.extraInfo ? state.extraInfo.slice(0, 40) : "-";
+      }
+
+      paint(getState());
+      subscribe(paint);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,28 @@
+:root {
+  --bg-app: #e9e9ee;
+  --bg-phone: #f6f6f9;
+  --bg-card: #ffffff;
+  --bg-soft: #f3f3f6;
+  --bg-soft-2: #efeff4;
+  --text-main: #16161c;
+  --text-secondary: #72727d;
+  --text-tertiary: #a2a2ad;
+  --line: #e5e5eb;
+  --line-strong: #d9d9e2;
+  --brand: #7f4dff;
+  --brand-2: #a687ff;
+  --brand-soft: #f0eaff;
+  --success: #22a06b;
+  --danger: #e05263;
+  --overlay: rgba(0, 0, 0, 0.36);
+  --radius-xs: 8px;
+  --radius-s: 12px;
+  --radius-m: 15px;
+  --radius-l: 18px;
+  --radius-xl: 24px;
+  --shadow-soft: 0 8px 30px rgba(104, 112, 168, 0.10);
+  --shadow-card: 0 3px 14px rgba(36, 36, 52, 0.05);
+  --font-ui: "PingFang SC", "SF Pro Text", "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+  --phone-w: 375px;
+  --phone-h: 812px;
+}

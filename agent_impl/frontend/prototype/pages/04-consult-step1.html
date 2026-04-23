@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>P04 咨询弹层阶段1</title>
+    <link rel="stylesheet" href="../styles/tokens.css" />
+    <link rel="stylesheet" href="../styles/base.css" />
+    <link rel="stylesheet" href="../styles/components.css" />
+  </head>
+  <body>
+    <div class="demo-center">
+      <section class="phone-shell">
+        <div class="phone-screen" style="padding-bottom: 0;">
+          <div class="status-row">
+            <span>10:08</span>
+            <div class="status-icons">
+              <span class="signal-icon"></span>
+              <span class="wifi-icon"></span>
+              <span class="dot-icon"></span>
+            </div>
+          </div>
+
+          <div class="row justify-between">
+            <button class="ghost-btn">☰</button>
+            <div class="tip-bubble" style="padding: 8px 12px; border-radius: 20px; font-size: 12px; color: #56566a;">
+              小红...<br /><span class="text-muted">咨询对象</span>
+            </div>
+          </div>
+
+          <div class="sheet-overlay"></div>
+
+          <section class="sheet">
+            <header class="sheet-header">
+              <h2 class="sheet-title">情感咨询</h2>
+              <div class="row gap-16">
+                <button class="icon-btn">◌</button>
+                <button class="icon-btn" data-close-home>×</button>
+              </div>
+            </header>
+
+            <div id="thumb-strip-1" class="thumb-row mt-20"></div>
+
+            <div class="reply-bubble" id="draft-bubble" style="max-width: 170px;">女朋友生气了怎么去哄</div>
+
+            <section class="chat-ask">
+              <div class="chat-row">
+                <img class="avatar-mini" src="../assets/xiaohua.png" alt="avatar" />
+                <div class="ask-text">她的语气感觉是什么样?</div>
+              </div>
+              <div class="row" style="justify-content: flex-end; gap: 8px; margin-top: 8px;">
+                <button class="option-pill" data-tone data-value="热情" style="width: 58px;">热情</button>
+                <button class="option-pill" data-tone data-value="平静" style="width: 58px;">平静</button>
+                <button class="option-pill" data-tone data-value="冷淡" style="width: 58px;">冷淡</button>
+              </div>
+            </section>
+
+            <section class="chat-ask mt-12">
+              <div class="chat-row">
+                <img class="avatar-mini" src="../assets/xiaohua.png" alt="avatar" />
+                <div class="ask-text">她回复的速度大致如何?</div>
+              </div>
+              <div class="option-grid mt-8">
+                <div class="option-row">
+                  <button class="option-pill" data-speed data-value="秒回">秒回</button>
+                  <button class="option-pill" data-speed data-value="1小时内">1小时内</button>
+                  <button class="option-pill" data-speed data-value="第二天">第二天</button>
+                </div>
+                <input id="speed-extra" class="option-text-input" placeholder="补充其他情况" />
+              </div>
+            </section>
+
+            <div class="composer mt-20">
+              <img src="../assets/chat_upload_icon.png" alt="icon" width="32" height="32" />
+              <input placeholder="请输入您的情感问题..." />
+              <button id="send-step1" class="send-btn">➤</button>
+            </div>
+            <div id="loading-step1" class="loading-tag hidden"><span class="spinner"></span>模拟提交中...</div>
+          </section>
+
+          <div class="footer-note" style="bottom: 8px; color: rgba(255,255,255,0.8);">P04 · Figma 2181:1548 · <a href="../index.html">返回目录</a></div>
+        </div>
+      </section>
+    </div>
+
+    <script type="module">
+      import { getState, setState } from "../scripts/mock-store.js";
+      import { submitConsultStep1 } from "../scripts/mock-api.js";
+      import { PAGE_IDS, goToPage } from "../scripts/flow.js";
+      import {
+        initCommonPage,
+        buildThumbList,
+        updateLoadingTag,
+        wireChoiceButtons,
+        wireCloseToHome,
+        wireInputMirror,
+      } from "../scripts/bindings.js";
+
+      initCommonPage(PAGE_IDS.P04);
+      wireCloseToHome();
+      buildThumbList("#thumb-strip-1", { includeMore: true });
+      wireChoiceButtons("[data-tone]", "tone");
+      wireChoiceButtons("[data-speed]", "speed");
+      wireInputMirror("#speed-extra", "speedExtra");
+
+      const state = getState();
+      const draftBubble = document.querySelector("#draft-bubble");
+      if (state.draftText) {
+        draftBubble.textContent = state.draftText;
+      }
+
+      document.querySelector("#send-step1").addEventListener("click", async () => {
+        const latest = getState();
+        const tone = latest.tone;
+        const speed = latest.speed;
+        const speedExtra = (latest.speedExtra || "").trim();
+
+        if (!tone) {
+          window.alert("请先选择语气");
+          return;
+        }
+
+        if (!speed && !speedExtra) {
+          window.alert("请先选择回复速度，或补充其他情况");
+          return;
+        }
+
+        const normalizedSpeed = speed || "补充其他情况";
+        setState({ speed: normalizedSpeed, speedExtra });
+
+        updateLoadingTag("#loading-step1", true);
+        try {
+          await submitConsultStep1({ tone, speed: normalizedSpeed, speedExtra });
+          goToPage(PAGE_IDS.P05);
+        } finally {
+          updateLoadingTag("#loading-step1", false);
+        }
+      });
+    </script>
+  </body>
+</html>

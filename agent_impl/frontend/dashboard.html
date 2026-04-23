@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Crushe · 数据仪表盘</title>
+<style>
+  :root {
+    --bg: #f7f7f9;
+    --card: #ffffff;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --primary: #8A4BFF;
+    --primary-soft: #ede7ff;
+    --border: #e5e7eb;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 16px; }
+  header {
+    padding: 16px 4px 12px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  h1 { margin: 0; font-size: 20px; font-weight: 700; }
+  .subtitle { color: var(--muted); font-size: 12px; }
+  .refresh {
+    font-size: 12px; color: var(--muted);
+    display: inline-flex; align-items: center; gap: 6px;
+    cursor: pointer; user-select: none;
+  }
+  .refresh:hover { color: var(--primary); }
+
+  .tabs {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin: 12px 0;
+  }
+  .tab {
+    padding: 8px 14px; font-size: 13px;
+    border: 1px solid var(--border);
+    background: var(--card); color: var(--text);
+    border-radius: 18px; cursor: pointer;
+    transition: all .15s;
+  }
+  .tab:hover { border-color: var(--primary); }
+  .tab.active {
+    background: var(--primary); color: white; border-color: var(--primary);
+    font-weight: 600;
+  }
+
+  .card {
+    background: var(--card); border-radius: 12px;
+    border: 1px solid var(--border);
+    padding: 16px; margin-bottom: 12px;
+  }
+  .card h2 {
+    margin: 0 0 12px; font-size: 15px; font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card h2 .range-tag {
+    font-size: 11px; background: var(--primary-soft); color: var(--primary);
+    padding: 2px 8px; border-radius: 8px; font-weight: 500;
+  }
+
+  /* 漏斗 */
+  .funnel-step {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center; gap: 8px;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+  }
+  .funnel-step:last-child { border-bottom: none; }
+  .funnel-label {
+    font-size: 13px; display: flex; flex-direction: column; gap: 2px;
+  }
+  .funnel-label .step-no {
+    font-size: 11px; color: var(--muted);
+  }
+  .funnel-users {
+    font-size: 18px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .funnel-conv {
+    font-size: 11px; color: var(--muted);
+    text-align: right; min-width: 84px;
+    font-variant-numeric: tabular-nums;
+  }
+  .funnel-conv .pct {
+    display: inline-block; padding: 2px 6px; border-radius: 4px;
+    background: var(--primary-soft); color: var(--primary);
+    font-weight: 600;
+  }
+
+  /* LLM 健康 */
+  .llm-row {
+    display: grid; grid-template-columns: 100px 1fr 1fr 1fr;
+    gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border);
+    align-items: center;
+  }
+  .llm-row:last-child { border-bottom: none; }
+  .llm-row.head {
+    font-size: 11px; color: var(--muted); font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .llm-endpoint { font-weight: 600; }
+  .llm-value { font-variant-numeric: tabular-nums; }
+  .llm-bad { color: var(--danger); }
+  .llm-warn { color: var(--warning); }
+  .llm-ok { color: var(--success); }
+
+  /* 明细表格 */
+  .events-table {
+    font-size: 12px; width: 100%; border-collapse: collapse;
+  }
+  .events-table th {
+    text-align: left; color: var(--muted);
+    font-weight: 500; padding: 8px 4px; border-bottom: 1px solid var(--border);
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .events-table td {
+    padding: 8px 4px; border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .events-table .name-cell {
+    font-weight: 600;
+  }
+  .events-table .props-cell {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; color: var(--muted); max-width: 280px;
+    word-break: break-all;
+  }
+  .events-table .anon-cell {
+    font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted);
+  }
+
+  .empty, .loading, .error {
+    padding: 24px; text-align: center; color: var(--muted);
+  }
+  .error { color: var(--danger); }
+
+  .footer {
+    text-align: center; color: var(--muted); font-size: 11px;
+    padding: 16px 0;
+  }
+
+  @media (max-width: 520px) {
+    .wrap { padding: 12px; }
+    h1 { font-size: 18px; }
+    .events-table .props-cell { max-width: 160px; }
+    .llm-row { grid-template-columns: 70px 1fr 1fr 1fr; font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h1>📊 Crushe 数据仪表盘</h1>
+      <span class="refresh" id="refresh-btn">🔄 刷新</span>
+    </div>
+    <div class="subtitle" id="subtitle">加载中…</div>
+  </header>
+
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-tab="today">今日实时</button>
+    <button class="tab" data-tab="yesterday">昨日</button>
+    <button class="tab" data-tab="7d">近 7 天</button>
+    <button class="tab" data-tab="recent">最近 100 条</button>
+    <button class="tab" data-tab="llm">LLM 健康</button>
+  </div>
+
+  <main id="content"></main>
+
+  <div class="footer">
+    数据来源：Supabase · events 表 · 聚合以 <code>anonymous_id</code> 去重
+  </div>
+</div>
+
+<script src="/scripts/dashboard.js"></script>
+</body>
+</html>

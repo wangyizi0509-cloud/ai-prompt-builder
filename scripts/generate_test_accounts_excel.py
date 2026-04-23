@@ -184,6 +184,7 @@ def update_test_users_md(master_path: str, new_accounts: list[TestAccount]) -> N
         end_index = len(lines)
 
     existing: dict[str, TestAccount] = {}
+    existing_order: list[str] = []
     if start_index != -1:
         for line in lines[start_index:end_index]:
             s = line.strip()
@@ -205,9 +206,14 @@ def update_test_users_md(master_path: str, new_accounts: list[TestAccount]) -> N
                 created_at=created_at,
                 source="existing",
             )
+            if email not in existing_order:
+                existing_order.append(email)
 
     merged = existing | new_by_email
-    merged_list = [merged[k] for k in sorted(merged.keys())]
+    new_emails = set(new_by_email)
+    new_ordered = [merged[a.email] for a in new_accounts]
+    rest = [merged[e] for e in existing_order if e not in new_emails]
+    merged_list = new_ordered + rest
 
     headers = ["邮箱", "密码", "用户名", "用户 ID", "创建时间"]
     rows = [[a.email, a.password, a.username, a.user_id, a.created_at] for a in merged_list]

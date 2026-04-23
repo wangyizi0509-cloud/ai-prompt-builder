@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>OnboardingStorage · 手动测试页</title>
+    <style>
+        body { font-family: -apple-system, 'Noto Sans SC', sans-serif; padding: 24px; max-width: 720px; margin: 0 auto; color: #0f172a; }
+        h1 { font-size: 20px; margin: 0 0 12px; }
+        p.hint { color: #475569; font-size: 13px; margin: 0 0 18px; }
+        .case { border-left: 3px solid #e2e8f0; padding: 8px 12px; margin: 6px 0; border-radius: 4px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+        .case.ok { border-left-color: #22c55e; background: #f0fdf4; }
+        .case.fail { border-left-color: #ef4444; background: #fef2f2; }
+        #summary { margin-top: 18px; padding: 12px; border-radius: 6px; font-weight: 600; }
+        #summary.all-ok { background: #dcfce7; color: #166534; }
+        #summary.any-fail { background: #fee2e2; color: #991b1b; }
+        button { margin-top: 12px; padding: 8px 14px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; cursor: pointer; }
+        button:hover { background: #f1f5f9; }
+    </style>
+    <script src="/scripts/onboarding_storage.js"></script>
+</head>
+<body>
+    <h1>OnboardingStorage · 手动测试页</h1>
+    <p class="hint">打开 DevTools Console 也能看到完整日志。本页会临时覆盖你当前的 <code>crushe_onboarding_v2</code>,结束后会清空。</p>
+    <div id="results"></div>
+    <div id="summary"></div>
+    <button onclick="location.reload()">重跑</button>
+
+<script>
+(function () {
+    const results = [];
+    const assert = (label, cond, detail) => {
+        results.push({ label, pass: !!cond, detail: detail || '' });
+    };
+
+    const Storage = window.OnboardingStorage;
+
+    // 始终从干净状态开始
+    Storage.clear();
+
+    // -------- Case 1: 无数据时 getStage / load 返回 null --------
+    assert('getStage() on empty returns null', Storage.getStage() === null);
+    assert('load() on empty returns null', Storage.load() === null);
+    assert('getReport() on empty returns null', Storage.getReport() === null);
+    assert('isPaid() on empty returns false', Storage.isPaid() === false);
+
+    // -------- Case 2: save / load round-trip --------
+    const sample = {
+        protocol_version: 1,
+        session_id: 'test-uuid-0001',
+        stage: 'questions',
+        free_text: '他是我同事',
+        uploaded_images: [],
+        analysis: null,
+        answers: { A3: ['A'] },
+        report: null,
+        paid: false,
+        paid_at: null,
+    };
+    Storage.save(sample);
+    const loaded = Storage.load();
+    assert('save(x); load() roundtrip (session_id)', loaded && loaded.session_id === 'test-uuid-0001');
+    assert('save(x); load() roundtrip (stage)', loaded && loaded.stage === 'questions');
+    assert('save(x); load() roundtrip (answers)', loaded && loaded.answers && Array.isArray(loaded.answers.A3));
+
+    // -------- Case 3: clear --------
+    Storage.clear();
+    assert('clear(); load() === null', Storage.load() === null);
+    assert('clear(); getStage() === null', Storage.getStage() === null);
+
+    // -------- Case 4: setStage on empty 会创建骨架 --------
+    Storage.setStage('splash');
+    const afterSet = Storage.load();
+    assert('setStage(splash) on empty creates skeleton', afterSet && afterSet.stage === 'splash' && !!afterSet.session_id);
+
+    // -------- Case 5: isPaid() 各种 stage --------
+    Storage.clear();
+    Storage.save({ ...sample, stage: 'paid' });
+    assert('isPaid() stage=paid returns true', Storage.isPaid() === true);
+
+    Storage.clear();
+    Storage.save({ ...sample, stage: 'done', paid: true, paid_at: '2026-04-21T10:00:00Z' });
+    assert('isPaid() stage=done+paid returns true', Storage.isPaid() === true);
+
+    Storage.clear();
+    Storage.save({ ...sample, stage: 'done', paid: false });
+    assert('isPaid() stage=done but paid=false returns false', Storage.isPaid() === false);
+
+    Storage.clear();
+    Storage.save({ ...sample, stage: 'questions' });
+    assert('isPaid() stage=questions returns false', Storage.isPaid() === false);
+
+    // -------- Case 6: markDone --------
+    Storage.clear();
+    Storage.save({ ...sample, stage: 'paid' });
+    Storage.markDone();
+    assert('markDone() then getStage() === "done"', Storage.getStage() === 'done');
+    const afterDone = Storage.load();
+    assert('markDone() sets paid=true', afterDone && afterDone.paid === true);
+    assert('markDone() sets paid_at', afterDone && typeof afterDone.paid_at === 'string' && afterDone.paid_at.length > 0);
+
+    // -------- Case 7: getSessionId 自动生成 --------
+    Storage.clear();
+    const sid = Storage.getSessionId();
+    assert('getSessionId() generates UUID when empty', typeof sid === 'string' && sid.length >= 8);
+    const sid2 = Storage.getSessionId();
+    assert('getSessionId() stable across calls', sid === sid2);
+
+    // -------- Case 8: getReport 返回 report 对象 --------
+    Storage.clear();
+    Storage.save({ ...sample, report: { collected_summary: 'xxx', report_id: 'CR-1' } });
+    const report = Storage.getReport();
+    assert('getReport() returns report object', report && report.collected_summary === 'xxx');
+
+    // -------- Case 9: protocol_version 不匹配 → 视为空 --------
+    Storage.clear();
+    // 绕过 save 的自动 bump,直接写 localStorage
+    localStorage.setItem(Storage.KEY, JSON.stringify({ protocol_version: 999, stage: 'paid' }));
+    assert('mismatched protocol_version returns null', Storage.load() === null);
+
+    // -------- Case 10: JSON 损坏 → load 返回 null,不抛 --------
+    localStorage.setItem(Storage.KEY, '{{not json');
+    assert('broken JSON returns null (no throw)', Storage.load() === null);
+
+    // -------- 清理 --------
+    Storage.clear();
+
+    // -------- 渲染结果 --------
+    const container = document.getElementById('results');
+    let fails = 0;
+    for (const r of results) {
+        const el = document.createElement('div');
+        el.className = 'case ' + (r.pass ? 'ok' : 'fail');
+        el.textContent = (r.pass ? '[PASS] ' : '[FAIL] ') + r.label + (r.detail ? ' — ' + r.detail : '');
+        container.appendChild(el);
+        console.log((r.pass ? '[PASS] ' : '[FAIL] ') + r.label);
+        if (!r.pass) fails++;
+    }
+    const summary = document.getElementById('summary');
+    if (fails === 0) {
+        summary.className = 'all-ok';
+        summary.textContent = `✅ 全部通过:${results.length} / ${results.length}`;
+    } else {
+        summary.className = 'any-fail';
+        summary.textContent = `❌ 失败 ${fails} / ${results.length}`;
+    }
+})();
+</script>
+</body>
+</html>

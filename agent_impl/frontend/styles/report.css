@@ -1,0 +1,732 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Onboarding v2 · report.html 样式
+   版本：V2_DarkHero（深色 hero band，对齐 docs/onboarding/page7-report.jsx L185-304）
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ───── 基础：字体 / 颜色变量 ─────
+   保持和 colors_and_type.css 同命名；没有 @import，避免额外依赖 */
+:root {
+  /* 品牌紫 */
+  --rp-violet:          #8A4BFF;
+  --rp-violet-hover:    #9D5CFE;
+  --rp-violet-soft:     #BDA3FF;
+  --rp-violet-wash:     #F8EDFF;
+  --rp-violet-light:    #F6EDFF;
+  --rp-pink:            #FF65C2;
+  --rp-pink-light:      #FFB4E6;
+  --rp-pink-wash:       #FFF0F9;
+
+  /* 深色 Hero band 颜色 */
+  --rp-dark-deep:       #1a1a2e;
+  --rp-dark-mid:        #2d1b5e;
+  --rp-dark-card:       #3A1A6A;
+
+  /* 文本 */
+  --rp-ink:             #1a1a1a;
+  --rp-ink-2:           #333333;
+  --rp-ink-3:           #666666;
+  --rp-ink-muted:       #999999;
+
+  /* 背景 / 分割线 */
+  --rp-bg:              #F7F7FA;
+  --rp-surface:         #FFFFFF;
+  --rp-line:            #E5E0F5;
+  --rp-line-2:          #F0EEF5;
+  --rp-surface-dim:     #FAFAFC;
+
+  /* 状态颜色（问题严重度） */
+  --rp-danger:          #C00000;
+  --rp-danger-bg:       #FFE6E6;
+  --rp-warning:         #E88F00;
+  --rp-warning-bg:      #FFF4E0;
+  --rp-hopeful:         #1E8C3A;
+  --rp-hopeful-bg:      #E6F7EB;
+
+  /* 阴影 */
+  --rp-shadow-card:     0 4px 16px rgba(0, 0, 0, 0.06);
+  --rp-shadow-btn:      0 10px 30px rgba(0, 0, 0, 0.30);
+
+  /* 字体 */
+  --rp-font-sans:    "Noto Sans SC", "PingFang SC", "Inter",
+                     -apple-system, BlinkMacSystemFont, sans-serif;
+  --rp-font-display: "DM Sans", "Noto Sans SC", sans-serif;
+}
+
+/* ───── 全局 reset ───── */
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--rp-font-sans);
+  background: var(--rp-bg);
+  color: var(--rp-ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.273px;
+}
+
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* ───── 全局 loading / error ───── */
+.rp-splash-state {
+  min-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 24px;
+  text-align: center;
+  gap: 14px;
+}
+.rp-splash-state .rp-spinner {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 3px solid var(--rp-violet-wash);
+  border-top-color: var(--rp-violet);
+  animation: rp-spin 0.85s linear infinite;
+}
+.rp-splash-state-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--rp-ink);
+}
+.rp-splash-state-desc {
+  font-size: 13px;
+  color: var(--rp-ink-3);
+  line-height: 1.7;
+  max-width: 320px;
+}
+.rp-splash-state-retry {
+  margin-top: 6px;
+  padding: 11px 22px;
+  border-radius: 12px;
+  background: var(--rp-violet);
+  color: #fff;
+  border: none;
+  font-weight: 700;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.rp-splash-state-retry:hover { background: var(--rp-violet-hover); }
+@keyframes rp-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ═══════════════════════════════════════════════
+   主容器（SPA 根节点）
+   ═══════════════════════════════════════════════ */
+
+.rp-app {
+  position: relative;
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100vh;
+  background: var(--rp-bg);
+  overflow: hidden;
+}
+
+/* ═══════════════════════════════════════════════
+   V2 深色 band + Sticky 顶栏
+   ═══════════════════════════════════════════════ */
+
+/* 顶部深色渐变 band（360px，覆盖 hero 卡区域） */
+.rp-dark-band {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 360px;
+  background: linear-gradient(180deg, var(--rp-dark-deep) 0%, var(--rp-dark-mid) 100%);
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Sticky 深色半透顶栏 */
+.rp-header-dark {
+  position: sticky;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 44px 21px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 20;
+  background: rgba(26, 26, 46, 0.75);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-bottom: 0.5px solid rgba(255, 255, 255, 0.08);
+}
+
+/* 返回按钮（36px 圆角白色半透） */
+.rp-back-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.10);
+  border: 0.5px solid rgba(255, 255, 255, 0.20);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+.rp-back-btn:hover { background: rgba(255, 255, 255, 0.18); }
+
+.rp-header-dark-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: rgba(255, 255, 255, 0.8);
+}
+.rp-header-dark-id {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* ═══════════════════════════════════════════════
+   可滚动主内容区
+   ═══════════════════════════════════════════════ */
+
+.rp-scroll-body {
+  position: relative;
+  z-index: 2;
+  padding: 10px 16px 0;
+}
+
+/* ═══════════════════════════════════════════════
+   Hero 卡（玻璃态白卡，置于深色 band 上）
+   ═══════════════════════════════════════════════ */
+
+.rp-hero-card {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
+  border: 0.5px solid rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  padding: 22px;
+  color: #fff;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* 状态胶囊 pill */
+.rp-hero-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  /* bg / color 由 JS 注入 */
+}
+.rp-hero-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  /* background 由 JS 注入 */
+}
+
+/* hero 大标题 */
+.rp-hero-title {
+  margin-top: 14px;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: -0.2px;
+  color: #fff;
+}
+
+/* 趋势文字 */
+.rp-hero-trend {
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* 5 维 mini 预览模块（内嵌玻璃卡） */
+.rp-hero-acr {
+  margin-top: 18px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  border: 0.5px solid rgba(255, 255, 255, 0.12);
+}
+.rp-hero-acr-label {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 10px;
+}
+.rp-hero-acr-body {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.rp-hero-acr-radar {
+  flex-shrink: 0;
+  /* 宽度固定为 140px，对应 buildRadarSvg size=140 */
+  width: 140px;
+  height: 140px;
+}
+.rp-hero-acr-scores {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 单行 mini 分数 */
+.rp-mini-score-row {
+  /* 每行包含 label+数字 + 进度条 */
+}
+.rp-mini-score-label-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  margin-bottom: 3px;
+}
+.rp-mini-score-label {
+  color: rgba(255, 255, 255, 0.85);
+}
+.rp-mini-score-val {
+  font-family: var(--rp-font-display);
+  font-weight: 700;
+  /* color 由 JS 注入 */
+}
+.rp-mini-score-bar-bg {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.rp-mini-score-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  /* width + background 由 JS 注入 */
+}
+
+/* ═══════════════════════════════════════════════
+   核心问题（白底区域）
+   ═══════════════════════════════════════════════ */
+
+.rp-section-header {
+  margin-top: 20px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.rp-section-title-dark {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--rp-ink);
+}
+.rp-section-subtitle {
+  font-size: 11px;
+  color: var(--rp-ink-muted);
+  margin-top: 2px;
+}
+.rp-problem-count-tag {
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--rp-danger-bg);
+  color: var(--rp-danger);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.rp-problem-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rp-problem-card {
+  background: var(--rp-surface);
+  border-radius: 14px;
+  padding: 14px;
+  border: 0.5px solid var(--rp-line);
+  box-shadow: var(--rp-shadow-card);
+}
+.rp-problem-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.rp-problem-idx {
+  font-family: var(--rp-font-display);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--rp-ink-muted);
+  letter-spacing: 1px;
+}
+.rp-problem-sev {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.rp-problem-title {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--rp-ink);
+}
+.rp-problem-sub {
+  font-size: 13px;
+  color: var(--rp-ink-2);
+  line-height: 1.5;
+  margin-top: 4px;
+}
+.rp-problem-evidence {
+  font-size: 12px;
+  color: var(--rp-ink-3);
+  margin-top: 6px;
+  line-height: 1.7;
+}
+
+/* ═══════════════════════════════════════════════
+   锁住完整方案（LockedTableRow 编号表）
+   ═══════════════════════════════════════════════ */
+
+.rp-locked-title {
+  margin-top: 22px;
+  padding: 0 4px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--rp-ink);
+}
+
+.rp-locked-table {
+  margin-top: 12px;
+  background: var(--rp-surface);
+  border-radius: 14px;
+  border: 0.5px solid var(--rp-line);
+  padding: 4px;
+  overflow: hidden;
+}
+
+.rp-locked-table-row {
+  padding: 12px;
+  border-bottom: 0.5px solid var(--rp-line-2);
+}
+.rp-locked-table-row.last {
+  border-bottom: none;
+}
+
+.rp-locked-table-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.rp-locked-table-row-no {
+  font-family: var(--rp-font-display);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--rp-violet);
+}
+.rp-locked-table-row-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--rp-ink);
+  flex: 1;
+}
+.rp-locked-row-lock {
+  width: 14px;
+  height: 14px;
+  fill: var(--rp-violet);
+  flex-shrink: 0;
+}
+
+.rp-locked-table-row-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 22px;
+}
+.rp-locked-row-item {
+  font-size: 11px;
+  color: var(--rp-ink-3);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rp-locked-row-dot {
+  flex-shrink: 0;
+}
+.rp-locked-row-item-text {
+  flex-shrink: 0;
+}
+.rp-locked-row-stripe {
+  flex: 1;
+  height: 4px;
+  margin: 0 6px;
+  background: repeating-linear-gradient(90deg, var(--rp-line-2) 0 6px, var(--rp-surface-dim) 6px 12px);
+  border-radius: 2px;
+}
+
+/* ═══════════════════════════════════════════════
+   信任横条
+   ═══════════════════════════════════════════════ */
+
+.rp-trust-bar {
+  margin-top: 18px;
+  padding: 12px 14px;
+  background: var(--rp-surface);
+  border-radius: 12px;
+  font-size: 12px;
+  color: var(--rp-ink-3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0.5px solid var(--rp-line);
+}
+.rp-trust-bar b {
+  color: var(--rp-violet);
+}
+.rp-trust-avatars {
+  display: flex;
+  flex-shrink: 0;
+}
+.rp-trust-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  /* background + margin-left 由 JS 注入 */
+}
+.rp-trust-text {
+  font-size: 12px;
+  color: var(--rp-ink-3);
+}
+
+/* ═══════════════════════════════════════════════
+   底部渐变过渡带（白底 → 浅紫 → 深紫）
+   ═══════════════════════════════════════════════ */
+
+.rp-transition-grad {
+  height: 80px;
+  margin: 18px -16px 0;
+  background: linear-gradient(180deg,
+    rgba(247, 247, 250, 0) 0%,
+    #F0EBFA 50%,
+    var(--rp-dark-mid) 100%
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   深色付费大卡（紧贴渐变带底端）
+   ═══════════════════════════════════════════════ */
+
+.rp-paycard-dark {
+  margin: 0 -16px;
+  padding: 22px 32px 40px;
+  background: linear-gradient(160deg, var(--rp-dark-card) 0%, var(--rp-dark-deep) 100%);
+  border-radius: 20px 20px 0 0;
+  color: #fff;
+  border: 0.5px solid rgba(255, 255, 255, 0.08);
+  border-bottom: none;
+}
+
+.rp-paycard-unlock-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--rp-pink);
+}
+
+.rp-paycard-urgency {
+  font-size: 20px;
+  font-weight: 700;
+  margin-top: 6px;
+  line-height: 1.35;
+  color: #fff;
+}
+
+.rp-paycard-feat-list {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.92);
+}
+.rp-feat-dark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rp-feat-dark svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+/* 价格 chip 行 */
+.rp-price-row {
+  margin-top: 18px;
+  display: flex;
+  gap: 10px;
+}
+.rp-price-chip-dark {
+  flex: 1;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.10);
+  color: #fff;
+  border: 0.5px solid rgba(255, 255, 255, 0.20);
+  position: relative;
+}
+.rp-price-chip-dark.featured {
+  background: linear-gradient(135deg, var(--rp-pink) 0%, var(--rp-violet) 100%);
+  border: none;
+}
+.rp-price-chip-dark-badge {
+  position: absolute;
+  right: -4px;
+  top: -8px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #FFE5A0;
+  color: var(--rp-violet);
+  font-size: 10px;
+  font-weight: 700;
+}
+.rp-price-chip-dark-title {
+  font-size: 11px;
+  opacity: 0.85;
+  font-weight: 600;
+}
+.rp-price-chip-dark-price {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  margin-top: 4px;
+}
+.rp-price-chip-dark-currency {
+  font-size: 11px;
+  font-weight: 700;
+}
+.rp-price-chip-dark-num {
+  font-family: var(--rp-font-display);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+.rp-price-chip-dark-sub {
+  font-size: 10px;
+  margin-top: 2px;
+  opacity: 0.75;
+}
+
+/* 白底主 CTA 按钮 */
+.rp-cta-btn {
+  width: 100%;
+  height: 52px;
+  margin-top: 16px;
+  border-radius: 14px;
+  background: #fff;
+  color: var(--rp-dark-deep);
+  border: none;
+  font-weight: 700;
+  font-size: 16px;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: var(--rp-shadow-btn);
+  letter-spacing: 0.2px;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.rp-cta-btn:hover:not(:disabled) {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+.rp-cta-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.rp-cta-btn:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+/* 退款注记 */
+.rp-refund-note {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.70);
+  text-align: center;
+  margin-top: 10px;
+}
+
+/* ═══════════════════════════════════════════════
+   Mock 支付遮罩
+   ═══════════════════════════════════════════════ */
+
+.rp-pay-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 8, 30, 0.48);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: rp-fade-in 200ms ease;
+}
+.rp-pay-overlay-card {
+  background: #fff;
+  border-radius: 20px;
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  min-width: 240px;
+  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.30);
+}
+.rp-pay-overlay-card .rp-spinner {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 3px solid var(--rp-violet-wash);
+  border-top-color: var(--rp-violet);
+  animation: rp-spin 0.85s linear infinite;
+}
+.rp-pay-overlay-card .rp-pay-text {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--rp-ink-2);
+}
+.rp-pay-overlay-card.success .rp-pay-text { color: var(--rp-hopeful); }
+.rp-pay-overlay-card.success .rp-check {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--rp-hopeful);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rp-pay-overlay-card.success .rp-check svg {
+  width: 22px;
+  height: 22px;
+  stroke: #fff;
+}
+@keyframes rp-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ───── 辅助：隐藏元素 ───── */
+[hidden] { display: none !important; }
