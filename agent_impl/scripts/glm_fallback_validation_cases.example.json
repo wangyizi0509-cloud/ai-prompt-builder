@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "image_path": "/Users/ant/13401615760079295.jpeg",
+      "expected_type": "private_chat_screenshot",
+      "store_uri_env": "VOLC_IMAGEX_STORE_URI_2"
+    },
+    {
+      "image_path": "/Users/ant/Crushe/32abf758a163e13210f585c7d812a271.jpg",
+      "expected_type": "private_chat_screenshot",
+      "store_uri_env": "VOLC_IMAGEX_STORE_URI_3"
+    },
+    {
+      "image_path": "/Users/ant/聊天/微信图片_20260208215237_212_13.png",
+      "expected_type": "moments_screenshot",
+      "store_uri_env": "VOLC_IMAGEX_STORE_URI_1"
+    }
+  ]
+}
