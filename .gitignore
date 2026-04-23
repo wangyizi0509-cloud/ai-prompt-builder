@@ -40,3 +40,24 @@ agent_impl/logs/
 agent_impl/lsof_*.txt
 
 generated/
+
+# Node modules (e2e tests)
+node_modules/
+
+# E2E test artifacts
+artifacts/
+
+# Test/run output (screenshots, JSON results, tmp files)
+output/
+tmp/
+test-results/
+tmp_req*.txt
+
+# Playwright CLI session files
+.playwright-cli/
+
+# Local runtime data
+agent_impl/local_data/
+
+# Design handoff files (large binaries, not source code)
+设计/
