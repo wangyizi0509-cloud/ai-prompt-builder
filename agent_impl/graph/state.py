@@ -165,7 +165,6 @@ class AgentState(TypedDict, total=False):
     onboarding_turn_count: int
     onboarding_last_answer_fingerprint: Optional[str]
     onboarding_max_turns: int
-    onboarding_handoff: Optional[dict]
     last_onboarding_question: Optional[str]
     _onboarding_interrupted: bool
     _onboarding_interrupt_payload: dict
@@ -178,7 +177,7 @@ class AgentState(TypedDict, total=False):
     # === 维护任务队列（异步提纯/归档）===
     # 这些字段必须在 TypedDict 中声明，否则 LangGraph 不会持久化！
     maintenance_queue: list[dict]           # 维护任务队列
-    maintenance_flags: dict                 # 维护状态标记（如 onboarding_refine_done）
+    maintenance_flags: dict                 # 维护状态标记
     maintenance_last_finalized_at: Optional[str]  # 最后一次 finalize 的时间戳
 
 
@@ -234,12 +233,13 @@ def create_initial_state(user_message: str, **overrides) -> AgentState:
         collected_info={},
         should_continue=True,
         route_to="main_agent",
-        onboarding_completed=False,  # 默认未完成，正常进入 Onboarding
+        # Onboarding 已迁移到独立 REST 流程（onboarding_v2），主图默认跳过老 onboarding 子图。
+        # 若某条链路仍需走老 onboarding（极少情况），可通过 overrides 显式传 False 恢复。
+        onboarding_completed=True,
         pending_crushe_guide=False,
         onboarding_turn_count=0,
         onboarding_last_answer_fingerprint=None,
         onboarding_max_turns=3,
-        onboarding_handoff=None,
         last_onboarding_question=None,
         
         # 循环控制

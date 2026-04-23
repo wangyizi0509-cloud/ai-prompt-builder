@@ -108,22 +108,6 @@ def router_node(state: AgentState, config: RunnableConfig | None = None) -> dict
         if fallback_message_id and not state.get("current_message_id"):
             base_update["current_message_id"] = fallback_message_id
 
-    # 如果 Onboarding 已完成，携带 handoff 给主 Agent，并保留 Onboarding 的即时回复
-    onboarding_handoff = state.get("onboarding_handoff")
-    if state.get("onboarding_completed") and onboarding_handoff:
-        base_update["onboarding_handoff"] = onboarding_handoff
-
-        pending_from_onboarding = state.get("pending_responses") or []
-        if pending_from_onboarding:
-            base_update["pending_responses"] = pending_from_onboarding
-
-        base_update["debug_log"].append({
-            "node": "router",
-            "step": "Onboarding Handoff",
-            "suggested_action": onboarding_handoff.get("suggested_action"),
-            "reason": onboarding_handoff.get("reason"),
-        })
-    
     # [FIX] 确保用户消息被添加到 messages 中
     # 这是关键修复：LangGraph Studio 直接传入 input 时，只有 user_message，没有 messages
     # 我们需要在这里把用户消息添加到对话历史
@@ -260,7 +244,18 @@ def router_node(state: AgentState, config: RunnableConfig | None = None) -> dict
         }
     
     # 3. 业务相关，先决定是否需要 Onboarding，再转发
+    # 注意：Onboarding v2 上线后，create_initial_state 默认 onboarding_completed=True，
+    # 理论上 go_onboarding 永远为 False。若仍被触发为 True，说明某条上游链路
+    # 绕过了默认值，应当告警以便排查老子图被误触发的情况。
     go_onboarding = not state.get("onboarding_completed", False)
+    if go_onboarding:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "router_node: unexpected go_onboarding=True after onboarding_v2 migration. "
+            "onboarding_completed=%s, route_to=onboarding (legacy subgraph). "
+            "Check caller/create_initial_state for missing defaults.",
+            state.get("onboarding_completed"),
+        )
 
     # 确保 messages 为列表（避免上一轮未携带）
     if "messages" not in base_update and not state.get("messages"):

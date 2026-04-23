@@ -102,6 +102,26 @@
 | `paid` | `/paid`(mock 支付页) | 显示"正在跳转支付" |
 | `done` | `/chat`(主对话页) | 跳过整个 onboarding |
 
+### 4.5 `paid → done` 自动衔接主对话(v2.1 新增)
+
+当 index.html onMounted 时发现 `stage === 'paid'`:
+
+1. **自动触发首轮**:立即调 `/api/chat/stream`,`message=""`,同时把 localStorage 里的完整漏斗数据组装成 `onboarding_payload`:
+   ```js
+   {
+     free_text: store.free_text || "",
+     ocr_texts: (store.uploaded_images || []).map(img => ({
+       ocr_result: img.ocr || "",
+       ocr_failed: !!img.ocr_failed,
+     })),
+     answers: store.answers || {},
+   }
+   ```
+2. **发出后推进 stage**:请求发出(不等 SSE 完成)即调 `markDone()` 把 `stage` 从 `paid` 写成 `done`,避免用户刷新时被重复触发。
+3. **本地字段无需新增**:复用现有 `free_text` / `uploaded_images` / `answers`。后端靠 `onboarding_payload` 结构化契约消费,不再读 `report.collected_summary`。
+
+契约细节见 `API_CONTRACT.md §4`(v2.1)。
+
 ### 4.3 状态迁移图(Mermaid)
 
 ```mermaid

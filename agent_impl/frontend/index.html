@@ -10,10 +10,16 @@
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <!-- Marked (Markdown Parser) -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Onboarding v2 · localStorage 共享工具(Agent I) -->
+    <script src="/scripts/onboarding_storage.js"></script>
+    <script src="/scripts/tracker.js"></script>
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
     
     <style>
+        /* v-cloak: 在 Vue 挂载完成前隐藏 #app，避免 {{...}} 模板字面量闪烁暴露 */
+        [v-cloak] { display: none !important; }
+
         :root {
             --cr-bg: #fbf4ff;
             --cr-bg-2: #fff7fb;
@@ -1237,7 +1243,7 @@
     </style>
 </head>
 <body>
-    <div class="layout-container" id="app">
+    <div class="layout-container" id="app" v-cloak>
         <!-- LEFT: Context Debug Sidebar -->
         <div class="context-sidebar" :class="{ 'open': showContext }">
             <div class="p-4 border-b border-gray-700 bg-[#1a1a2e] flex justify-between items-center">
@@ -1396,15 +1402,6 @@
                             <span class="context-stat-value">
                                 {{ contextData?.onboarding_status?.turn_count ?? 0 }} / {{ contextData?.onboarding_status?.max_turns ?? 3 }}
                             </span>
-                        </div>
-                        <div class="context-stat">
-                            <span>有 Handoff 数据</span>
-                            <span class="context-stat-value">
-                                {{ contextData?.onboarding_status?.has_handoff ? '是' : '否' }}
-                            </span>
-                        </div>
-                        <div class="text-xs text-gray-400 mt-2">
-                            提示：Onboarding 完成后会触发 onboarding_refine 任务
                         </div>
                     </div>
                 </div>
@@ -1764,9 +1761,9 @@
                             </button>
                         </div>
                     </div>
-                    <!-- Guest: Login entry -->
+                    <!-- Guest: Login entry · Onboarding v2 本期无登录,隐藏(保留节点供恢复) -->
                     <a
-                        v-else
+                        v-if="false"
                         href="/auth.html"
                         class="top-tools-btn px-3 py-1.5 text-sm font-bold bg-white/70 border border-white/40 text-slate-700 hover:bg-white/90"
                         title="登录以同步对话"
@@ -1824,10 +1821,84 @@
                         <p class="mt-4 text-xs bg-gray-50 inline-block px-3 py-1 rounded-full">来和我说说你和ta的现状吧...</p>
                     </div>
 
-                    <div v-for="(msg, index) in messages" :key="index" class="flex flex-col space-y-1">
-                        
+                    <div v-for="(msg, index) in messages" :key="getMessageRenderKey(msg, index)" class="flex flex-col space-y-1">
+
+                        <!-- 工具调用卡片 -->
+                        <div v-if="msg.role === 'system_task' && msg.taskType === 'tool_call'"
+                             class="mx-4 my-1 px-4 py-2 rounded-xl flex items-center gap-2 text-sm"
+                             style="background: #fafafa; border: 1px solid #e8e8e8; color: #666;">
+                            <span style="font-size: 16px;">&#x2699;&#xFE0F;</span>
+                            <span class="font-medium" style="color: #333;">{{ msg.title }}</span>
+                            <span v-if="msg.taskState === 'loading'"
+                                  class="ml-auto text-xs px-2 py-0.5 rounded-full"
+                                  style="background: #fff3e0; color: #f57c00;">调用中…</span>
+                            <span v-else-if="msg.taskState === 'done'"
+                                  class="ml-auto text-xs px-2 py-0.5 rounded-full"
+                                  style="background: #e8f5e9; color: #2e7d32;">&#x2713; 完成</span>
+                            <span v-else-if="msg.taskState === 'error'"
+                                  class="ml-auto text-xs px-2 py-0.5 rounded-full"
+                                  style="background: #fce4ec; color: #c62828;">&#x2717; 失败</span>
+                        </div>
+
+                        <!-- 推理过程折叠卡 -->
+                        <div v-else-if="msg.role === 'reasoning'"
+                             class="mx-4 my-2 rounded-2xl overflow-hidden"
+                             style="background: #f5f0ff; border: 1px solid #e0d5f5;">
+                            <button @click="msg.collapsed = !msg.collapsed"
+                                    class="w-full flex items-center justify-between px-4 py-2 text-sm"
+                                    style="color: #7c4dff;">
+                                <span>&#x1F9E0; {{ msg._displayNode ? '思考完成' : '思考过程' }}</span>
+                                <span>{{ msg.collapsed ? '展开' : '收起' }}</span>
+                            </button>
+                            <div v-if="!msg.collapsed"
+                                 class="px-4 pb-3 text-xs leading-relaxed whitespace-pre-wrap"
+                                 style="color: #555; max-height: 300px; overflow-y: auto;">
+                                {{ msg.content }}
+                            </div>
+                        </div>
+
+                        <!-- DisplayNode: subgraph_thinking 折叠卡 -->
+                        <div v-else-if="msg.role === 'subgraph_thinking' || msg._nodeType === 'subgraph_thinking'"
+                             class="mx-4 my-2 rounded-2xl overflow-hidden"
+                             style="background: #eff6ff; border: 1px solid #bfdbfe;">
+                            <button @click="msg.collapsed = !msg.collapsed"
+                                    class="w-full flex items-center justify-between px-4 py-2 text-sm"
+                                    style="color: #2563eb;">
+                                <span>&#x1F50D; {{ msg.source === 'call_status_agent' ? '现状分析 Agent 思考中...' : msg.source === 'call_plan_agent' ? '策略规划 Agent 思考中...' : msg.source === 'call_guide_agent' ? '指南生成 Agent 思考中...' : '子流程思考中...' }}</span>
+                                <span>{{ msg.collapsed !== false ? '展开' : '收起' }}</span>
+                            </button>
+                            <div v-if="msg.collapsed === false"
+                                 class="px-4 pb-3 text-xs leading-relaxed whitespace-pre-wrap"
+                                 style="color: #555; max-height: 300px; overflow-y: auto;">
+                                {{ msg.content }}
+                            </div>
+                        </div>
+
+                        <!-- DisplayNode: tool_call 卡片（新版，含中文名） -->
+                        <div v-else-if="msg.role === 'tool_call' && msg._displayNode"
+                             class="mx-4 my-1 px-4 py-2 rounded-xl flex items-center gap-2 text-sm"
+                             style="background: #fafafa; border: 1px solid #e8e8e8; color: #666;">
+                            <span style="font-size: 16px;">&#x2699;&#xFE0F;</span>
+                            <span class="font-medium" style="color: #333;">{{ msg.tool_label || msg.tool_name || '执行操作' }}</span>
+                            <span v-if="msg.status === 'calling' || msg.status === 'loading'"
+                                  class="ml-auto text-xs px-2 py-0.5 rounded-full flex items-center gap-1"
+                                  style="background: #fff3e0; color: #f57c00;">
+                                <span class="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>
+                                调用中...
+                            </span>
+                            <span v-else-if="msg.status === 'done'"
+                                  class="ml-auto text-xs px-2 py-0.5 rounded-full"
+                                  style="background: #e8f5e9; color: #2e7d32;">&#x2713; 完成</span>
+                            <span v-else-if="msg.status === 'error'"
+                                  class="ml-auto text-xs px-2 py-0.5 rounded-full"
+                                  style="background: #fce4ec; color: #c62828;">&#x2717; 失败</span>
+                        </div>
+
+                        <!-- DisplayNode: report_card — 已由下方详细卡片替代，不再单独渲染 -->
+                        <template v-else-if="msg._displayNode && msg._nodeType === 'report_card'"></template>
+
                         <!-- System Task Card -->
-                        <div v-if="msg.role === 'system_task'" class="flex justify-center my-2">
+                        <div v-else-if="msg.role === 'system_task'" class="flex justify-center my-2">
                             <div 
                                 class="task-card"
                                 :class="[
@@ -1944,8 +2015,9 @@
                             </div>
                             
                             <!-- Bubble -->
-                            <div 
+                            <div
                                 :class="['max-w-[80%] px-4 py-3 text-sm shadow-sm', msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai']"
+                                :style="msg.isIntermediate ? 'opacity: 0.75' : ''"
                             >
                                 <div v-if="msg.role === 'assistant'" class="markdown-body">
                                     <div v-if="msg.isAssessment" v-html="msg.content"></div>
@@ -1990,6 +2062,12 @@
                         <div v-if="msg.showGuideButton" class="flex justify-start ml-10 mb-4 fade-in-up">
                             <button class="onboarding-btn" @click="openGuideModal">
                                 快速了解Crushe用法
+                            </button>
+                        </div>
+
+                        <div v-if="showGuideFallbackButton && index === messages.length - 1" class="flex justify-start ml-10 mb-4 fade-in-up">
+                            <button class="onboarding-btn" @click="openGuideModal">
+                                继续
                             </button>
                         </div>
                     </div>
@@ -2375,19 +2453,19 @@
 
                     <div class="chatbar-shell">
                     <!-- Photo Upload Button (keeps same interaction) -->
-                    <button 
+                    <button
                         @click="triggerImageUpload"
-                        :disabled="isLoading || isProcessingImages"
+                        :disabled="!!inputLockReason || isProcessingImages"
                         class="chatbar-upload-btn"
                         title="上传图片"
                         aria-label="上传图片"
                     >
                         <img src="./assets/chat_upload_icon.png" alt="" aria-hidden="true" />
                     </button>
-                    
+
                     <!-- Hidden File Input for Image Upload (wyz_1 pipeline) -->
-                    <input 
-                        type="file" 
+                    <input
+                        type="file"
                         ref="mainImageInput"
                         accept="image/*"
                         multiple
@@ -2395,18 +2473,18 @@
                         class="hidden"
                     >
 
-                    <input 
-                        v-model="inputMessage" 
+                    <input
+                        v-model="inputMessage"
                         @keyup.enter="sendMessageAndSwitch"
                         @paste="handlePaste"
-                        type="text" 
-                        placeholder="请输入 您的情感问题..." 
+                        type="text"
+                        :placeholder="inputLockReason === 'pending_inquiry' ? '请先回答问卷...' : '请输入 您的情感问题...'"
                         class="chatbar-input"
-                        :disabled="isLoading || isProcessingImages"
+                        :disabled="!!inputLockReason || isProcessingImages"
                     >
-                    <button 
+                    <button
                         @click="sendMessageAndSwitch"
-                        :disabled="(!inputMessage.trim() && pendingImages.length === 0) || isLoading || isProcessingImages"
+                        :disabled="(!inputMessage.trim() && pendingImages.length === 0) || !!inputLockReason || isProcessingImages"
                         class="chatbar-send-btn"
                         aria-label="发送"
                     >
@@ -2750,28 +2828,66 @@
     </div>
 
     <script>
-        // 全局 401 拦截：未登录时自动跳转登录页
+        // 全局 401 拦截：Onboarding v2 本期无登录(DISABLE_AUTH=1),不再跳 auth.html
+        // 保留 hook 方便将来恢复登录流;本期只打 console.warn,不中断用户
         (function () {
             const _fetch = window.fetch;
             window.fetch = async function (...args) {
                 const response = await _fetch.apply(this, args);
                 if (response.status === 401) {
                     const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
-                    // 排除 auth 相关端点，避免登录/校验请求触发跳转
                     if (!url.includes('/api/auth/')) {
-                        localStorage.removeItem('token');
-                        localStorage.removeItem('user');
-                        window.location.href = '/auth.html';
+                        console.warn('[auth] 401 received on', url, '— Onboarding v2 本期无登录,忽略跳转');
+                        // 旧逻辑(保留注释供恢复登录时参考):
+                        // localStorage.removeItem('token');
+                        // localStorage.removeItem('user');
+                        // window.location.href = '/auth.html';
                     }
                 }
                 return response;
             };
         })();
 
-        const { createApp, ref, computed, onMounted, onBeforeUnmount, nextTick, watch } = Vue;
+        const { createApp, ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } = Vue;
 
         createApp({
             setup() {
+                // ==========================================================
+                // Onboarding v2 · 主入口守卫 + 首轮自动触发
+                // ==========================================================
+                // 付费成功后进入 index.html,若 stage === 'paid' 则自动发起首轮
+                // /api/chat/stream,携带完整 onboarding_payload(free_text +
+                // uploaded_images OCR + answers)。用户无需输入。
+                //
+                // - pendingOnboardingPayload:暂存的首轮 payload,由 sendMessage
+                //   的 Path B 读取后塞进 requestBody,发出后清空
+                // - 入口守卫:onMounted 最开头执行 stage 校验
+                // - 详见 onboarding_v2/API_CONTRACT.md §4
+                const pendingOnboardingPayload = ref(null);
+
+                const buildOnboardingPayloadFromStorage = () => {
+                    try {
+                        const Storage = window.OnboardingStorage;
+                        if (!Storage) return null;
+                        const store = Storage.load();
+                        if (!store) return null;
+                        const ocr_texts = Array.isArray(store.uploaded_images)
+                            ? store.uploaded_images.map((img) => ({
+                                ocr_result: (img && img.ocr) ? String(img.ocr) : '',
+                                ocr_failed: !!(img && img.ocr_failed),
+                            }))
+                            : [];
+                        return {
+                            free_text: typeof store.free_text === 'string' ? store.free_text : '',
+                            ocr_texts,
+                            answers: (store.answers && typeof store.answers === 'object') ? store.answers : {},
+                        };
+                    } catch (e) {
+                        console.warn('[onboarding] build payload failed:', e);
+                        return null;
+                    }
+                };
+
                 // Auth State
                 const currentUser = ref(null);
                 const showLogoutConfirm = ref(false);
@@ -2798,7 +2914,9 @@
                 };
 
                 const redirectToAuth = () => {
-                    window.location.href = '/auth.html';
+                    // Onboarding v2 本期无登录(DISABLE_AUTH=1),不再跳 auth.html
+                    console.warn('[auth] redirectToAuth() called — 本期无登录,跳过跳转');
+                    // 旧逻辑(保留注释):window.location.href = '/auth.html';
                 };
 
                 const checkAuth = async () => {
@@ -2917,6 +3035,21 @@
                 const assistantId = ref('crushe_agent'); // 对应 langgraph.json 中的名称
                 // --------------------------
 
+                // ── Debug Panel ──────────────────────────────────────────
+                const debugPanelOpen = ref(false);
+                const debugLog = ref([]); // max 60 entries
+                const _dbg = (tag, data) => {
+                    const ts = new Date().toLocaleTimeString('zh', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    const entry = { ts, tag, data: typeof data === 'object' ? JSON.stringify(data) : String(data ?? '') };
+                    debugLog.value.unshift(entry);
+                    if (debugLog.value.length > 60) debugLog.value.pop();
+                    if (window.dbgLog) window.dbgLog(tag, data);
+                };
+                // capture unhandled JS errors
+                window.addEventListener('error', e => _dbg('JS ERROR', e.message + ' @ ' + (e.filename || '?') + ':' + e.lineno));
+                window.addEventListener('unhandledrejection', e => _dbg('PROMISE ERR', String(e.reason)));
+                // ─────────────────────────────────────────────────────────
+
                 // Chat State
                 const inputMessage = ref('');
                 const messages = ref([]);
@@ -2936,6 +3069,309 @@
                 const recoveryInProgress = ref(false);
                 const recoveryTimer = ref(null);
                 const maxRecoveryRetries = 4;
+
+                // ─── DisplayStore: 统一展示节点模型 ───
+                const displayNodeMap = reactive(new Map());  // nodeId -> DisplayNode
+                const orderedNodeIds = ref([]);              // 有序 nodeId 列表
+                const streamActive = ref(false);             // 后端流式处理中
+                const hasPendingInquiry = ref(false);        // 存在未回答的提问卡片
+
+                // 工具中文名映射（与后端 display_events.py 保持一致）
+                const TOOL_LABEL_MAP = {
+                    call_status_agent: '分析感情现状',
+                    call_plan_agent: '制定行动策略',
+                    call_guide_agent: '生成行动指南',
+                    load_skill: '加载技能',
+                    ask_human: '向你提问',
+                    task_manager: '管理任务',
+                    context_loader: '加载上下文',
+                    submit_status_report: '提交现状分析',
+                    submit_action_plan: '提交行动策略',
+                    submit_action_guide: '提交行动指南',
+                    update_guide_status: '更新指南状态',
+                    update_guide_content: '更新指南内容',
+                    return_to_main: '返回主流程',
+                };
+                function getToolLabel(name) {
+                    return name && TOOL_LABEL_MAP[name] || '执行操作';
+                }
+
+                // upsert：同 nodeId 原地更新不跳位
+                function upsertDisplayNode(node) {
+                    const nid = node.nodeId;
+                    if (!nid) return;
+                    if (displayNodeMap.has(nid)) {
+                        // 保持原 seq（位置不变），更新其他字段
+                        const existing = displayNodeMap.get(nid);
+                        const oldSeq = existing.seq;
+                        displayNodeMap.set(nid, { ...node, seq: oldSeq });
+                    } else {
+                        displayNodeMap.set(nid, node);
+                        orderedNodeIds.value.push(nid);
+                    }
+                    // 更新 inquiry pending 状态（payload 为空的历史恢复节点不锁定输入）
+                    if (node.nodeType === 'inquiry_card') {
+                        const hasPayloadData = node.payload && node.payload.questions && node.payload.questions.length > 0;
+                        hasPendingInquiry.value = (node.status === 'new' && hasPayloadData);
+                    }
+                }
+
+                // 从 process_event SSE 事件构建 DisplayNode
+                function normalizeProcessEventToDisplayNode(event) {
+                    const payload = event.payload || {};
+                    return {
+                        seq: event.seq,
+                        turnId: event.turn_id,
+                        nodeId: event.node_id,
+                        nodeType: event.node_type || _mapEventTypeToNodeType(event.event_type),
+                        status: event.status || undefined,
+                        source: event.source || 'main_agent',
+                        payload: payload,
+                    };
+                }
+
+                function _mapEventTypeToNodeType(et) {
+                    const map = {
+                        reasoning: 'reasoning',
+                        ai_intermediate: 'ai_intermediate',
+                        ai_message: 'ai_intermediate',
+                        tool_call: 'tool_call',
+                        report_ready: 'report_card',
+                        report_card: 'report_card',
+                        subgraph_thinking: 'subgraph_thinking',
+                    };
+                    return map[et] || 'ai_intermediate';
+                }
+
+                // 从 final.pending_responses 构建 DisplayNode（兼容旧逻辑）
+                function normalizePendingResponseToDisplayNode(resp, fallbackSeq) {
+                    if (resp.phase === 'final' || resp.type === 'text') {
+                        return {
+                            seq: fallbackSeq,
+                            turnId: resp.turn_id || '',
+                            nodeId: resp.node_id || `final:${fallbackSeq}`,
+                            nodeType: 'final_response',
+                            source: resp.from || 'main_agent',
+                            payload: { content: resp.content || '' },
+                        };
+                    }
+                    if (resp.phase === 'subgraph_thinking') {
+                        return {
+                            seq: fallbackSeq,
+                            turnId: resp.turn_id || '',
+                            nodeId: resp.node_id || `subgraph:${resp.from}:${fallbackSeq}`,
+                            nodeType: 'subgraph_thinking',
+                            source: resp.from || 'unknown',
+                            payload: { content: resp.content || '' },
+                        };
+                    }
+                    if (resp.type === 'system_task') {
+                        const rt = resp.taskType === 'strategy' ? 'plan' : (resp.taskType || 'status');
+                        return {
+                            seq: fallbackSeq,
+                            turnId: resp.turn_id || '',
+                            nodeId: resp.node_id || `report:${rt}:${resp.taskKey || fallbackSeq}`,
+                            nodeType: 'report_card',
+                            status: resp.taskState === 'done' ? 'done' : 'loading',
+                            payload: {
+                                report_type: rt,
+                                title: resp.title || resp.label || '',
+                                panel_target: resp.panel_target || _getDefaultPanelTarget(rt),
+                            },
+                        };
+                    }
+                    return null;
+                }
+
+                function _getDefaultPanelTarget(rt) {
+                    const map = {
+                        status: { tab: 'plan', planTab: 'status', anchor: '' },
+                        plan: { tab: 'plan', planTab: 'status', anchor: '#plan-analysis' },
+                        guide: { tab: 'plan', planTab: 'plan', anchor: '' },
+                    };
+                    return map[rt] || { tab: 'plan', planTab: 'status', anchor: '' };
+                }
+
+                // 从历史恢复消息构建 DisplayNode
+                function normalizeHistoryMessageToDisplayNode(msg, idx) {
+                    const meta = msg.metadata || {};
+                    // 如果有 node_type，使用新版 DisplayNode 字段
+                    if (meta.node_type) {
+                        return {
+                            seq: meta.seq || idx,
+                            turnId: meta.turn_id || msg.turn_id || '',
+                            nodeId: meta.node_id || `hist:${idx}`,
+                            nodeType: meta.node_type,
+                            status: meta.status || meta.display_status || undefined,
+                            source: meta.source || meta.display_source || 'main_agent',
+                            payload: _buildPayloadFromHistoryMessage(msg, meta),
+                        };
+                    }
+                    // 降级：根据 kind/role 推断
+                    return _inferDisplayNodeFromLegacyMessage(msg, idx);
+                }
+
+                function _buildPayloadFromHistoryMessage(msg, meta) {
+                    const p = {};
+                    if (msg.content) p.content = msg.content;
+                    if (meta.tool_name) {
+                        p.tool_name = meta.tool_name;
+                        p.tool_label = meta.tool_label || getToolLabel(meta.tool_name);
+                        p.tool_call_id = meta.tool_call_id || '';
+                        p.result_summary = meta.result_summary || '';
+                    }
+                    if (meta.report_type) {
+                        p.report_type = meta.report_type;
+                        p.title = meta.title || '';
+                        p.panel_target = meta.panel_target || _getDefaultPanelTarget(meta.report_type);
+                    }
+                    if (msg.kind === 'inquiry_receipt' || meta.node_type === 'inquiry_receipt') {
+                        p.answers = meta.answers || {};
+                    }
+                    return p;
+                }
+
+                function _inferDisplayNodeFromLegacyMessage(msg, idx) {
+                    const kind = msg.kind || '';
+                    const role = msg.role || '';
+                    let nodeType = 'ai_intermediate';
+                    let status = undefined;
+
+                    if (role === 'user' || (kind === 'chat_text' && role === 'user')) nodeType = 'user_message';
+                    else if (kind === 'reasoning_event') nodeType = 'reasoning';
+                    else if (kind === 'tool_event') { nodeType = 'tool_call'; status = 'done'; }
+                    else if (kind === 'system_task') { nodeType = 'report_card'; status = 'done'; }
+                    else if (kind === 'interrupt_inquiry') { nodeType = 'inquiry_card'; status = 'submitted'; }
+                    else if (kind === 'inquiry_receipt') { nodeType = 'inquiry_receipt'; status = 'submitted'; }
+                    else if (kind === 'subgraph_thinking') nodeType = 'subgraph_thinking';
+                    else if (kind === 'chat_text' && role === 'assistant') nodeType = 'final_response';
+                    else if (kind === 'ai_intermediate') nodeType = 'ai_intermediate';
+
+                    return {
+                        seq: idx,
+                        turnId: msg.turn_id || '',
+                        nodeId: `legacy:${kind || role}:${idx}`,
+                        nodeType,
+                        status,
+                        source: 'main_agent',
+                        payload: _buildPayloadFromHistoryMessage(msg, msg.metadata || {}),
+                    };
+                }
+
+                // 将 DisplayStore 转换为 messages 格式给现有渲染逻辑（桥接层）
+                function buildMessagesViewFromDisplayNodes() {
+                    const result = [];
+                    for (const nid of orderedNodeIds.value) {
+                        const node = displayNodeMap.get(nid);
+                        if (!node) continue;
+                        result.push(_displayNodeToMessage(node));
+                    }
+                    return result;
+                }
+
+                function _displayNodeToMessage(node) {
+                    const base = {
+                        _displayNode: true,
+                        _nodeId: node.nodeId,
+                        _nodeType: node.nodeType,
+                        _seq: node.seq,
+                        _status: node.status,
+                        _source: node.source,
+                    };
+
+                    switch (node.nodeType) {
+                        case 'user_message':
+                            return { ...base, role: 'user', content: node.payload?.content || '' };
+                        case 'reasoning':
+                            return { ...base, role: 'reasoning', content: node.payload?.content || '', collapsed: true };
+                        case 'subgraph_thinking':
+                            return { ...base, role: 'subgraph_thinking', content: node.payload?.content || '', source: node.source };
+                        case 'tool_call':
+                            return { ...base, role: 'tool_call', content: '', tool_name: node.payload?.tool_name, tool_label: node.payload?.tool_label || getToolLabel(node.payload?.tool_name), tool_call_id: node.payload?.tool_call_id, status: node.status, result_summary: node.payload?.result_summary };
+                        case 'report_card':
+                            return { ...base, role: 'system_task', type: 'system_task', taskType: node.payload?.report_type === 'plan' ? 'strategy' : node.payload?.report_type, taskState: node.status || 'done', title: node.payload?.title || '', panel_target: node.payload?.panel_target, report_type: node.payload?.report_type };
+                        case 'inquiry_card':
+                            return { ...base, role: 'inquiry_card', ...node.payload, status: node.status };
+                        case 'inquiry_receipt':
+                            return { ...base, role: 'inquiry_receipt', content: node.payload?.content || '', answers: node.payload?.answers };
+                        case 'ai_intermediate':
+                            return { ...base, role: 'assistant', content: node.payload?.content || '', isIntermediate: true };
+                        case 'final_response':
+                            return { ...base, role: 'assistant', content: node.payload?.content || '' };
+                        default:
+                            return { ...base, role: 'assistant', content: node.payload?.content || '' };
+                    }
+                }
+
+                function _findReportInsertIdx(reportType) {
+                    const TOOL_TITLES = { status: '分析感情现状', plan: '制定行动策略', guide: '生成行动指南' };
+                    const TOOL_NAMES = { status: 'call_status_agent', plan: 'call_plan_agent', guide: 'call_guide_agent' };
+                    const title = TOOL_TITLES[reportType];
+                    const name = TOOL_NAMES[reportType];
+                    if (!title && !name) return -1;
+                    for (let i = messages.value.length - 1; i >= 0; i--) {
+                        const m = messages.value[i];
+                        if (m.taskType === 'tool_call' && (m.title === title || m.tool_name === name)) {
+                            return i + 1;
+                        }
+                    }
+                    return -1;
+                }
+
+                function syncReportCardsFromDisplayNodes(displayNodes) {
+                    const REPORT_TITLES_SYNC = { status: '情感罗盘', plan: '行动蓝图', guide: '行动指南' };
+                    for (const dn of displayNodes) {
+                        if (!dn || dn.nodeType !== 'report_card') continue;
+                        const rt = dn.payload?.report_type || '';
+                        const rcKey = `report_${rt || dn.payload?.report_id || 'unknown'}`;
+                        const exists = messages.value.some(
+                            m => m.role === 'system_task' && m.taskType === 'report_card' && m.taskKey === rcKey
+                        );
+                        if (!exists) {
+                            const reportMsg = {
+                                _displayNode: true,
+                                _nodeType: 'report_card',
+                                role: 'system_task',
+                                taskType: 'report_card',
+                                taskKey: rcKey,
+                                taskState: dn.status || 'done',
+                                label: 'REPORT',
+                                title: REPORT_TITLES_SYNC[rt] || dn.payload?.title || '报告',
+                                report_type: rt,
+                                desc: dn.payload?.result_summary || '',
+                                disabled: dn.status === 'loading',
+                            };
+                            const insertIdx = _findReportInsertIdx(rt);
+                            if (insertIdx >= 0) {
+                                messages.value.splice(insertIdx, 0, reportMsg);
+                            } else {
+                                messages.value.push(reportMsg);
+                            }
+                            scrollToBottom();
+                        }
+                    }
+                }
+
+                // 报告卡片跳转
+                function handleReportCardClick(msg) {
+                    const pt = msg.panel_target || _getDefaultPanelTarget(msg.report_type);
+                    currentTab.value = pt.tab || 'plan';
+                    currentPlanTab.value = pt.planTab || 'status';
+                    if (pt.anchor) {
+                        nextTick(() => {
+                            const el = document.querySelector(pt.anchor);
+                            if (el) el.scrollIntoView({ behavior: 'smooth' });
+                        });
+                    }
+                }
+
+                // 输入锁定
+                const inputLockReason = computed(() => {
+                    if (streamActive.value || isLoading.value) return 'streaming';
+                    if (hasPendingInquiry.value) return 'pending_inquiry';
+                    return null;
+                });
+                // ─── End DisplayStore ───
 
                 const getAssistantMessageCount = () => {
                     return (messages.value || []).filter((m) => m && m.role === 'assistant' && typeof m.content === 'string' && m.content.trim()).length;
@@ -3039,9 +3475,15 @@
 
                 const applyRecoverySnapshot = async (snapshot) => {
                     if (!snapshot) return false;
-                    const uiMessages = (snapshot.messages || []).map(m => _mapSupabaseMessageToUI(m)).filter(Boolean);
+                    const uiMessages = normalizePersistedHistoryMessages(snapshot.messages || []);
                     if (uiMessages.length > 0) {
                         messages.value = uiMessages;
+                    }
+                    // 历史消息走 DisplayNode 统一模型
+                    const rawHistoryMsgs = snapshot.messages || [];
+                    for (let i = 0; i < rawHistoryMsgs.length; i++) {
+                        const dn = normalizeHistoryMessageToDisplayNode(rawHistoryMsgs[i], i);
+                        if (dn && dn.nodeId) upsertDisplayNode(dn);
                     }
                     if (snapshot.state) {
                         processStateUpdate(snapshot.state, { isHistoryRestore: true });
@@ -3137,6 +3579,8 @@
                     action_guides: [],  // 新版：支持多个指南
                     inquiry_card: null,
                     preliminary_assessment: null,
+                    pending_crushe_guide: false,
+                    onboarding_completed: false,
                     debug_log: []
                 });
 
@@ -3157,12 +3601,23 @@
                     const role = msg.role || 'assistant';
                     const content = msg.content || '';
                     const metadata = msg.metadata || {};
+                    const baseMessage = {
+                        id: msg.id || '',
+                        kind,
+                        seq: msg.seq || 0,
+                        partIndex: msg.part_index || 0,
+                    };
 
                     if (kind === 'chat_text') {
                         if (!content) return null;
                         // 过滤系统内部标记消息（[SYS:*] 前缀）
                         if (/\[SYS:/.test(content)) return null;
-                        return { role, content };
+                        return {
+                            ...baseMessage,
+                            role,
+                            content,
+                            showGuideButton: Boolean(metadata.showGuideButton),
+                        };
                     }
 
                     if (kind === 'system_task') {
@@ -3170,6 +3625,7 @@
                         const taskType = metadata.taskType || 'status';
                         const taskKey = metadata.taskKey || `history_${msg.seq || msg.id}`;
                         return {
+                            ...baseMessage,
                             role: 'system_task',
                             taskType,
                             taskKey,
@@ -3177,7 +3633,7 @@
                             label: metadata.label || '',
                             title: metadata.title || '',
                             desc: metadata.desc || content || '',
-                            disabled: true,
+                            disabled: Boolean(metadata.disabled),
                             _taskKey: taskKey,
                         };
                     }
@@ -3191,14 +3647,15 @@
                             inquiryCardByTaskKey.value[taskKey] = deepClone(normalized.card);
                         }
                         return {
+                            ...baseMessage,
                             role: 'system_task',
                             taskType: 'inquiry',
                             taskKey,
-                            taskState: 'done',
+                            taskState: metadata.taskState || 'new',
                             label: 'QUESTION',
                             title: '需要补充信息',
                             desc: ((normalized && normalized.card && normalized.card.intro) ? normalized.card.intro : card.intro) || '为了更好地制定策略，请回答几个问题',
-                            disabled: true,
+                            disabled: Boolean(metadata.disabled),
                             _taskKey: taskKey,
                             inquiryData: {
                                 intro: ((normalized && normalized.card && normalized.card.intro) ? normalized.card.intro : card.intro) || '',
@@ -3213,16 +3670,16 @@
                         if (!pa || typeof pa !== 'object') return null;
                         const html = renderAssessmentToHTML(pa);
                         if (!html) return null;
-                        return { role: 'assistant', content: html, isAssessment: true };
+                        return { ...baseMessage, role: 'assistant', content: html, isAssessment: true };
                     }
 
                     if (kind === 'inquiry_receipt') {
                         const answers = metadata.answers || {};
                         const card = metadata.inquiry_card || {};
                         const normalized = normalizeInquiryCardForUI(card);
-                        const taskKey = (normalized && normalized.key) ? normalized.key : `inquiry_${msg.turn_id || msg.id}`;
-                        const details = [];
-                        if (card.questions && Array.isArray(card.questions)) {
+                        const taskKey = metadata.taskKey || ((normalized && normalized.key) ? normalized.key : `inquiry_${msg.turn_id || msg.id}`);
+                        const details = Array.isArray(metadata.details) ? metadata.details : [];
+                        if (details.length === 0 && card.questions && Array.isArray(card.questions)) {
                             for (const q of card.questions) {
                                 const qid = q.id || '';
                                 const answer = answers[qid];
@@ -3235,10 +3692,11 @@
                             }
                         }
                         return {
+                            ...baseMessage,
                             role: 'inquiry_receipt',
                             id: `receipt_${msg.turn_id || msg.id}`,
                             taskKey,
-                            summary: '已提交问卷',
+                            summary: metadata.summary || '已提交问卷',
                             status: 'success',
                             details,
                             images: [],
@@ -3246,23 +3704,105 @@
                         };
                     }
 
+                    // Kind: ai_intermediate - AI 中间过渡消息
+                    if (kind === 'ai_intermediate') {
+                        if (!content) return null;
+                        return { ...baseMessage, role: 'assistant', content, isIntermediate: true };
+                    }
+
+                    // Kind: tool_event - 工具调用事件
+                    if (kind === 'tool_event') {
+                        const toolName = (metadata.tool_name) || '';
+                        const taskKey = `history_tool_${msg.seq || msg.id}`;
+                        return {
+                            ...baseMessage,
+                            role: 'system_task',
+                            taskType: 'tool_call',
+                            taskKey,
+                            taskState: 'done',
+                            label: 'TOOL',
+                            title: toolName,
+                            desc: metadata.result_summary || '',
+                            disabled: true,
+                            _taskKey: taskKey,
+                        };
+                    }
+
+                    // Kind: reasoning_event - 推理过程
+                    if (kind === 'reasoning_event') {
+                        if (!content) return null;
+                        return { ...baseMessage, role: 'reasoning', content, collapsed: true };
+                    }
+
                     // 兜底：作为普通文本消息
                     if (content) {
-                        return { role, content };
+                        return { ...baseMessage, role, content };
                     }
                     return null;
                 };
 
+                const normalizePersistedHistoryMessages = (rawMessages) => {
+                    if (!Array.isArray(rawMessages) || rawMessages.length === 0) return [];
+                    const sortedRawMsgs = [...rawMessages].sort((a, b) => {
+                        const aSeq = Number(a?.seq || 0);
+                        const bSeq = Number(b?.seq || 0);
+                        if (aSeq !== bSeq) return aSeq - bSeq;
+                        const aTurnSeq = Number(a?.turn_seq || 0);
+                        const bTurnSeq = Number(b?.turn_seq || 0);
+                        if (aTurnSeq !== bTurnSeq) return aTurnSeq - bTurnSeq;
+                        return Number(a?.part_index || 0) - Number(b?.part_index || 0);
+                    });
+                    return dedupeHistoryMessages(
+                        sortedRawMsgs.map(m => {
+                            if (m && typeof m === 'object' && !('kind' in m) && ('taskType' in m || 'showGuideButton' in m || 'isAssessment' in m)) {
+                                return m;
+                            }
+                            return _mapSupabaseMessageToUI(m) || m;
+                        }).filter(Boolean)
+                    );
+                };
+
                 const pushSystemTaskOnce = (key, payload) => {
+                    const nextMessage = {
+                        ...payload,
+                        clientKey: payload.clientKey || `task:${key}`,
+                    };
+                    const existingIdx = messages.value.findIndex(
+                        m => m?.role === 'system_task' && (m.taskKey === key || m._taskKey === key)
+                    );
+                    if (existingIdx !== -1) {
+                        messages.value[existingIdx] = {
+                            ...(messages.value[existingIdx] || {}),
+                            ...nextMessage,
+                            _taskKey: key,
+                        };
+                        taskMessageIds.value.add(key);
+                        return;
+                    }
                     if (taskMessageIds.value.has(key)) return;
                     taskMessageIds.value.add(key);
-                    messages.value.push(payload);
+                    messages.value.push({
+                        ...nextMessage,
+                        _taskKey: nextMessage._taskKey || key,
+                    });
                 };
 
                 const pushAssistantOnce = (key, content) => {
                     if (assistantMessageIds.value.has(key)) return;
                     assistantMessageIds.value.add(key);
-                    messages.value.push({ role: 'assistant', content });
+                    messages.value.push({
+                        role: 'assistant',
+                        content,
+                        clientKey: `assistant:${key}`,
+                    });
+                };
+
+                const getAssistantVisibleMessageDedupKey = (content) => {
+                    const normalized = typeof content === 'string'
+                        ? content.replace(/\s+/g, ' ').trim()
+                        : '';
+                    if (!normalized) return '';
+                    return `assistant_visible:${normalized.substring(0, 120)}`;
                 };
 
                 const getAssessmentMessageKey = (assessment) => {
@@ -3286,26 +3826,317 @@
                     messages.value.push({
                         role: 'assistant',
                         content: assessmentHtml,
-                        isAssessment: true
+                        isAssessment: true,
+                        clientKey: `assessment:${key}`,
                     });
                     return true;
+                };
+
+                const getPendingResponseMessageKey = (resp) => {
+                    if (!(resp && typeof resp === 'object')) return '';
+                    if (typeof resp.messageKey === 'string' && resp.messageKey.trim()) return resp.messageKey.trim();
+                    if (typeof resp.taskKey === 'string' && resp.taskKey.trim()) return resp.taskKey.trim();
+                    const content = typeof resp.content === 'string' ? resp.content : '';
+                    return `${resp.from || 'assistant'}_${content.substring(0, 50)}`;
                 };
 
                 const pushPendingResponsesDedup = (pendingResponses) => {
                     if (!Array.isArray(pendingResponses) || pendingResponses.length === 0) return false;
                     let hasResponse = false;
                     pendingResponses.forEach(resp => {
-                        if (!(resp && resp.content)) return;
-                        const msgKey = `${resp.from || 'assistant'}_${String(resp.content).substring(0, 50)}`;
-                        if (displayedMessageIds.value.has(msgKey)) return;
-                        displayedMessageIds.value.add(msgKey);
-                        messages.value.push({ role: 'assistant', content: resp.content });
+                        if (!(resp && typeof resp === 'object')) return;
+                        if (resp.type === 'system_task' || resp.taskType) {
+                            const taskKey = String(resp.taskKey || '').trim() || `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                            pushSystemTaskOnce(taskKey, {
+                                role: 'system_task',
+                                taskType: resp.taskType || 'status',
+                                taskKey,
+                                taskState: resp.taskState || 'done',
+                                label: resp.label || '',
+                                title: resp.title || '',
+                                desc: resp.desc || resp.content || '',
+                                disabled: Boolean(resp.disabled),
+                                _taskKey: taskKey,
+                            });
+                            hasResponse = true;
+                        } else if (resp.content) {
+                            const msgKey = getPendingResponseMessageKey(resp);
+                            const visibleKey = getAssistantVisibleMessageDedupKey(resp.content, resp.from || 'assistant');
+                            const dedupKey = visibleKey || msgKey;
+                            if (!dedupKey || displayedMessageIds.value.has(dedupKey)) {
+                                if (pushAssessmentMessageDedup(resp.preliminary_assessment)) {
+                                    hasResponse = true;
+                                }
+                                return;
+                            }
+                            displayedMessageIds.value.add(dedupKey);
+                            if (resp.showGuideButton) {
+                                guidePrompted.value = true;
+                            }
+                            messages.value.push({
+                                role: 'assistant',
+                                content: resp.content,
+                                showGuideButton: Boolean(resp.showGuideButton),
+                                clientKey: `pending:${dedupKey}`,
+                            });
+                            hasResponse = true;
+                        }
                         if (pushAssessmentMessageDedup(resp.preliminary_assessment)) {
                             hasResponse = true;
                         }
-                        hasResponse = true;
                     });
                     return hasResponse;
+                };
+
+                const shouldGateVisibleOutputs = (statePatch) => {
+                    if (guideCompleted.value) return false;
+                    if (!(statePatch && typeof statePatch === 'object')) return false;
+                    const hasReadyOutputs = Boolean(
+                        statePatch.status_report ||
+                        statePatch.action_plan ||
+                        statePatch.action_guide ||
+                        (Array.isArray(statePatch.action_guides) && statePatch.action_guides.length > 0)
+                    );
+                    return Boolean(statePatch.pending_crushe_guide) && hasReadyOutputs;
+                };
+
+                const splitPendingResponsesForGuideGate = (pendingResponses, statePatch) => {
+                    if (!shouldGateVisibleOutputs(statePatch)) {
+                        return { immediate: Array.isArray(pendingResponses) ? pendingResponses : [], deferred: [] };
+                    }
+
+                    const immediate = [];
+                    const deferred = [];
+                    (pendingResponses || []).forEach((resp) => {
+                        if (!(resp && typeof resp === 'object')) return;
+                        const taskType = resp.taskType || '';
+                        const phase = resp.phase || '';
+                        const shouldDefer =
+                            taskType === 'status' ||
+                            taskType === 'strategy' ||
+                            taskType === 'plan' ||
+                            phase === 'status_preface' ||
+                            phase === 'plan_preface';
+                        if (shouldDefer) deferred.push(resp);
+                        else immediate.push(resp);
+                    });
+                    return { immediate, deferred };
+                };
+
+                const mergePendingGatedOutputs = (statePatch, deferredResponses) => {
+                    const previous = pendingGatedOutputs.value || {};
+                    const previousDeferred = Array.isArray(previous.pending_responses) ? previous.pending_responses : [];
+                    pendingGatedOutputs.value = {
+                        ...previous,
+                        ...(statePatch || {}),
+                        pending_responses: previousDeferred.concat(deferredResponses || []),
+                    };
+                };
+
+                const dedupeHistoryMessages = (uiMessages) => {
+                    if (!Array.isArray(uiMessages) || uiMessages.length === 0) return [];
+                    const normalizeVisibleText = (value) => {
+                        if (typeof value !== 'string') return '';
+                        return value.replace(/\s+/g, ' ').trim().slice(0, 200);
+                    };
+                    const submittedInquiryTaskKeys = new Set();
+                    const finalAssistantTextKeys = new Set();
+                    uiMessages.forEach((msg) => {
+                        if (msg?.role === 'inquiry_receipt' && msg.taskKey) {
+                            submittedInquiryTaskKeys.add(msg.taskKey);
+                        }
+                        if (msg?.role === 'assistant' && !msg?.isIntermediate) {
+                            const textKey = normalizeVisibleText(msg.content);
+                            if (textKey) finalAssistantTextKeys.add(textKey);
+                        }
+                    });
+                    const latestInquiryByTaskKey = new Map();
+                    uiMessages.forEach((msg, index) => {
+                        if (
+                            msg?.role === 'system_task' &&
+                            msg.taskType === 'inquiry' &&
+                            msg.taskKey &&
+                            !submittedInquiryTaskKeys.has(msg.taskKey)
+                        ) {
+                            latestInquiryByTaskKey.set(msg.taskKey, index);
+                        }
+                    });
+                    return uiMessages.filter((msg, index) => {
+                        if (msg?.role === 'assistant' && msg?.isIntermediate) {
+                            const textKey = normalizeVisibleText(msg.content);
+                            if (textKey && finalAssistantTextKeys.has(textKey)) return false;
+                        }
+                        if (msg?.role === 'system_task' && msg.taskType === 'inquiry' && msg.taskKey) {
+                            if (submittedInquiryTaskKeys.has(msg.taskKey)) return false;
+                        }
+                        if (msg?.role === 'system_task' && msg.taskType === 'inquiry' && msg.taskKey) {
+                            return latestInquiryByTaskKey.get(msg.taskKey) === index;
+                        }
+                        return true;
+                    });
+                };
+
+                const hasSubmittedInquiryReceipt = (taskKey) => {
+                    if (!taskKey) return false;
+                    return messages.value.some(
+                        msg => msg?.role === 'inquiry_receipt' && msg.taskKey === taskKey
+                    );
+                };
+
+                const getMessageRenderKey = (msg, index = 0) => {
+                    if (!msg || typeof msg !== 'object') return `msg:${index}`;
+                    if (typeof msg.clientKey === 'string' && msg.clientKey) return msg.clientKey;
+                    if (typeof msg.id === 'string' && msg.id) return `id:${msg.id}`;
+                    if (msg.role === 'inquiry_receipt' && msg.id) return `receipt:${msg.id}`;
+                    if (msg.role === 'system_task' && msg.taskKey) return `task:${msg.taskType || 'task'}:${msg.taskKey}`;
+                    if (msg.kind && msg.seq) return `${msg.kind}:${msg.seq}`;
+                    if (msg.role && msg.seq) return `${msg.role}:${msg.seq}`;
+                    if (typeof msg.content === 'string' && msg.content) return `${msg.role || 'msg'}:${msg.content.slice(0, 40)}:${index}`;
+                    return `msg:${index}`;
+                };
+
+                // 处理实时中间过程事件（来自 get_stream_writer()）
+                const handleProcessEvent = (event, sseChunk) => {
+                    if (!event || !event.event_type) return;
+
+                    // --- DisplayNode 统一展示层 ---
+                    // sseChunk 是完整的 SSE 顶层对象，包含 seq/turn_id/node_id/node_type
+                    // event 是 sseChunk.payload，包含 event_type/content 等
+                    const enriched = sseChunk ? { ...event, seq: sseChunk.seq, turn_id: sseChunk.turn_id, node_id: sseChunk.node_id, node_type: sseChunk.node_type, source: sseChunk.source } : event;
+                    if (enriched.seq !== undefined && enriched.node_id) {
+                        const dn = normalizeProcessEventToDisplayNode(enriched);
+                        if (dn && dn.nodeId) upsertDisplayNode(dn);
+                    }
+
+                    switch (event.event_type) {
+                        case 'ai_message': {
+                            if (!event.content) break;
+                            const key = getAssistantVisibleMessageDedupKey(event.content, 'assistant');
+                            if (displayedMessageIds.value.has(key)) break;
+                            displayedMessageIds.value.add(key);
+                            messages.value.push({
+                                role: 'assistant',
+                                content: event.content,
+                                isIntermediate: true,
+                            });
+                            scrollToBottom();
+                            break;
+                        }
+                        case 'tool_call': {
+                            const cardKey = `tool_${event.tool_call_id || event.tool_name}`;
+                            const existingIdx = messages.value.findIndex(
+                                m => m.role === 'system_task' && m.taskType === 'tool_call' && m.taskKey === cardKey
+                            );
+                            if (event.status === 'calling' || event.status === 'loading') {
+                                if (existingIdx === -1) {
+                                    messages.value.push({
+                                        role: 'system_task',
+                                        taskType: 'tool_call',
+                                        taskKey: cardKey,
+                                        taskState: 'loading',
+                                        label: 'TOOL',
+                                        title: event.tool_label || event.tool_name || '工具调用',
+                                        desc: '',
+                                        disabled: true,
+                                    });
+                                    scrollToBottom();
+                                }
+                            } else if (event.status === 'done' || event.status === 'error') {
+                                if (existingIdx !== -1) {
+                                    messages.value[existingIdx] = {
+                                        ...messages.value[existingIdx],
+                                        taskState: event.status === 'done' ? 'done' : 'error',
+                                        desc: event.result_summary || '',
+                                    };
+                                }
+                            }
+                            break;
+                        }
+                        case 'reasoning': {
+                            if (!event.content) break;
+                            const rKey = `reasoning_${String(event.content).substring(0, 40)}`;
+                            if (displayedMessageIds.value.has(rKey)) break;
+                            displayedMessageIds.value.add(rKey);
+                            messages.value.push({
+                                role: 'reasoning',
+                                content: event.content,
+                                collapsed: true,
+                            });
+                            scrollToBottom();
+                            break;
+                        }
+                        case 'report_card': {
+                            const rcKey = `report_${event.report_type || event.report_id || 'unknown'}`;
+                            const rcIdx = messages.value.findIndex(
+                                m => m.role === 'system_task' && m.taskType === 'report_card' && m.taskKey === rcKey
+                            );
+                            if (event.status === 'loading') {
+                                if (rcIdx === -1) {
+                                    const REPORT_TITLES = { status: '情感罗盘', plan: '行动蓝图', guide: '行动指南' };
+                                    messages.value.push({
+                                        _displayNode: true,
+                                        _nodeType: 'report_card',
+                                        role: 'system_task',
+                                        taskType: 'report_card',
+                                        taskKey: rcKey,
+                                        taskState: 'loading',
+                                        label: 'REPORT',
+                                        title: REPORT_TITLES[event.report_type] || '报告生成中',
+                                        report_type: event.report_type,
+                                        desc: '',
+                                        disabled: true,
+                                    });
+                                    scrollToBottom();
+                                }
+                            } else if (event.status === 'done') {
+                                if (rcIdx !== -1) {
+                                    messages.value[rcIdx] = {
+                                        ...messages.value[rcIdx],
+                                        taskState: 'done',
+                                        desc: event.result_summary || '',
+                                        disabled: false,
+                                    };
+                                } else {
+                                    const REPORT_TITLES_DONE = { status: '情感罗盘', plan: '行动蓝图', guide: '行动指南' };
+                                    const reportMsg = {
+                                        _displayNode: true,
+                                        _nodeType: 'report_card',
+                                        role: 'system_task',
+                                        taskType: 'report_card',
+                                        taskKey: rcKey,
+                                        taskState: 'done',
+                                        label: 'REPORT',
+                                        title: REPORT_TITLES_DONE[event.report_type] || '报告已生成',
+                                        report_type: event.report_type,
+                                        desc: event.result_summary || '',
+                                        disabled: false,
+                                    };
+                                    const insertIdx = _findReportInsertIdx(event.report_type);
+                                    if (insertIdx >= 0) {
+                                        messages.value.splice(insertIdx, 0, reportMsg);
+                                    } else {
+                                        messages.value.push(reportMsg);
+                                    }
+                                    scrollToBottom();
+                                }
+                                if (event.content) {
+                                    const rt = event.report_type;
+                                    if (rt === 'status') processStateUpdate({ status_report: event.content });
+                                    else if (rt === 'plan') processStateUpdate({ action_plan: event.content });
+                                }
+                            }
+                            break;
+                        }
+                        case 'report_ready': {
+                            const reportContent = event.content || '';
+                            if (event.report_kind === 'status_report' && reportContent) {
+                                processStateUpdate({ status_report: reportContent });
+                            } else if (event.report_kind === 'action_plan' && reportContent) {
+                                processStateUpdate({ action_plan: reportContent });
+                            }
+                            break;
+                        }
+                    }
                 };
 
                 const ensureUniqueKey = (baseKey, usedKeys) => {
@@ -3593,6 +4424,21 @@
                     };
                 };
 
+                const clearFrontendInquiryIfBackendEmpty = (statePatch = null, explicitInquiryCard = undefined) => {
+                    const hasExplicitStateField = Boolean(statePatch) && Object.prototype.hasOwnProperty.call(statePatch, 'inquiry_card');
+                    const hasBackendInquiry =
+                        explicitInquiryCard && Array.isArray(explicitInquiryCard.questions) && explicitInquiryCard.questions.length > 0;
+                    if (!hasExplicitStateField || hasBackendInquiry) return false;
+                    if (statePatch && statePatch.inquiry_card) return false;
+
+                    inquiryCard.value = null;
+                    currentInquiryCardKey.value = '';
+                    activeInquiryTaskKey.value = '';
+                    inquiryAnswers.value = {};
+                    showInquiryModal.value = false;
+                    return true;
+                };
+
                 const disableLatestInquiryTask = () => {
                     for (let i = messages.value.length - 1; i >= 0; i--) {
                         const msg = messages.value[i];
@@ -3844,51 +4690,16 @@
                             if (msgData.success) {
                                 // 3. 将 Supabase 消息格式转换为前端消息格式
                                 const rawMsgs = msgData.messages || [];
-                                const uiMessages = rawMsgs.map(m => _mapSupabaseMessageToUI(m)).filter(Boolean);
-
-                                // 4. 如果 state 中有 preliminary_assessment，在"初判卡"提示语后插入
-                                const restoredState = (stateData.success && stateData.state) ? stateData.state : null;
-                                if (restoredState) {
-                                    const pa = restoredState.preliminary_assessment;
-                                    if (pa && typeof pa === 'object') {
-                                        const hasAssessment = uiMessages.some(m =>
-                                            Boolean(m && (m.isAssessment || (m.role === 'assistant' && typeof m.content === 'string' && m.content.includes('assessment-card'))))
-                                        );
-                                        if (!hasAssessment) {
-                                            const html = renderAssessmentToHTML(pa);
-                                            if (html) {
-                                                // 找到"初判卡"提示语的位置（assistant 消息中含"初判"关键词）
-                                                let insertIdx = -1;
-                                                for (let i = 0; i < uiMessages.length; i++) {
-                                                    const m = uiMessages[i];
-                                                    if (m.role === 'assistant' && m.content &&
-                                                        (m.content.includes('初判卡') || m.content.includes('初判'))) {
-                                                        insertIdx = i + 1;
-                                                        break;
-                                                    }
-                                                }
-                                                if (insertIdx < 0) {
-                                                    for (let i = 0; i < uiMessages.length; i++) {
-                                                        const m = uiMessages[i];
-                                                        if (m?.role === 'system_task') {
-                                                            insertIdx = i;
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-                                                const assessmentMsg = { role: 'assistant', content: html, isAssessment: true };
-                                                if (insertIdx >= 0) {
-                                                    uiMessages.splice(insertIdx, 0, assessmentMsg);
-                                                } else {
-                                                    uiMessages.push(assessmentMsg);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                                const uiMessages = normalizePersistedHistoryMessages(rawMsgs);
 
                                 messages.value = uiMessages;
                                 console.log('[History] Loaded messages count:', messages.value.length);
+
+                                // 历史消息走 DisplayNode 统一模型
+                                for (let i = 0; i < rawMsgs.length; i++) {
+                                    const dn = normalizeHistoryMessageToDisplayNode(rawMsgs[i], i);
+                                    if (dn && dn.nodeId) upsertDisplayNode(dn);
+                                }
 
                                 // 恢复 taskMessageIds 避免重复
                                 uiMessages.forEach(m => {
@@ -3902,6 +4713,9 @@
                             if (stateData.success && stateData.state) {
                                 console.log('[History] Restoring dashboard state');
                                 processStateUpdate(stateData.state, { isHistoryRestore: true });
+                                // 历史恢复时聊天区已由 /messages 还原；这里再主动刷新一次上下文面板，
+                                // 避免 contextData 仍停留在初始空态，导致面板显示“未生成/暂无指南”。
+                                await refreshContext();
                             }
 
                             await scrollToBottom();
@@ -3920,46 +4734,17 @@
                                 const historyData = await historyRes.json();
 
                                 if (historyData.success) {
-                                    const legacyMsgs = (historyData.messages || []).map(m => _mapSupabaseMessageToUI(m) || m).filter(Boolean);
-                                    // 插入初判卡
-                                    if (historyData.state && historyData.state.preliminary_assessment) {
-                                        const pa = historyData.state.preliminary_assessment;
-                                        const hasAssessment = legacyMsgs.some(m =>
-                                            Boolean(m && (m.isAssessment || (m.role === 'assistant' && typeof m.content === 'string' && m.content.includes('assessment-card'))))
-                                        );
-                                        if (!hasAssessment) {
-                                            const html = renderAssessmentToHTML(pa);
-                                            if (html) {
-                                                let insertIdx = -1;
-                                                for (let i = 0; i < legacyMsgs.length; i++) {
-                                                    const m = legacyMsgs[i];
-                                                    if (m.role === 'assistant' && m.content &&
-                                                        (m.content.includes('初判卡') || m.content.includes('初判'))) {
-                                                        insertIdx = i + 1;
-                                                        break;
-                                                    }
-                                                }
-                                                if (insertIdx < 0) {
-                                                    for (let i = 0; i < legacyMsgs.length; i++) {
-                                                        const m = legacyMsgs[i];
-                                                        if (m?.role === 'system_task') {
-                                                            insertIdx = i;
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-                                                const assessmentMsg = { role: 'assistant', content: html, isAssessment: true };
-                                                if (insertIdx >= 0) {
-                                                    legacyMsgs.splice(insertIdx, 0, assessmentMsg);
-                                                } else {
-                                                    legacyMsgs.push(assessmentMsg);
-                                                }
-                                            }
-                                        }
-                                    }
+                                    const legacyMsgs = normalizePersistedHistoryMessages(historyData.messages || []);
                                     messages.value = legacyMsgs;
+                                    // 历史消息走 DisplayNode 统一模型
+                                    const legacyRawMsgs = historyData.messages || [];
+                                    for (let i = 0; i < legacyRawMsgs.length; i++) {
+                                        const dn = normalizeHistoryMessageToDisplayNode(legacyRawMsgs[i], i);
+                                        if (dn && dn.nodeId) upsertDisplayNode(dn);
+                                    }
                                     if (historyData.state) {
                                         processStateUpdate(historyData.state, { isHistoryRestore: true });
+                                        await refreshContext();
                                     }
                                     await scrollToBottom();
                                 }
@@ -4057,7 +4842,6 @@
                                         completed: Boolean(state.onboarding_completed),
                                         turn_count: state.onboarding_turn_count || 0,
                                         max_turns: state.onboarding_max_turns || 3,
-                                        has_handoff: Boolean(state.onboarding_handoff),
                                     },
                                     maintenance: {
                                         queue_size: maintenance_queue.length,
@@ -4742,9 +5526,10 @@
                             }
                         } catch (error) {
                             console.error('Image processing error:', error);
+                            const message = error?.message || '未知错误';
                             msgImage.type = msgImage.type || 'universal_screenshot_analysis';
                             msgImage.status = 'error';
-                            msgImage.ocrResult = `[处理失败: ${error.message || '未知错误'}]`;
+                            msgImage.ocrResult = `[处理失败: ${message}]`;
                         }
                     });
 
@@ -4778,8 +5563,14 @@
                                     screenshot_type: img.type
                                 }));
                         }
+                        if (options?.inquiryReceiptPayload) {
+                            requestBody.inquiry_receipt_payload = options.inquiryReceiptPayload;
+                        }
 
-                        const response = await fetch('/api/chat', {
+                        // Onboarding v2 首轮自动触发走 Path B;resume / feedback 不会重叠。
+
+                        _dbg('FETCH(resume)', resumePayload ? 'resume_payload=YES' : 'msg=' + (requestBody.message || '').substring(0, 40));
+                        const response = await fetch('/api/chat/stream', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -4795,16 +5586,120 @@
                             } catch {
                                 errorText = '';
                             }
+                            _dbg('FETCH(resume) ERR', response.status + ' ' + errorText.substring(0, 100));
                             throw new Error(errorText ? `Network response was not ok: ${response.status} - ${errorText}` : `Network response was not ok: ${response.status}`);
                         }
-                        const data = await response.json();
+                        _dbg('STREAM(resume) START', 'status=' + response.status);
 
-                        if (!pushPendingResponsesDedup(data.pending_responses) && data.response) {
-                            messages.value.push({ role: 'assistant', content: data.response });
-                        }
+                        // 读取 SSE 流
+                        const smReader = response.body.getReader();
+                        const smDecoder = new TextDecoder();
+                        let smBuffer = '';
+                        let smFinalData = null;
 
-                        if (data.state) {
-                            processStateUpdate(data.state);
+                        let smStreamDone = false;
+                        while (!smStreamDone) {
+                            const { value: smValue, done: smDone } = await smReader.read();
+                            if (smDone) break;
+
+                            smBuffer += smDecoder.decode(smValue, { stream: true });
+                            const smLines = smBuffer.split('\n');
+                            smBuffer = smLines.pop() || '';
+
+                            for (const smLine of smLines) {
+                                if (!smLine.startsWith('data: ')) continue;
+                                const smRaw = smLine.substring(6).trim();
+                                if (smRaw === '[DONE]') { _dbg('STREAM(resume) DONE', '[DONE]'); smStreamDone = true; break; }
+
+                                let smChunk;
+                                try { smChunk = JSON.parse(smRaw); } catch { _dbg('PARSE ERR(resume)', smRaw.substring(0, 80)); continue; }
+
+                                const _sk = smChunk.type || smChunk.event || (smChunk.value ? 'value-str' : 'unknown');
+                                _dbg('CHUNK(resume)', _sk + (smChunk.type === 'process_event' ? ':' + (smChunk.payload?.event_type || '?') : '') + (smChunk.event === 'updates' ? ' nodes=' + Object.keys(smChunk.data || {}).join(',') : ''));
+
+                                if (smChunk.type === 'process_event' && smChunk.payload) {
+                                    handleProcessEvent(smChunk.payload, smChunk);
+                                    continue;
+                                }
+
+                                if (smChunk.type === 'final') {
+                                    smFinalData = smChunk;
+                                    streamActive.value = false;
+                                    _dbg('FINAL(resume)', 'pending=' + (smChunk.pending_responses?.length || 0) + ' inquiry=' + (smChunk.inquiry_card ? 'YES' : 'NO'));
+                                    // --- DisplayNode: 使用 final.display_nodes 作为主语义 ---
+                                    if (Array.isArray(smChunk.display_nodes)) {
+                                        for (const dn of smChunk.display_nodes) {
+                                            if (dn && dn.nodeId) upsertDisplayNode(dn);
+                                        }
+                                        syncReportCardsFromDisplayNodes(smChunk.display_nodes);
+                                    }
+                                    // --- DisplayNode: interrupt 处理 ---
+                                    if (smChunk.node_id) {
+                                        upsertDisplayNode({
+                                            seq: smChunk.seq,
+                                            turnId: smChunk.turn_id,
+                                            nodeId: smChunk.node_id,
+                                            nodeType: smChunk.node_type || 'inquiry_card',
+                                            status: smChunk.status || 'new',
+                                            payload: smChunk.inquiry_card || {},
+                                        });
+                                    }
+                                    const gatedResumeResponses = splitPendingResponsesForGuideGate(smChunk.pending_responses || [], smChunk.state || {});
+                                    if (gatedResumeResponses.immediate.length > 0) {
+                                        pushPendingResponsesDedup(gatedResumeResponses.immediate);
+                                    }
+                                    if (gatedResumeResponses.deferred.length > 0) {
+                                        mergePendingGatedOutputs(smChunk.state || {}, gatedResumeResponses.deferred);
+                                    }
+                                    if (smChunk.inquiry_card && smChunk.inquiry_card.questions && smChunk.inquiry_card.questions.length > 0) {
+                                        const normalized = normalizeInquiryCardForUI(smChunk.inquiry_card);
+                                        if (normalized) {
+                                            inquiryCard.value = normalized.card;
+                                            const nextKey = normalized.key || `inquiry_resume_${Date.now()}`;
+                                            currentInquiryCardKey.value = nextKey;
+                                            inquiryCardByTaskKey.value[nextKey] = deepClone(normalized.card);
+                                            inquiryAnswers.value = {};
+                                            for (const [idx, q] of normalized.card.questions.entries()) {
+                                                if (q.type === 'scale') {
+                                                    inquiryAnswers.value[getInquiryQuestionUiKey(q, idx)] = 5;
+                                                }
+                                            }
+                                            pushSystemTaskOnce(nextKey, {
+                                                role: 'system_task',
+                                                taskType: 'inquiry',
+                                                taskKey: nextKey,
+                                                taskState: 'new',
+                                                label: 'QUESTION',
+                                                title: '需要补充信息',
+                                                desc: normalized.card.intro || '为了更好地制定策略，请回答几个问题',
+                                                inquiryData: {
+                                                    intro: normalized.card.intro || '',
+                                                    reasoning: normalized.card.reasoning || '',
+                                                    questions: (normalized.card.questions || []).map(q => q.question || ''),
+                                                },
+                                            });
+                                        }
+                                    }
+                                    if (smChunk.feedback_status === 'asking') {
+                                        feedbackStatus.value = 'asking';
+                                        feedbackQuestion.value = smChunk.feedback_question || '';
+                                    } else if (smChunk.feedback_status === 'completed') {
+                                        feedbackStatus.value = 'completed';
+                                        feedbackQuestion.value = '';
+                                    }
+                                    if (smChunk.state) {
+                                        processStateUpdate(smChunk.state);
+                                        clearFrontendInquiryIfBackendEmpty(smChunk.state, smChunk.inquiry_card);
+                                    }
+                                    await scrollToBottom();
+                                    continue;
+                                }
+
+                                if (smChunk.event === 'values' && smChunk.data) {
+                                    processStateUpdate(smChunk.data);
+                                    await scrollToBottom();
+                                }
+                            }
                         }
 
                         if (showContext.value) {
@@ -4813,7 +5708,7 @@
                         if (trackedTurn || pendingTurn.value) {
                             clearPendingTurn();
                         }
-                        return { ok: true, data };
+                        return { ok: true, data: smFinalData || {} };
                     } catch (error) {
                         console.error('Error:', error);
                         if (isNetworkLikeError(error) && getToken()) {
@@ -4832,6 +5727,7 @@
                         return { ok: false, error };
                     } finally {
                         isLoading.value = false;
+                        streamActive.value = false;
                         await scrollToBottom();
                     }
                 };
@@ -4872,6 +5768,7 @@
                     inputMessage.value = '';
                     clearPendingImages(false);
                     isLoading.value = true;
+                    streamActive.value = true;
                     isProcessingImages.value = true;
                     await scrollToBottom();
 
@@ -4881,6 +5778,7 @@
                         if (allFailed && !userMessage.content) {
                             messages.value.push({ role: 'assistant', content: '图片处理失败，请重试。' });
                             isLoading.value = false;
+                            streamActive.value = false;
                             await scrollToBottom();
                             return;
                         }
@@ -5077,6 +5975,21 @@
                         switchTab('chat');
                         await nextTick();
                     }
+                    try {
+                        if (window.Tracker && !window.__crusheFirstMsgSent) {
+                            var hasOnboardingPayload = false;
+                            try {
+                                var raw = localStorage.getItem('crushe_onboarding_v2');
+                                if (raw) {
+                                    var parsed = JSON.parse(raw);
+                                    hasOnboardingPayload = !!(parsed && (parsed.free_text || (Array.isArray(parsed.uploaded_images) && parsed.uploaded_images.length) || (parsed.answers && Object.keys(parsed.answers).length)));
+                                }
+                            } catch (_) {}
+                            window.Tracker.track('first_message_send', { has_onboarding_payload: hasOnboardingPayload });
+                            window.Tracker.flush();
+                            window.__crusheFirstMsgSent = true;
+                        }
+                    } catch (_) {}
                     await sendMessageWithImages();
                 };
 
@@ -5214,12 +6127,6 @@
                     const promptGuideIfNeeded = () => {
                         if (guidePrompted.value || hasPendingInquiry || isInquiryModalActive) return;
                         guidePrompted.value = true;
-                        messages.value.push({
-                            role: 'assistant',
-                            content: '我将为您生成详细的情感攻略，在此之前，为了让我们双方在后续的攻略过程中合作得更好，请先花 30 秒看完这份《Crushe使用指南》~',
-                            showGuideButton: true
-                        });
-                        hasUpdates = true;
                     };
 
                     // When restoring from history, auto-complete guide to avoid re-gating
@@ -5235,49 +6142,66 @@
                     // 历史恢复时：只更新 state 数据（面板/看板），不向 messages 推送任何卡片或文本，
                     // 因为历史消息已经从 Supabase 加载并包含了这些内容。
                     if (options.isHistoryRestore) {
-                        if (newState.status_report) state.value.status_report = newState.status_report;
-                        if (newState.action_plan) state.value.action_plan = newState.action_plan;
+                        console.log('[HistoryRestore] newState keys:', Object.keys(newState || {}));
+                        console.log('[HistoryRestore] status_report:', newState.status_report ? newState.status_report.substring(0, 80) : null);
+                        console.log('[HistoryRestore] layer2_memory:', newState.layer2_memory ? JSON.stringify(Object.keys(newState.layer2_memory)) : 'MISSING');
+                        const _l2csr = newState.layer2_memory?.current_status_report;
+                        console.log('[HistoryRestore] current_status_report:', _l2csr ? JSON.stringify({keys: Object.keys(_l2csr), preview: (_l2csr.report_content||'').substring(0,80)}) : 'MISSING');
+                        if (newState.status_report) {
+                            state.value.status_report = newState.status_report;
+                        }
+                        if (newState.action_plan) {
+                            state.value.action_plan = newState.action_plan;
+                        }
                         if (newState.action_guide) state.value.action_guide = newState.action_guide;
                         if (newState.action_guides) state.value.action_guides = newState.action_guides;
                         if (newState.preliminary_assessment) state.value.preliminary_assessment = newState.preliminary_assessment;
+                        if ('pending_crushe_guide' in newState) state.value.pending_crushe_guide = Boolean(newState.pending_crushe_guide);
+                        if ('onboarding_completed' in newState) state.value.onboarding_completed = Boolean(newState.onboarding_completed);
                         if (newState.inquiry_card) {
-                            state.value.inquiry_card = newState.inquiry_card;
                             const normalized = normalizeInquiryCardForUI(newState.inquiry_card);
-                            if (normalized) {
+                            const restoredTaskKey = normalized?.key || '';
+                            if (restoredTaskKey && hasSubmittedInquiryReceipt(restoredTaskKey)) {
+                                state.value.inquiry_card = null;
+                                inquiryCard.value = null;
+                                currentInquiryCardKey.value = '';
+                            } else if (normalized) {
+                                state.value.inquiry_card = newState.inquiry_card;
                                 inquiryCard.value = normalized.card;
                                 currentInquiryCardKey.value = normalized.key || '';
                                 if (currentInquiryCardKey.value) {
                                     inquiryCardByTaskKey.value[currentInquiryCardKey.value] = deepClone(normalized.card);
                                 }
-                                const hasInquiryMsg = messages.value.some(m => m.role === 'system_task' && m.taskType === 'inquiry');
-                                if (!hasInquiryMsg && normalized.card.questions && normalized.card.questions.length > 0) {
-                                    const nextCard = normalized.card;
-                                    const nextInquiryKey = normalized.key || '';
-                                    pushSystemTaskOnce(nextInquiryKey || `inquiry_restore_${Date.now()}`, {
-                                        role: 'system_task',
-                                        taskType: 'inquiry',
-                                        taskKey: nextInquiryKey,
-                                        taskState: 'new',
-                                        label: 'QUESTION',
-                                        title: '需要补充信息',
-                                        desc: nextCard.intro || '为了更好地制定策略，请回答几个问题',
-                                        inquiryData: {
-                                            intro: nextCard.intro || '',
-                                            reasoning: nextCard.reasoning || '',
-                                            questions: (nextCard.questions || []).map(q => q.question || ''),
-                                        },
-                                    });
-                                } else if (hasInquiryMsg && currentInquiryCardKey.value) {
+                                if (currentInquiryCardKey.value) {
+                                    let reused = false;
                                     for (let i = messages.value.length - 1; i >= 0; i--) {
                                         const msg = messages.value[i];
-                                        if (msg?.role === 'system_task' && msg.taskType === 'inquiry') {
+                                        if (msg?.role === 'system_task' && msg.taskType === 'inquiry' && msg.taskState !== 'submitted') {
                                             msg.taskKey = currentInquiryCardKey.value;
                                             msg.taskState = 'new';
                                             msg.disabled = false;
+                                            reused = true;
                                             break;
                                         }
                                     }
+                                    if (!reused) {
+                                        messages.value.push({
+                                            role: 'system_task',
+                                            taskType: 'inquiry',
+                                            taskKey: currentInquiryCardKey.value,
+                                            taskState: 'new',
+                                            label: 'INQUIRY',
+                                            title: normalized.card.intro || '需要补充信息',
+                                            desc: '',
+                                            disabled: false,
+                                        });
+                                        scrollToBottom();
+                                    }
                                 }
+                            } else {
+                                state.value.inquiry_card = null;
+                                inquiryCard.value = null;
+                                currentInquiryCardKey.value = '';
                             }
                         }
                         if (newState.user_context) state.value.user_profile = newState.user_context;
@@ -5286,7 +6210,7 @@
                         return;
                     }
 
-                    if (isFirstReportPhase && hasReadyOutputs && !guideCompleted.value) {
+                    if (isFirstReportPhase && hasReadyOutputs && !guideCompleted.value && pendingCrusheGuide) {
                         pendingGatedOutputs.value = {
                             ...(pendingGatedOutputs.value || {}),
                             ...(newState.status_report ? { status_report: newState.status_report } : {}),
@@ -5309,37 +6233,11 @@
 
                     // Check Status Update
                     if (newState.status_report && newState.status_report !== oldState.status_report) {
-                        // 如果 pending_responses 已包含 status_agent 的中间消息，不再推送硬编码过渡
-                        const hasStatusThinking = Array.isArray(newState.pending_responses) &&
-                            newState.pending_responses.some(r => r.from === 'status_agent' && r.phase === 'subgraph_thinking');
-                        if (!hasStatusThinking) {
-                            pushAssistantOnce(`status_preface_${newState.status_report}`, '这是基于你提供的信息生成的现状分析报告：');
-                        }
-                        pushSystemTaskOnce(`status_${newState.status_report}`, {
-                            role: 'system_task',
-                            taskType: 'status',
-                            label: 'STATUS REPORT',
-                            title: oldState.status_report ? '现状分析已更新' : '现状分析报告已生成',
-                            desc: '点击查看最新的关系阶段与分析报告'
-                        });
                         hasUpdates = true;
                     }
 
                     // Check Plan Update
                     if (newState.action_plan && newState.action_plan !== oldState.action_plan) {
-                        // 如果 pending_responses 已包含 plan_agent 的中间消息，不再推送硬编码过渡
-                        const hasPlanThinking = Array.isArray(newState.pending_responses) &&
-                            newState.pending_responses.some(r => r.from === 'plan_agent' && r.phase === 'subgraph_thinking');
-                        if (!hasPlanThinking) {
-                            pushAssistantOnce(`plan_preface_${newState.action_plan}`, '我已为你制定了专属的行动计划：');
-                        }
-                        pushSystemTaskOnce(`plan_${newState.action_plan}`, {
-                            role: 'system_task',
-                            taskType: 'strategy',
-                            label: 'PLANNING',
-                            title: oldState.action_plan ? '情感计划已更新' : '专属情感计划已生成',
-                            desc: '点击查看最新的情感计划'
-                        });
                         hasUpdates = true;
                     }
 
@@ -5347,18 +6245,7 @@
                     if (newState.action_guides && Array.isArray(newState.action_guides)) {
                         const oldGuides = oldState.action_guides || [];
                         const newGuides = newState.action_guides;
-                        
-                        // 检查是否有新指南
-                        if (newGuides.length > oldGuides.length) {
-                            pushSystemTaskOnce(`guide_count_${newGuides.length}`, {
-                                role: 'system_task',
-                                taskType: 'plan',
-                                label: 'ACTION GUIDE',
-                                title: '新的行动指南已生成',
-                                desc: '点击查看最新的行动指南'
-                            });
-                            hasUpdates = true;
-                        }
+                        if (newGuides.length > oldGuides.length) hasUpdates = true;
                         
                         // 更新 state
                         state.value.action_guides = newGuides;
@@ -5382,9 +6269,7 @@
 
                     // Check Preliminary Assessment
                     if (newState.preliminary_assessment && JSON.stringify(newState.preliminary_assessment) !== JSON.stringify(oldState.preliminary_assessment)) {
-                         if (pushAssessmentMessageDedup(newState.preliminary_assessment)) {
-                             hasUpdates = true;
-                         }
+                         hasUpdates = true;
                          if (!guideCompleted.value) {
                              promptGuideIfNeeded();
                          }
@@ -5399,52 +6284,39 @@
                     }
 
                     // Check Inquiry
-                    const normalizedInquiry = normalizeInquiryCardForUI(newState.inquiry_card);
-                    if (normalizedInquiry && normalizedInquiry.card.questions.length > 0) {
-                        const nextCard = normalizedInquiry.card;
-                        const nextInquiryKey = normalizedInquiry.key;
-                        const isSameInquiryCard = Boolean(nextInquiryKey) && nextInquiryKey === currentInquiryCardKey.value;
+                    // 只有当 newState 里显式包含 inquiry_card 字段时才操作（undefined 说明本次 update 不涉及问卷，不应清空）
+                    if ('inquiry_card' in newState) {
+                        const normalizedInquiry = normalizeInquiryCardForUI(newState.inquiry_card);
+                        if (normalizedInquiry && normalizedInquiry.card.questions.length > 0) {
+                            const nextCard = normalizedInquiry.card;
+                            const nextInquiryKey = normalizedInquiry.key;
+                            const isSameInquiryCard = Boolean(nextInquiryKey) && nextInquiryKey === currentInquiryCardKey.value;
 
-                        inquiryCard.value = nextCard;
-                        currentInquiryCardKey.value = nextInquiryKey;
-                        activeInquiryTaskKey.value = nextInquiryKey || activeInquiryTaskKey.value;
-                        if (nextInquiryKey) {
-                            inquiryCardByTaskKey.value[nextInquiryKey] = deepClone(nextCard);
-                            const existingTask = findInquiryTaskCard(nextInquiryKey);
-                            if (existingTask && existingTask.msg.taskState === 'submitted') {
-                                setInquiryTaskState(nextInquiryKey, 'new');
-                            }
-                        }
-
-                        // 仅在真正新卡片时重置答案；同卡片重复下发时保留已填写内容（含截图）。
-                        if (!isSameInquiryCard) {
-                            inquiryAnswers.value = {};
-                            for (const [idx, q] of nextCard.questions.entries()) {
-                                if (q.type === 'scale') {
-                                    const uiKey = getInquiryQuestionUiKey(q, idx);
-                                    inquiryAnswers.value[uiKey] = 5;
+                            inquiryCard.value = nextCard;
+                            currentInquiryCardKey.value = nextInquiryKey;
+                            activeInquiryTaskKey.value = nextInquiryKey || activeInquiryTaskKey.value;
+                            if (nextInquiryKey) {
+                                inquiryCardByTaskKey.value[nextInquiryKey] = deepClone(nextCard);
+                                const existingTask = findInquiryTaskCard(nextInquiryKey);
+                                if (existingTask && existingTask.msg.taskState === 'submitted') {
+                                    setInquiryTaskState(nextInquiryKey, 'new');
                                 }
                             }
 
-                            pushSystemTaskOnce(nextInquiryKey || `inquiry_${Date.now()}`, {
-                                role: 'system_task',
-                                taskType: 'inquiry',
-                                taskKey: nextInquiryKey || '',
-                                taskState: 'new',
-                                label: 'QUESTION',
-                                title: '需要补充信息',
-                                desc: nextCard.intro || '为了更好地制定策略，请回答几个问题',
-                                inquiryData: {
-                                    intro: nextCard.intro || '',
-                                    reasoning: nextCard.reasoning || '',
-                                    questions: (nextCard.questions || []).map(q => q.question || ''),
-                                },
-                            });
-                            hasUpdates = true;
+                            // 仅在真正新卡片时重置答案；同卡片重复下发时保留已填写内容（含截图）。
+                            if (!isSameInquiryCard) {
+                                inquiryAnswers.value = {};
+                                for (const [idx, q] of nextCard.questions.entries()) {
+                                    if (q.type === 'scale') {
+                                        const uiKey = getInquiryQuestionUiKey(q, idx);
+                                        inquiryAnswers.value[uiKey] = 5;
+                                    }
+                                }
+                                hasUpdates = true;
+                            }
+                        } else {
+                            clearFrontendInquiryIfBackendEmpty(newState, null);
                         }
-                    } else {
-                        inquiryCard.value = null;
-                        currentInquiryCardKey.value = '';
                     }
 
                     // Feedback flow updates
@@ -5612,6 +6484,7 @@
 
                         // 阶段2：后台并行 OCR，拼接最终输入后一次性发送到 /api/chat
                         isLoading.value = true;
+                        streamActive.value = true;
                         console.log('[submitInquiry] 阶段2开始: 启动截图上传与 OCR');
 
                         const screenshotUploadPromises = new Map();
@@ -5688,6 +6561,7 @@
                                 for (let idx = 0; idx < screenshotItems.length; idx++) {
                                     const item = screenshotItems[idx];
                                     let ocrText = item?.ocrText || item?.text || '';
+                                    let ocrError = item?.error || '';
                                     console.log(`[submitInquiry] 拼接第${idx + 1}张: item.ocrText=${!!item?.ocrText}, item.text=${!!item?.text}, 初始ocrText长度=${ocrText.length}`);
 
                                     if (!ocrText && uploadPromises[idx]) {
@@ -5697,22 +6571,27 @@
                                             console.log(`[submitInquiry] 第${idx + 1}张: 上传结果 success=${uploadResult?.success}, text_len=${(uploadResult?.text || '').length}, error=${uploadResult?.error || 'none'}`);
                                             if (uploadResult?.success) {
                                                 ocrText = uploadResult.text || '';
+                                                ocrError = '';
                                             } else {
+                                                ocrError = uploadResult?.error || '截图上传或 OCR 失败';
                                                 console.error(`[submitInquiry] 第${idx + 1}张: 上传失败! error=${uploadResult?.error}`);
                                             }
                                         } catch (promiseErr) {
+                                            ocrError = promiseErr?.message || '等待截图识别结果时发生异常';
                                             console.error(`[submitInquiry] 第${idx + 1}张: promise 异常`, promiseErr);
                                         }
                                     } else if (!ocrText) {
                                         console.warn(`[submitInquiry] 第${idx + 1}张: 无 ocrText 且无对应 uploadPromise (uploadPromises.length=${uploadPromises.length})`);
+                                        ocrError = ocrError || '未拿到截图 OCR 结果';
                                     }
 
                                     if (ocrText) {
                                         ocrBlocks.push(`第${idx + 1}张：\n${ocrText}`);
                                         console.log(`[submitInquiry] 第${idx + 1}张: OCR 成功, text_len=${ocrText.length}`);
                                     } else {
-                                        ocrBlocks.push(`第${idx + 1}张：截图解析失败，用户已上传图片`);
-                                        console.error(`[submitInquiry] 第${idx + 1}张: ⚠️ OCR 最终为空 -> 截图解析失败`);
+                                        const finalError = ocrError || '截图解析失败，用户已上传图片';
+                                        ocrBlocks.push(`第${idx + 1}张：截图解析失败（${finalError}）`);
+                                        console.error(`[submitInquiry] 第${idx + 1}张: ⚠️ OCR 最终为空 -> ${finalError}`);
                                     }
                                 }
 
@@ -5732,6 +6611,11 @@
                             message: finalAnswerForBackend,
                             resumePayload: isLocalOnboardingInquiry ? null : { answers: answersForResume },
                         };
+                        const inquiryReceiptPayload = {
+                            taskKey,
+                            summary: inquiryReceipt.summary,
+                            details: inquiryReceipt.details || [],
+                        };
                         updateInquiryReceiptStatus(inquiryReceipt.id, 'submitting', {
                             submitSpec,
                             retryCount: inquiryReceipt.retryCount || 0,
@@ -5744,11 +6628,15 @@
                         let submitResult;
                         if (isLocalOnboardingInquiry) {
                             // 本地 onboarding 引导卡并非后端 interrupt，不应走 resume。
-                            submitResult = await sendMessageToBackend(backendUserMessage, { silentError: true });
+                            submitResult = await sendMessageToBackend(backendUserMessage, {
+                                silentError: true,
+                                inquiryReceiptPayload,
+                            });
                         } else {
                             submitResult = await sendMessageToBackend(backendUserMessage, {
                                 resumePayload: { answers: answersForResume },
                                 silentError: true,
+                                inquiryReceiptPayload,
                             });
                         }
 
@@ -5770,6 +6658,7 @@
                     } catch (error) {
                         console.error('Submit inquiry error:', error);
                         isLoading.value = false;
+                        streamActive.value = false;
                         const taskKey =
                             currentInquiryCardKey.value ||
                             activeInquiryTaskKey.value ||
@@ -5811,6 +6700,7 @@
                     });
                     setInquiryTaskState(receipt.taskKey, 'submitting');
                     isLoading.value = true;
+                    streamActive.value = true;
 
                     const backendUserMessage = {
                         id: `inquiry_retry_${Date.now()}`,
@@ -5855,15 +6745,19 @@
 
                 const sendMessage = async (skipPush = false) => {
                     const content = inputMessage.value.trim();
-                    if (!content || isLoading.value) return;
-                    const trackedTurn = markPendingTurnOnSend(content);
+                    // Onboarding v2 首轮自动触发时 content 为空,pendingOnboardingPayload 非空,
+                    // 此时允许空 content 通过入口校验。
+                    const isAutoOnboardingFirstTurn = !content && !!pendingOnboardingPayload.value;
+                    if ((!content && !isAutoOnboardingFirstTurn) || isLoading.value) return;
+                    const trackedTurn = isAutoOnboardingFirstTurn ? null : markPendingTurnOnSend(content);
 
-                    if (!skipPush) {
+                    if (!skipPush && !isAutoOnboardingFirstTurn) {
                         messages.value.push({ role: 'user', content });
                     }
                     
                     inputMessage.value = '';
                     isLoading.value = true;
+                    streamActive.value = true;
                     await scrollToBottom();
 
                     try {
@@ -5985,48 +6879,158 @@
                                 }
                             }
                         } else {
-                            // === 原有逻辑: 调用本地 server.py ===
-                        const response = await fetch('/api/chat', {
+                            // === Path B: 调用本地 server.py SSE 流 ===
+                        _dbg('FETCH', 'POST /api/chat/stream msg=' + content.substring(0, 40));
+                        const _pathBBody = {
+                            message: content,
+                            session_id: sessionId.value,
+                            stream_mode: 'updates',
+                        };
+                        // Onboarding v2 首轮自动触发:带上完整 onboarding_payload,
+                        // 发出后立刻清空暂存,避免后续普通轮重复发送。
+                        if (pendingOnboardingPayload.value) {
+                            _pathBBody.onboarding_payload = pendingOnboardingPayload.value;
+                            pendingOnboardingPayload.value = null;
+                            try { window.OnboardingStorage && window.OnboardingStorage.markDone(); } catch (e) { /* noop */ }
+                        }
+                        const response = await fetch('/api/chat/stream', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
                                 ...buildAuthHeaders(),
                             },
-                            body: JSON.stringify({
-                                message: content,
-                                session_id: sessionId.value
-                            })
+                            body: JSON.stringify(_pathBBody),
                         });
 
                         if (!response.ok) {
                             const errorText = await response.text();
+                            _dbg('FETCH ERR', response.status + ' ' + errorText.substring(0, 100));
                             throw new Error(`Network response was not ok: ${response.status} - ${errorText}`);
                         }
+                        _dbg('STREAM START', 'status=' + response.status);
 
-                        const data = await response.json();
-                        console.log('[API Response]', data);
-                        
-                        let hasResponse = false;
-                        
-                        // 统一处理响应逻辑：优先使用结构化的 pending_responses
-                        if (pushPendingResponsesDedup(data.pending_responses)) {
-                            hasResponse = true;
-                        }
-                        // 如果 pending_responses 为空，但有 response 字符串（后端 Fallback），则使用它
-                        else if (data.response) {
-                            messages.value.push({ role: 'assistant', content: data.response });
-                            hasResponse = true;
-                        }
-                        
-                        if (!hasResponse && !data.state?.inquiry_card) {
-                            console.warn('No response content found in API result');
-                            // Optional: Show a generic message if absolutely nothing came back
-                            // messages.value.push({ role: 'assistant', content: '（AI 似乎没有回复，请重试或检查日志）' });
-                        }
-                        
-                        // 3. 更新状态
-                        if (data.state) {
-                            processStateUpdate(data.state);
+                        // 读取 SSE 流
+                        const reader = response.body.getReader();
+                        const decoder = new TextDecoder();
+                        let buffer = '';
+
+                        let streamDone = false;
+                        while (!streamDone) {
+                            const { value, done } = await reader.read();
+                            if (done) break;
+
+                            buffer += decoder.decode(value, { stream: true });
+                            const lines = buffer.split('\n');
+                            buffer = lines.pop() || '';
+
+                            for (const line of lines) {
+                                if (!line.startsWith('data: ')) continue;
+                                const raw = line.substring(6).trim();
+                                if (raw === '[DONE]') { _dbg('STREAM DONE', '[DONE] received'); streamDone = true; break; }
+
+                                let chunk;
+                                try { chunk = JSON.parse(raw); } catch { _dbg('PARSE ERR', raw.substring(0, 80)); continue; }
+
+                                // debug: log chunk type summary
+                                const _ck = chunk.type || chunk.event || (chunk.value ? 'value-str' : 'unknown');
+                                _dbg('CHUNK', _ck + (chunk.type === 'process_event' ? ':' + (chunk.payload?.event_type || '?') : '') + (chunk.event === 'updates' ? ' nodes=' + Object.keys(chunk.data || {}).join(',') : ''));
+
+                                // 1. 中间过程事件（实时渲染）
+                                if (chunk.type === 'process_event' && chunk.payload) {
+                                    handleProcessEvent(chunk.payload, chunk);
+                                    continue;
+                                }
+
+                                // 2. 流结束汇总（pending_responses + inquiry_card + feedback）
+                                if (chunk.type === 'final') {
+                                    streamActive.value = false;
+                                    const pr = chunk.pending_responses || [];
+                                    _dbg('FINAL', 'pending=' + pr.length + ' inquiry=' + (chunk.inquiry_card ? 'YES' : 'NO') + ' feedback=' + (chunk.feedback_status || 'none'));
+                                    // --- DisplayNode: 使用 final.display_nodes 作为主语义 ---
+                                    if (Array.isArray(chunk.display_nodes)) {
+                                        for (const dn of chunk.display_nodes) {
+                                            if (dn && dn.nodeId) upsertDisplayNode(dn);
+                                        }
+                                        syncReportCardsFromDisplayNodes(chunk.display_nodes);
+                                    }
+                                    // --- DisplayNode: interrupt 处理 ---
+                                    if (chunk.node_id) {
+                                        upsertDisplayNode({
+                                            seq: chunk.seq,
+                                            turnId: chunk.turn_id,
+                                            nodeId: chunk.node_id,
+                                            nodeType: chunk.node_type || 'inquiry_card',
+                                            status: chunk.status || 'new',
+                                            payload: chunk.inquiry_card || {},
+                                        });
+                                    }
+                                    const gatedResponses = splitPendingResponsesForGuideGate(pr, chunk.state || {});
+                                    if (gatedResponses.immediate.length > 0) pushPendingResponsesDedup(gatedResponses.immediate);
+                                    if (gatedResponses.deferred.length > 0) {
+                                        mergePendingGatedOutputs(chunk.state || {}, gatedResponses.deferred);
+                                    }
+                                    if (chunk.inquiry_card && chunk.inquiry_card.questions && chunk.inquiry_card.questions.length > 0) {
+                                        const normalized = normalizeInquiryCardForUI(chunk.inquiry_card);
+                                        if (normalized) {
+                                            inquiryCard.value = normalized.card;
+                                            const nextKey = normalized.key || `inquiry_stream_${Date.now()}`;
+                                            currentInquiryCardKey.value = nextKey;
+                                            inquiryCardByTaskKey.value[nextKey] = deepClone(normalized.card);
+                                            inquiryAnswers.value = {};
+                                            for (const [idx, q] of normalized.card.questions.entries()) {
+                                                if (q.type === 'scale') {
+                                                    inquiryAnswers.value[getInquiryQuestionUiKey(q, idx)] = 5;
+                                                }
+                                            }
+                                            pushSystemTaskOnce(nextKey, {
+                                                role: 'system_task',
+                                                taskType: 'inquiry',
+                                                taskKey: nextKey,
+                                                taskState: 'new',
+                                                label: 'QUESTION',
+                                                title: '需要补充信息',
+                                                desc: normalized.card.intro || '为了更好地制定策略，请回答几个问题',
+                                                inquiryData: {
+                                                    intro: normalized.card.intro || '',
+                                                    reasoning: normalized.card.reasoning || '',
+                                                    questions: (normalized.card.questions || []).map(q => q.question || ''),
+                                                },
+                                            });
+                                        }
+                                    }
+                                    if (chunk.feedback_status === 'asking') {
+                                        feedbackStatus.value = 'asking';
+                                        feedbackQuestion.value = chunk.feedback_question || '';
+                                    } else if (chunk.feedback_status === 'completed') {
+                                        feedbackStatus.value = 'completed';
+                                        feedbackQuestion.value = '';
+                                    }
+                                    if (chunk.state) {
+                                        processStateUpdate(chunk.state);
+                                        clearFrontendInquiryIfBackendEmpty(chunk.state, chunk.inquiry_card);
+                                    }
+                                    await scrollToBottom();
+                                    continue;
+                                }
+
+                                // 3. LangGraph updates 事件
+                                if (chunk.event === 'updates') {
+                                    const updates = chunk.data || {};
+                                    for (const nodeName in updates) {
+                                        const nodeData = updates[nodeName];
+                                        if (nodeData && nodeData.pending_responses) {
+                                            // state 更新时同步，等 final 事件统一处理
+                                        }
+                                    }
+                                    continue;
+                                }
+
+                                // 4. 兜底：values 模式 state 对象
+                                if (chunk.event === 'values' && chunk.data) {
+                                    processStateUpdate(chunk.data);
+                                    await scrollToBottom();
+                                }
+                            }
                         }
                         }
                         
@@ -6038,6 +7042,7 @@
                         }
                         
                     } catch (error) {
+                        _dbg('CATCH', error.message);
                         console.error('Error:', error);
                         if (isNetworkLikeError(error) && getToken()) {
                             if (pendingTurn.value) {
@@ -6054,6 +7059,7 @@
                         }
                     } finally {
                         isLoading.value = false;
+                        streamActive.value = false;
                         if (guideCompletionQueued.value && !guideCompletionSent.value) {
                             guideCompletionQueued.value = false;
                             await notifyGuideCompleted();
@@ -6256,31 +7262,74 @@
                     
                     try {
                         isFeedbackSubmitting.value = true;
-                        const response = await fetch('/api/chat', {
+                        const _feedbackBody = {
+                            message,
+                            session_id: sessionId.value,
+                            feedback_mode: feedbackPayload
+                        };
+                        const response = await fetch('/api/chat/stream', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
                                 ...buildAuthHeaders(),
                             },
-                            body: JSON.stringify({
-                                message,
-                                session_id: sessionId.value,
-                                feedback_mode: feedbackPayload
-                            })
+                            body: JSON.stringify(_feedbackBody)
                         });
-                        
+
                         if (!response.ok) throw new Error('Network response was not ok');
-                        
-                        const data = await response.json();
-                        
-                        if (!pushPendingResponsesDedup(data.pending_responses) && data.response) {
-                            messages.value.push({ role: 'assistant', content: data.response });
+
+                        // 读取 SSE 流
+                        const fbReader = response.body.getReader();
+                        const fbDecoder = new TextDecoder();
+                        let fbBuffer = '';
+
+                        while (true) {
+                            const { value: fbValue, done: fbDone } = await fbReader.read();
+                            if (fbDone) break;
+
+                            fbBuffer += fbDecoder.decode(fbValue, { stream: true });
+                            const fbLines = fbBuffer.split('\n');
+                            fbBuffer = fbLines.pop() || '';
+
+                            for (const fbLine of fbLines) {
+                                if (!fbLine.startsWith('data: ')) continue;
+                                const fbRaw = fbLine.substring(6).trim();
+                                if (fbRaw === '[DONE]') break;
+
+                                let fbChunk;
+                                try { fbChunk = JSON.parse(fbRaw); } catch { continue; }
+
+                                if (fbChunk.type === 'process_event' && fbChunk.payload) {
+                                    handleProcessEvent(fbChunk.payload, fbChunk);
+                                    continue;
+                                }
+
+                                if (fbChunk.type === 'final') {
+                                    streamActive.value = false;
+                                    // --- DisplayNode: 使用 final.display_nodes 作为主语义 ---
+                                    if (Array.isArray(fbChunk.display_nodes)) {
+                                        for (const dn of fbChunk.display_nodes) {
+                                            if (dn && dn.nodeId) upsertDisplayNode(dn);
+                                        }
+                                        syncReportCardsFromDisplayNodes(fbChunk.display_nodes);
+                                    }
+                                    if (Array.isArray(fbChunk.pending_responses) && fbChunk.pending_responses.length > 0) {
+                                        pushPendingResponsesDedup(fbChunk.pending_responses);
+                                    }
+                                    if (fbChunk.state) {
+                                        processStateUpdate(fbChunk.state);
+                                    }
+                                    await scrollToBottom();
+                                    continue;
+                                }
+
+                                if (fbChunk.event === 'values' && fbChunk.data) {
+                                    processStateUpdate(fbChunk.data);
+                                    await scrollToBottom();
+                                }
+                            }
                         }
-                        
-                        if (data.state) {
-                            processStateUpdate(data.state);
-                        }
-                        
+
                         if (showContext.value) {
                             await refreshContext();
                         }
@@ -6309,6 +7358,14 @@
                     showGuideModal.value = true;
                 };
 
+                const showGuideFallbackButton = computed(() => {
+                    if (guideCompleted.value || showGuideModal.value) return false;
+                    if (state.value.onboarding_completed) return false;
+                    if (!state.value.pending_crushe_guide) return false;
+                    if (!state.value.preliminary_assessment) return false;
+                    return !messages.value.some(msg => msg && msg.showGuideButton);
+                });
+
                 const closeGuideModal = () => {
                     showGuideModal.value = false;
                 };
@@ -6328,51 +7385,12 @@
                         // Reveal gated outputs (first status report / plan / guides)
                         if (pendingGatedOutputs.value) {
                             const bundle = pendingGatedOutputs.value;
-                            const prev = state.value;
 
                             // Apply to state so Plan tab can render
                             state.value = { ...state.value, ...bundle };
 
-                            // Emit task cards now (same UX as original, but after guide)
-                            if (bundle.status_report && bundle.status_report !== prev.status_report) {
-                                const hasStatusThinking = Array.isArray(bundle.pending_responses) &&
-                                    bundle.pending_responses.some(r => r.from === 'status_agent' && r.phase === 'subgraph_thinking');
-                                if (!hasStatusThinking) {
-                                    pushAssistantOnce(`status_preface_${bundle.status_report}`, '这是基于你提供的信息生成的现状分析报告：');
-                                }
-                                pushSystemTaskOnce(`status_${bundle.status_report}`, {
-                                    role: 'system_task',
-                                    taskType: 'status',
-                                    label: 'STATUS REPORT',
-                                    title: prev.status_report ? '现状分析已更新' : '现状分析报告已生成',
-                                    desc: '点击查看最新的关系阶段与分析报告'
-                                });
-                            }
-                            if (bundle.action_plan && bundle.action_plan !== prev.action_plan) {
-                                const hasPlanThinking = Array.isArray(bundle.pending_responses) &&
-                                    bundle.pending_responses.some(r => r.from === 'plan_agent' && r.phase === 'subgraph_thinking');
-                                if (!hasPlanThinking) {
-                                    pushAssistantOnce(`plan_preface_${bundle.action_plan}`, '我已为你制定了专属的行动计划：');
-                                }
-                                pushSystemTaskOnce(`plan_${bundle.action_plan}`, {
-                                    role: 'system_task',
-                                    taskType: 'strategy',
-                                    label: 'PLANNING',
-                                    title: prev.action_plan ? '情感计划已更新' : '专属情感计划已生成',
-                                    desc: '点击查看最新的情感计划'
-                                });
-                            }
-                            if (bundle.action_guides && Array.isArray(bundle.action_guides)) {
-                                const prevGuides = prev.action_guides || [];
-                                if (bundle.action_guides.length > prevGuides.length) {
-                                    pushSystemTaskOnce(`guide_count_${bundle.action_guides.length}`, {
-                                        role: 'system_task',
-                                        taskType: 'plan',
-                                        label: 'ACTION GUIDE',
-                                        title: '新的行动指南已生成',
-                                        desc: '点击查看最新的行动指南'
-                                    });
-                                }
+                            if (Array.isArray(bundle.pending_responses) && bundle.pending_responses.length > 0) {
+                                pushPendingResponsesDedup(bundle.pending_responses);
                             }
 
                             pendingGatedOutputs.value = null;
@@ -6529,6 +7547,39 @@
                 };
 
                 onMounted(async () => {
+                    // ====== Onboarding v2 入口守卫 + 首轮自动触发 ======
+                    // 未走完 onboarding 的用户必须回到对应页面;stage === 'paid' 的
+                    // 新用户在进入主聊天后立即以完整 onboarding_payload 自动发起首轮
+                    // /api/chat/stream,用户无需输入。详见 LOCAL_STORAGE_PROTOCOL.md §4.2。
+                    let shouldAutoTriggerOnboardingFirstTurn = false;
+                    try {
+                        const Storage = window.OnboardingStorage;
+                        if (Storage) {
+                            const stage = Storage.getStage();
+                            if (!stage || stage === 'splash' || stage === 'free_input' || stage === 'questions') {
+                                window.location.href = '/splash.html';
+                                return;
+                            }
+                            if (stage === 'report') {
+                                window.location.href = '/report.html';
+                                return;
+                            }
+                            // stage === 'paid' → 自动首轮; stage === 'done' → 正常进入主聊天
+                            if (stage === 'paid') {
+                                const payload = buildOnboardingPayloadFromStorage();
+                                if (payload) {
+                                    pendingOnboardingPayload.value = payload;
+                                    shouldAutoTriggerOnboardingFirstTurn = true;
+                                } else {
+                                    // 降级:没拿到 payload 也要推进 stage,避免刷新后卡死在 paid
+                                    Storage.markDone();
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[onboarding] guard check failed, 继续进入主聊天:', e);
+                    }
+
                     const restoredPendingTurn = getToken() ? loadPendingTurn() : null;
                     if (restoredPendingTurn) {
                         savePendingTurn(restoredPendingTurn);
@@ -6539,9 +7590,15 @@
 
                     await checkAuth();
                     await loadUserHistory();
-                    
-                    // If no messages, start onboarding
-                    if (messages.value.length === 0) {
+
+                    // Onboarding v2 用户(stage === 'paid' / 'done')不走旧的欢迎+CTA 流;
+                    // 他们的首屏应该是 v2 自动首轮产出的 AI 开场白 / status 报告卡。
+                    // 只有老用户或从未走过 v2 漏斗的访问者才触发 startOnboardingFlow()。
+                    const _obStage = (() => {
+                        try { return window.OnboardingStorage?.getStage() || null; } catch { return null; }
+                    })();
+                    const _isV2User = _obStage === 'paid' || _obStage === 'done';
+                    if (messages.value.length === 0 && !_isV2User) {
                         startOnboardingFlow();
                     }
 
@@ -6549,10 +7606,61 @@
                         scheduleRecoverPendingTurn(0);
                     }
 
+                    // Lock app-container scrollTop and tab-stage scrollLeft to 0 permanently.
+                    // overflow:hidden clips the horizontal tab slider, but Chrome still allows
+                    // programmatic scrollTop/scrollLeft changes on overflow:hidden elements when
+                    // scrollIntoView() traverses ancestors — this shifts position:absolute modals
+                    // and causes the plan tab to bleed into the chat tab.
+                    // Fix: override the property on the instance with a native-setter-backed lock
+                    // so the REAL DOM scroll is also reset to 0, not just the JS read value.
+                    const _lockScroll = (el, prop) => {
+                        if (!el) return;
+                        // Grab native setter AND getter from prototype chain BEFORE we override the instance
+                        let _nativeSetter = null, _nativeGetter = null;
+                        let _proto = Object.getPrototypeOf(el);
+                        while (_proto) {
+                            const _d = Object.getOwnPropertyDescriptor(_proto, prop);
+                            if (_d && _d.set) { _nativeSetter = _d.set; _nativeGetter = _d.get; break; }
+                            _proto = Object.getPrototypeOf(_proto);
+                        }
+                        Object.defineProperty(el, prop, {
+                            configurable: true,
+                            get() { return 0; },
+                            set(_v) {
+                                // Always force the real DOM scroll back to 0
+                                if (_nativeSetter) _nativeSetter.call(el, 0);
+                            },
+                        });
+                        // scrollIntoView() uses native C++ scroll, bypassing our JS setter above.
+                        // Catch those via the 'scroll' event and immediately reset to 0.
+                        el.addEventListener('scroll', () => {
+                            if (_nativeGetter && _nativeGetter.call(el) !== 0 && _nativeSetter) {
+                                _nativeSetter.call(el, 0);
+                            }
+                        }, { passive: true });
+                        // Reset any existing scroll immediately
+                        if (_nativeSetter) _nativeSetter.call(el, 0);
+                    };
+                    _lockScroll(document.querySelector('.app-container'), 'scrollTop');
+                    _lockScroll(document.querySelector('.tab-stage'), 'scrollLeft');
+
                     // Click anywhere outside user menu to close it (does not block underlying clicks)
                     document.addEventListener('click', handleDocumentClick, true);
                     document.addEventListener('visibilitychange', handleVisibilityRecovery);
                     window.addEventListener('online', handleOnlineRecovery);
+
+                    // Onboarding v2:UI 挂载完成后再触发自动首轮,避免早于 isLoading 等 ref 初始化
+                    if (shouldAutoTriggerOnboardingFirstTurn && pendingOnboardingPayload.value) {
+                        await nextTick();
+                        try {
+                            inputMessage.value = '';
+                            await sendMessage(true);
+                        } catch (e) {
+                            console.warn('[onboarding] auto first turn failed:', e);
+                            pendingOnboardingPayload.value = null;
+                            try { window.OnboardingStorage && window.OnboardingStorage.markDone(); } catch (_) { /* noop */ }
+                        }
+                    }
                 });
 
                 onBeforeUnmount(() => {
@@ -6627,6 +7735,7 @@
 
                     // Guide Carousel
                     showGuideModal,
+                    showGuideFallbackButton,
                     currentGuideStep,
                     openGuideModal,
                     closeGuideModal,
@@ -6643,6 +7752,7 @@
                     isProcessingImages,
                     mainImageInput,
                     messagesContainer,
+                    getMessageRenderKey,
                     sendMessage,
                     sendMessageWithImages,
                     retryPendingTurnNow,
@@ -6650,6 +7760,16 @@
                     handleMainImageSelect,
                     handlePaste,
                     removeImage,
+
+                    // DisplayStore
+                    displayNodeMap,
+                    orderedNodeIds,
+                    streamActive,
+                    hasPendingInquiry,
+                    inputLockReason,
+                    handleReportCardClick,
+                    getToolLabel,
+                    buildMessagesViewFromDisplayNodes,
                     renderMarkdown,
                     
                     // Data
@@ -6713,10 +7833,80 @@
                     openFeedbackModal,
                     closeFeedbackModal,
                     canSubmitFeedback,
-                    submitFeedback
+                    submitFeedback,
+                    debugPanelOpen,
+                    debugLog,
+                    _dbg,
                 };
             }
         }).mount('#app');
     </script>
+
+    <!-- ══════════════ DEBUG PANEL ══════════════ -->
+    <div id="dbg-root" style="position:fixed;bottom:16px;right:16px;z-index:9999;font-family:monospace;font-size:11px;">
+        <!-- toggle button -->
+        <button id="dbg-toggle"
+            onclick="document.getElementById('dbg-panel').style.display=document.getElementById('dbg-panel').style.display==='none'?'flex':'none';this.textContent=document.getElementById('dbg-panel').style.display==='none'?'🐛 Debug':'✕ Debug'"
+            style="background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;padding:4px 10px;cursor:pointer;float:right;">
+            🐛 Debug
+        </button>
+        <!-- panel -->
+        <div id="dbg-panel" style="display:none;flex-direction:column;width:380px;max-height:420px;background:#1e1e2e;border:1px solid #45475a;border-radius:8px;margin-top:4px;overflow:hidden;">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:#181825;border-bottom:1px solid #313244;">
+                <span style="color:#cba6f7;font-weight:bold;">SSE Debug Log</span>
+                <div style="display:flex;gap:6px;">
+                    <span id="dbg-loading" style="color:#a6e3a1;display:none;">⏳ loading</span>
+                    <button onclick="document.getElementById('dbg-list').innerHTML='';window.__dbgEntries=[];" style="background:#313244;color:#f38ba8;border:none;border-radius:4px;padding:2px 6px;cursor:pointer;font-size:10px;">Clear</button>
+                </div>
+            </div>
+            <ul id="dbg-list" style="margin:0;padding:4px 0;list-style:none;overflow-y:auto;flex:1;"></ul>
+        </div>
+    </div>
+    <script>
+        // lightweight vanilla logger — doesn't depend on Vue mounting
+        window.__dbgEntries = [];
+        const _origDbg = window._dbgHook; // placeholder
+        function dbgLog(tag, data) {
+            const ts = new Date().toLocaleTimeString('zh', { hour12: false });
+            const entry = { ts, tag, data: typeof data === 'object' ? JSON.stringify(data) : String(data ?? '') };
+            window.__dbgEntries.unshift(entry);
+            if (window.__dbgEntries.length > 80) window.__dbgEntries.pop();
+            const list = document.getElementById('dbg-list');
+            if (!list) return;
+            // color by tag
+            const color = tag.includes('ERR') || tag === 'CATCH' ? '#f38ba8'
+                : tag.includes('DONE') ? '#a6e3a1'
+                : tag === 'FINAL' || tag === 'FINAL(resume)' ? '#fab387'
+                : tag.startsWith('CHUNK') ? '#89dceb'
+                : tag.startsWith('FETCH') ? '#cba6f7'
+                : '#cdd6f4';
+            const li = document.createElement('li');
+            li.style.cssText = 'padding:2px 8px;border-bottom:1px solid #313244;color:' + color + ';word-break:break-all;white-space:pre-wrap;';
+            const dataStr = entry.data.length > 120 ? entry.data.substring(0, 120) + '…' : entry.data;
+            li.textContent = entry.ts + '  [' + tag + ']  ' + dataStr;
+            list.insertBefore(li, list.firstChild);
+            // keep max 60 DOM nodes
+            while (list.children.length > 60) list.removeChild(list.lastChild);
+        }
+        // patch Vue app's _dbg to also write to panel
+        const _vueMountInterval = setInterval(() => {
+            const app = document.getElementById('app').__vue_app__;
+            if (!app) return;
+            clearInterval(_vueMountInterval);
+            // We can't easily patch Vue's internal _dbg ref, so we expose dbgLog globally
+            // and call it from inline埋点 via window.dbgLog
+        }, 200);
+        window.dbgLog = dbgLog;
+
+        // isLoading observer via MutationObserver on a sentinel element — or just poll
+        setInterval(() => {
+            const loadingEl = document.getElementById('dbg-loading');
+            if (!loadingEl) return;
+            // detect any spinner visible
+            const spinner = document.querySelector('.animate-spin, [class*="loading"]');
+            loadingEl.style.display = spinner ? 'inline' : 'none';
+        }, 500);
+    </script>
+    <!-- ══════════════ END DEBUG PANEL ══════════════ -->
 </body>
 </html>

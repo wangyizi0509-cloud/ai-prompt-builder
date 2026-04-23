@@ -3,7 +3,7 @@ import uuid
 import hashlib
 from pathlib import Path
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional, Literal, Any, Union, List
@@ -16,6 +16,11 @@ LOG_PATH = PROJECT_ROOT / ".cursor" / "debug.log"
 
 
 from utils.logger import get_logger
+from api.onboarding_handoff_prompt import (
+    OnboardingPayload,
+    render_onboarding_first_turn_message,
+)
+from api.track import log_event_server
 
 logger = get_logger("chat")
 import time
@@ -40,6 +45,12 @@ class ChatRequest(BaseModel):
     feedback_mode: Optional[FeedbackModeInput] = None
     resume_payload: Optional[Union[dict[str, Any], str]] = None
     resume: Optional[bool] = None
+    inquiry_receipt_payload: Optional[dict[str, Any]] = None
+    # Onboarding v2：付费后首轮前端自动触发时携带。后端会用固定模板把
+    # free_text / ocr_texts / answers 渲染成完整 user_message(含系统指令 +
+    # 诊断素材),main_agent 首轮按指令立即调 call_status_agent。仅首轮生效;
+    # 非首轮即使前端误传也会被忽略。详见 onboarding_v2/API_CONTRACT.md §4。
+    onboarding_payload: Optional[OnboardingPayload] = None
 
 def _get_screenshot_label(screenshot_type: Optional[str]) -> str:
     labels = {
@@ -53,6 +64,11 @@ def _get_screenshot_label(screenshot_type: Optional[str]) -> str:
 
 
 def _build_user_message_with_images(request: ChatRequest) -> str:
+    """构造本轮用户消息：OCR 段 + 原始 message。
+
+    Onboarding v2 首轮的「系统指令 + 诊断素材」走单独分支(见 chat() 主流程),
+    不经过本函数。
+    """
     final_message = request.message or ""
     if request.images:
         image_parts = []
@@ -66,6 +82,26 @@ def _build_user_message_with_images(request: ChatRequest) -> str:
             if request.message:
                 final_message += f"\n\n---\n\n用户补充说明：{request.message}"
     return final_message
+
+
+def _is_first_turn_for_thread(base_state: Optional[dict]) -> bool:
+    """判定当前请求是否属于 thread 的首轮消息。
+
+    复用既有判定口径：
+    - `base_state is None` —— checkpointer 无快照，全新会话
+    - 或者 state 中既无 messages 也无 layer3_memory.all_messages 历史记录
+    """
+    if not isinstance(base_state, dict):
+        return True
+    messages = base_state.get("messages")
+    if isinstance(messages, list) and messages:
+        return False
+    layer3 = base_state.get("layer3_memory")
+    if isinstance(layer3, dict):
+        all_messages = layer3.get("all_messages")
+        if isinstance(all_messages, list) and all_messages:
+            return False
+    return True
 
 
 def _extract_answers_from_resume_payload(resume_payload: Optional[Union[dict[str, Any], str]]) -> dict[str, Any]:
@@ -124,22 +160,22 @@ def _answers_fingerprint(answers: dict[str, Any]) -> str:
 
 
 async def get_optional_user_dep(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ):
-    if credentials is None:
-        return None
     from auth_utils import get_optional_user
-    return await get_optional_user(credentials)
+    return await get_optional_user(request, credentials)
 
 
-security_required = HTTPBearer()
+security_required = HTTPBearer(auto_error=False)
 
 
 async def get_required_user_dep(
-    credentials: HTTPAuthorizationCredentials = Depends(security_required),
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_required),
 ):
     from auth_utils import get_current_user
-    return await get_current_user(credentials)
+    return await get_current_user(request, credentials)
 
 
 def _append_debug_log(run_id: str, hypothesis_id: str, location: str, message: str, data: dict):
@@ -169,7 +205,6 @@ def _run_maintenance_tasks_sdk(session_id: str, thread_id: str) -> None:
     """
     from api.sdk_client import get_thread_state, update_thread_state
     from graph.archive_manager import (
-        refine_on_onboarding_complete,
         compress_layer3,
         compress_task_reasoning,
         archive_guide_to_layer2,
@@ -226,14 +261,7 @@ def _run_maintenance_tasks_sdk(session_id: str, thread_id: str) -> None:
 
             updates = {}
 
-            if task_type == "onboarding_refine":
-                updates = refine_on_onboarding_complete(state)
-                flags = dict(flags)
-                flags["onboarding_refine_done"] = True
-                flags["onboarding_refine_queued"] = False
-                updates["maintenance_flags"] = flags
-
-            elif task_type == "layer3_compress":
+            if task_type == "layer3_compress":
                 updates = compress_layer3(state)
 
             elif task_type == "task_reasoning_compress":
@@ -464,19 +492,30 @@ def _extract_inquiry_card_from_any(value: Any) -> dict | None:
 async def chat(
     request: ChatRequest,
     background_tasks: BackgroundTasks,
-    current_user=Depends(get_required_user_dep),
+    current_user=Depends(get_optional_user_dep),
 ):
     is_resume = bool(request.resume_payload) or bool(request.resume)
     has_images = bool(request.images)
-    if not is_resume and not (request.message or "").strip() and not has_images:
+    has_onboarding_payload = request.onboarding_payload is not None
+    if (
+        not is_resume
+        and not (request.message or "").strip()
+        and not has_images
+        and not has_onboarding_payload
+    ):
         raise HTTPException(status_code=400, detail="message is required")
     if is_resume and request.resume_payload is None:
         raise HTTPException(status_code=400, detail="resume_payload is required when resume is true")
 
-    final_message = _build_user_message_with_images(request) if not is_resume else ""
-    message_preview = (final_message or "").strip()[:50] if not is_resume else ""
+    # Resume 请求本质上不属于"首轮"，禁止把 onboarding_payload 前置
+    # （resume 场景下 final_message 由 base_state + answers 合成，不走 _build_user_message_with_images）。
+    if is_resume and request.onboarding_payload is not None:
+        request.onboarding_payload = None
+
+    message_preview_source = request.message if not is_resume else "[resume]"
     logger.info(
-        f"Received message from session {request.session_id}: {message_preview if not is_resume else '[resume]'}..."
+        f"Received message from session {request.session_id}: "
+        f"{(message_preview_source or '').strip()[:50] if not is_resume else '[resume]'}..."
     )
 
     from api.sdk_client import (
@@ -484,17 +523,18 @@ async def chat(
         get_thread_state,
         run_assistant,
         thread_has_pending_interrupt,
-        update_thread_state,
     )
     from graph.state import create_initial_state
-    
-    user_id = current_user['user_id']
+
+    # Onboarding v2 本期支持匿名入口：current_user 可能为 None
+    user_id = current_user['user_id'] if isinstance(current_user, dict) else None
     thread_id = await ensure_thread_exists(request.session_id, user_id)
     onboarding_turn_count_before: int | None = None
 
     input_payload: Any = None
     resume_command: dict | None = None
     synthetic_resume = False
+    final_message: str = ""  # 默认空串：resume 分支不走 message 合成时保持兼容
     if is_resume:
         base_state = get_thread_state(thread_id)
         if isinstance(base_state, dict):
@@ -563,6 +603,30 @@ async def chat(
         if isinstance(base_state, dict):
             onboarding_turn_count_before = int(base_state.get("onboarding_turn_count", 0) or 0)
 
+        # Onboarding v2 衔接：仅首轮允许 onboarding_payload。非首轮即使前端传了也忽略。
+        is_first_turn = _is_first_turn_for_thread(base_state)
+        use_onboarding_payload = is_first_turn and request.onboarding_payload is not None
+        if not is_first_turn and request.onboarding_payload is not None:
+            logger.info(
+                "Ignoring onboarding_payload on non-first turn: thread=%s", thread_id
+            )
+            request.onboarding_payload = None
+
+        if use_onboarding_payload:
+            # 首轮 + 有 payload：完全由模板生成 user_message,不拼接 request.message/images
+            final_message = render_onboarding_first_turn_message(request.onboarding_payload)
+        else:
+            final_message = _build_user_message_with_images(request)
+
+        preview = (final_message or "").strip()[:80]
+        logger.info(
+            "Non-resume prepared final_message: thread=%s, is_first_turn=%s, use_onboarding_payload=%s, preview=%s",
+            thread_id,
+            is_first_turn,
+            use_onboarding_payload,
+            preview,
+        )
+
         if base_state is None:
             logger.info(f"Creating new session for thread {thread_id} (checkpointer empty)")
             current_message_id = str(uuid.uuid4())
@@ -581,6 +645,19 @@ async def chat(
             state["pending_responses"] = []
             state["last_response_for_continuity"] = None
             state["feedback_mode_input"] = request.feedback_mode.dict() if request.feedback_mode else None
+
+        if use_onboarding_payload:
+            log_event_server(
+                anonymous_id=request.session_id,
+                session_id=request.session_id,
+                event_name="first_chat_success",
+                props={
+                    "thread_id": thread_id,
+                    "message_len": len(final_message),
+                    "has_ocr": bool(request.onboarding_payload.ocr_texts),
+                    "answer_count": len(request.onboarding_payload.answers or {}),
+                },
+            )
         input_payload = state
 
     try:
@@ -605,17 +682,22 @@ async def chat(
         for chunk in run_assistant(thread_id, input_payload, stream_mode="values", command=resume_command):
             chunks.append(chunk)
         
+        # 反向遍历找最后一个 event="values" 的有效 chunk，而不是无条件取 chunks[-1]
         final_state: Any = {}
-        if chunks:
-            last_chunk = chunks[-1]
-            data_attr = getattr(last_chunk, "data", None)
-            if isinstance(data_attr, dict):
-                final_state = data_attr
-            elif isinstance(last_chunk, dict):
-                final_state = last_chunk.get("data") or {}
+        for chunk in reversed(chunks):
+            event = getattr(chunk, "event", None)
+            data = getattr(chunk, "data", None)
+            if event == "values" and isinstance(data, dict) and data:
+                final_state = dict(data)
+                break
+        if not final_state:  # fallback：兼容无 event 属性的旧版 SDK
+            for chunk in reversed(chunks):
+                data = getattr(chunk, "data", None)
+                if isinstance(data, dict) and data:
+                    final_state = dict(data)
+                    break
         if not isinstance(final_state, dict):
             final_state = {}
-        final_state = dict(final_state)
 
         inquiry_card = _extract_inquiry_card_from_chunk_interrupts(chunks)
         if inquiry_card is None:
@@ -694,6 +776,7 @@ async def chat(
                 final_state=final_state,
                 is_resume=is_resume,
                 inquiry_card=inquiry_card,
+                inquiry_receipt_payload=request.inquiry_receipt_payload,
             )
 
         # 构造标准响应
@@ -767,7 +850,7 @@ async def get_chat_history(thread_id: str, current_user=Depends(get_required_use
 
                         if kind == "chat_text" and content and role in ("user", "assistant"):
                             clean_messages.append({"role": role, "content": content, "kind": kind})
-                        elif kind in ("interrupt_inquiry", "inquiry_receipt", "system_task", "preliminary_assessment"):
+                        elif kind in ("interrupt_inquiry", "inquiry_receipt", "system_task", "preliminary_assessment", "ai_intermediate", "tool_event", "reasoning_event"):
                             clean_messages.append({
                                 "role": role,
                                 "content": content,

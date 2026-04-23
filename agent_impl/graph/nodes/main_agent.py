@@ -21,6 +21,7 @@
 import json
 import os
 import hashlib
+from copy import deepcopy
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -29,6 +30,7 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_core.runnables import RunnableConfig
 from langchain_core.runnables.config import ensure_config
+from langgraph.config import get_stream_writer
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command, interrupt
 
@@ -48,7 +50,9 @@ from graph.subgraphs.plan import get_plan_subgraph
 from graph.subgraphs.guide import get_guide_subgraph
 from graph.subgraphs.status import get_status_subgraph
 from graph.tools.submit_tools import submit_tools_state_context
+from api.display_events import get_tool_label
 from utils.logger import get_logger
+from utils.reasoning_content import extract_reasoning_content
 
 
 logger = get_logger("main_agent")
@@ -238,6 +242,38 @@ def _extract_status_report_markdown(state_like: Any) -> str:
     return str(content).strip() if isinstance(content, str) else ""
 
 
+def _extract_current_status_report_item(state_like: Any) -> dict[str, Any]:
+    if not isinstance(state_like, dict):
+        return {}
+    layer2 = state_like.get("layer2_memory")
+    if not isinstance(layer2, dict):
+        return {}
+    report = layer2.get("current_status_report")
+    return dict(report) if isinstance(report, dict) else {}
+
+
+def _extract_current_action_plan_item(state_like: Any) -> dict[str, Any]:
+    if not isinstance(state_like, dict):
+        return {}
+    layer2 = state_like.get("layer2_memory")
+    if not isinstance(layer2, dict):
+        return {}
+    plan = layer2.get("current_action_plan")
+    return dict(plan) if isinstance(plan, dict) else {}
+
+
+def _extract_action_guides(state_like: Any) -> list[dict[str, Any]]:
+    if not isinstance(state_like, dict):
+        return []
+    layer2 = state_like.get("layer2_memory")
+    if not isinstance(layer2, dict):
+        return []
+    guides = layer2.get("action_guides")
+    if not isinstance(guides, list):
+        return []
+    return [dict(g) for g in guides if isinstance(g, dict)]
+
+
 def _extract_layer2_from_patch(patch: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(patch, dict):
         return {}
@@ -249,6 +285,19 @@ def _first_non_empty_text(*values: Any) -> str:
     for value in values:
         if isinstance(value, str) and value.strip():
             return value.strip()
+    return ""
+
+
+def _get_item_identity(item: dict[str, Any], *keys: str) -> str:
+    if not isinstance(item, dict):
+        return ""
+    for key in keys:
+        value = item.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
     return ""
 
 
@@ -347,52 +396,115 @@ def _build_status_brief(markdown: str) -> str:
     return f"【现状分析摘要】{summary}\n\n完整内容见“当前现状”面板。"
 
 
-def _format_onboarding_handoff_summary(handoff: Any) -> str:
-    if not isinstance(handoff, dict):
-        return ""
-    recommendation = handoff.get("recommendation")
-    suggested_action = handoff.get("suggested_action")
-    reason = handoff.get("reason")
+def _build_system_task_pending_responses(
+    previous_state: dict[str, Any],
+    next_state: dict[str, Any],
+    existing_pending_responses: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    pending_items: list[dict[str, Any]] = []
 
-    rec_text = str(recommendation) if isinstance(recommendation, (str, int, float, bool)) else ""
-    action_text = str(suggested_action) if isinstance(suggested_action, (str, int, float, bool)) else ""
-    reason_text = str(reason) if isinstance(reason, (str, int, float, bool)) else ""
+    has_status_thinking = any(
+        isinstance(item, dict)
+        and item.get("from") == "status_agent"
+        and item.get("phase") == "subgraph_thinking"
+        for item in existing_pending_responses
+    )
+    has_plan_thinking = any(
+        isinstance(item, dict)
+        and item.get("from") == "plan_agent"
+        and item.get("phase") == "subgraph_thinking"
+        for item in existing_pending_responses
+    )
 
-    parts: list[str] = []
-    if rec_text:
-        parts.append(f"建议: {rec_text}")
-    if action_text:
-        parts.append(f"动作: {action_text}")
-    if reason_text:
-        parts.append(f"理由: {reason_text}")
-    return "\n".join(parts)
+    old_status = _extract_current_status_report_item(previous_state)
+    new_status = _extract_current_status_report_item(next_state)
+    old_status_id = _get_item_identity(old_status, "report_id", "id")
+    new_status_id = _get_item_identity(new_status, "report_id", "id")
+    if new_status and new_status_id and new_status_id != old_status_id:
+        report_markdown = _extract_status_report_markdown(next_state)
+        if report_markdown and not has_status_thinking:
+            pending_items.append(
+                {
+                    "from": "main_agent",
+                    "content": "这是基于你提供的信息生成的现状分析报告：",
+                    "phase": "status_preface",
+                    "messageKey": f"status_preface_{new_status_id}",
+                }
+            )
+        pending_items.append(
+            {
+                "type": "system_task",
+                "from": "main_agent",
+                "taskType": "status",
+                "taskKey": f"status_{new_status_id}",
+                "taskState": "done",
+                "label": "STATUS REPORT",
+                "title": "现状分析报告已生成",
+                "desc": "点击查看最新的关系阶段与分析报告",
+            }
+        )
 
+    old_plan = _extract_current_action_plan_item(previous_state)
+    new_plan = _extract_current_action_plan_item(next_state)
+    old_plan_id = _get_item_identity(old_plan, "plan_id", "id")
+    new_plan_id = _get_item_identity(new_plan, "plan_id", "id")
+    if new_plan and new_plan_id and new_plan_id != old_plan_id:
+        plan_markdown = str(new_plan.get("plan_content") or "").strip()
+        if plan_markdown and not has_plan_thinking:
+            pending_items.append(
+                {
+                    "from": "main_agent",
+                    "content": "我已为你制定了专属的行动计划：",
+                    "phase": "plan_preface",
+                    "messageKey": f"plan_preface_{new_plan_id}",
+                }
+            )
+        pending_items.append(
+            {
+                "type": "system_task",
+                "from": "main_agent",
+                "taskType": "strategy",
+                "taskKey": f"plan_{new_plan_id}",
+                "taskState": "done",
+                "label": "PLANNING",
+                "title": "专属情感计划已生成",
+                "desc": "点击查看最新的情感计划",
+            }
+        )
 
-def _format_onboarding_handoff_summary(handoff: Any) -> str:
-    if not isinstance(handoff, dict):
-        return ""
-    recommendation = handoff.get("recommendation")
-    suggested_action = handoff.get("suggested_action")
-    reason = handoff.get("reason")
+    old_guides = _extract_action_guides(previous_state)
+    new_guides = _extract_action_guides(next_state)
+    old_guide_ids = {
+        _get_item_identity(guide, "guide_id", "id")
+        for guide in old_guides
+        if _get_item_identity(guide, "guide_id", "id")
+    }
+    for guide in new_guides:
+        guide_id = _get_item_identity(guide, "guide_id", "id")
+        if not guide_id or guide_id in old_guide_ids:
+            continue
+        guide_title = _first_non_empty_text(guide.get("title"), guide.get("one_liner"), "点击查看最新的行动指南")
+        pending_items.append(
+            {
+                "type": "system_task",
+                "from": "main_agent",
+                "taskType": "plan",
+                "taskKey": f"guide_{guide_id}",
+                "taskState": "done",
+                "label": "ACTION GUIDE",
+                "title": "新的行动指南已生成",
+                "desc": guide_title,
+            }
+        )
 
-    rec_text = str(recommendation) if isinstance(recommendation, (str, int, float, bool)) else ""
-    action_text = str(suggested_action) if isinstance(suggested_action, (str, int, float, bool)) else ""
-    reason_text = str(reason) if isinstance(reason, (str, int, float, bool)) else ""
-
-    parts: list[str] = []
-    if rec_text:
-        parts.append(f"建议: {rec_text}")
-    if action_text:
-        parts.append(f"动作: {action_text}")
-    if reason_text:
-        parts.append(f"理由: {reason_text}")
-    return "\n".join(parts)
+    return pending_items
 
 
 def _wrap_tools_for_patch_collection(
     tools: list[BaseTool],
     patches: list[dict],
     live_state: dict | None = None,
+    emission_records: list[dict[str, Any]] | None = None,
 ) -> list[BaseTool]:
     """Wrap tools to collect state_patch from each invocation.
 
@@ -409,6 +521,11 @@ def _wrap_tools_for_patch_collection(
 
         def _make_wrapped(inner: BaseTool):
             def _wrapped(**kwargs):
+                pre_patch_state = {}
+                if isinstance(live_state, dict):
+                    layer2 = live_state.get("layer2_memory")
+                    if isinstance(layer2, dict):
+                        pre_patch_state = {"layer2_memory": deepcopy(layer2)}
                 try:
                     result = inner.invoke(kwargs, config=sanitize_runtime_config(ensure_config()))
                 except GraphBubbleUp:
@@ -417,6 +534,11 @@ def _wrap_tools_for_patch_collection(
                     logger.exception("tool invoke failed: tool=%s", getattr(inner, "name", ""))
                     return _tool_failure_to_content(getattr(inner, "name", ""), e)
                 patch = _extract_state_patch(result)
+                if emission_records is not None:
+                    emission_records.append({
+                        "patch": patch if isinstance(patch, dict) else None,
+                        "previous_state": pre_patch_state,
+                    })
                 if patch:
                     patches.append(patch)
                     if live_state is not None:
@@ -463,9 +585,16 @@ def _run_langchain_supervisor(
     max_rounds: int,
     config: RunnableConfig | None = None,
     live_state: dict | None = None,
+    writer=None,
 ) -> dict[str, Any]:
     patches: list[dict] = []
-    wrapped_tools = _wrap_tools_for_patch_collection(list(tools or []), patches, live_state=live_state)
+    emission_records: list[dict[str, Any]] = []
+    wrapped_tools = _wrap_tools_for_patch_collection(
+        list(tools or []),
+        patches,
+        live_state=live_state,
+        emission_records=emission_records,
+    )
 
     checkpointer = resolve_runtime_checkpointer(config)
 
@@ -478,18 +607,50 @@ def _run_langchain_supervisor(
     rounds = max(1, int(max_rounds or 1))
     recursion_limit = max(25, rounds * 4 + 10)
     cfg["recursion_limit"] = recursion_limit
-    result = agent_graph.invoke(
+
+    messages_out = list(initial_messages)
+    interrupt_value = None
+    tool_record_index = 0
+
+    for chunk in agent_graph.stream(
         {"messages": list(initial_messages)},
         config=cfg,
+        stream_mode="updates",
+    ):
+        # __interrupt__ 出现在 chunk key 里
+        if "__interrupt__" in chunk:
+            interrupt_value = chunk["__interrupt__"]
+            continue
+        for node_name, node_delta in chunk.items():
+            if not isinstance(node_delta, dict):
+                continue
+            for msg in (node_delta.get("messages") or []):
+                # 内层图会重复把 initial_messages 放进来，用 id 去重
+                existing_ids = {getattr(m, "id", None) for m in messages_out}
+                msg_id = getattr(msg, "id", None)
+                if msg_id is not None and msg_id in existing_ids:
+                    continue
+                messages_out.append(msg)
+                if isinstance(msg, AIMessage):
+                    _emit_ai_events(writer, msg)
+                elif isinstance(msg, ToolMessage):
+                    record = emission_records[tool_record_index] if tool_record_index < len(emission_records) else {}
+                    tool_record_index += 1
+                    _emit_tool_done_from_message(
+                        writer,
+                        msg,
+                        record.get("patch") if isinstance(record, dict) else None,
+                        record.get("previous_state") if isinstance(record, dict) else None,
+                    )
+
+    final = next(
+        (m for m in reversed(messages_out) if isinstance(m, AIMessage)),
+        AIMessage(content=""),
     )
-
-    messages_out = list(result.get("messages") or [])
-    final = messages_out[-1] if messages_out else AIMessage(content="")
-    new_messages = messages_out[len(initial_messages) :] if len(messages_out) >= len(initial_messages) else messages_out
-
+    new_messages = messages_out[len(initial_messages):]
     out = {"final": final, "new_messages": new_messages, "patches": patches}
-    if "__interrupt__" in result:
-        out["__interrupt__"] = result["__interrupt__"]
+    if interrupt_value is not None:
+        out["__interrupt__"] = interrupt_value
     return out
 
 
@@ -512,6 +673,10 @@ def _call_subagent(
         current_input=instruction,
     )
     initial_messages = _truncate_messages(initial_messages, max_total=25)
+    try:
+        _subagent_writer = get_stream_writer()
+    except RuntimeError:
+        _subagent_writer = None
     with submit_tools_state_context(current_state):
         supervisor = _run_langchain_supervisor(
             llm=llm,
@@ -520,6 +685,7 @@ def _call_subagent(
             max_rounds=int(os.getenv("SUBAGENT_TOOL_MAX_ROUNDS", "8")),
             config=config,
             live_state=current_state,
+            writer=_subagent_writer,
         )
     merged_patch = merge_patches({}, supervisor["patches"])
     output = (supervisor["final"].content or "").strip()
@@ -545,6 +711,12 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
         return merged
 
     def _status_tool(instruction: str) -> ToolResult:
+        # 获取 stream writer 用于发射实时展示事件
+        try:
+            _sw = get_stream_writer()
+        except RuntimeError:
+            _sw = None
+
         cfg = _current_config()
         checkpointer = resolve_runtime_checkpointer(cfg)
         subgraph = get_status_subgraph(checkpointer=checkpointer) if checkpointer is not None else get_status_subgraph()
@@ -558,6 +730,14 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
             },
             "private_messages": [],
         }
+
+        # 报告卡片 loading 事件
+        if _sw:
+            try:
+                _sw({"event_type": "report_card", "status": "loading", "report_type": "status"})
+            except Exception:
+                pass
+
         pending_payload = _extract_pending_interrupt(subgraph, invoke_cfg)
         active_cfg = invoke_cfg
         if pending_payload is not None:
@@ -579,22 +759,61 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
             sub_out = subgraph.invoke(Command(resume=answer), config=active_cfg)
         patch = dict(sub_out.get("state_patch") or {}) if isinstance(sub_out, dict) else {}
         final = sub_out.get("final") if isinstance(sub_out, dict) else None
+        # DEBUG: 检查子图返回的 patch 内容
+        _l2_in_patch = patch.get("layer2_memory", {}) if isinstance(patch, dict) else {}
+        _csr_in_patch = _l2_in_patch.get("current_status_report") if isinstance(_l2_in_patch, dict) else None
+        logger.info(
+            "call_status_agent patch check: patch_keys=%s l2_keys=%s csr_exists=%s csr_preview=%s",
+            list(patch.keys()) if patch else [],
+            list(_l2_in_patch.keys()) if isinstance(_l2_in_patch, dict) else None,
+            _csr_in_patch is not None,
+            str(_csr_in_patch)[:200] if _csr_in_patch else None,
+        )
         text = ""
         if isinstance(final, dict) and isinstance(final.get("text"), str):
             text = final["text"].strip()
         text = _build_status_tool_observation(text, patch)
-        # 提取子图中间 AI 消息，累积到 working_state 的临时字段
+
+        # 提取子图中间 AI 消息，累积到 working_state 的临时字段，并通过 stream_writer 实时发射
         intermediate = sub_out.get("intermediate_messages") or [] if isinstance(sub_out, dict) else []
         if intermediate:
             ws = state_getter()
             existing = ws.get("_subgraph_intermediates") or []
-            for msg in intermediate:
-                if isinstance(msg, dict) and msg.get("text"):
-                    existing.append({"from": "status_agent", "content": msg["text"], "phase": "subgraph_thinking"})
+            for msg_item in intermediate:
+                if isinstance(msg_item, dict) and msg_item.get("text"):
+                    existing.append({"from": "status_agent", "content": msg_item["text"], "phase": "subgraph_thinking"})
+                    if _sw:
+                        try:
+                            _sw({
+                                "event_type": "subgraph_thinking",
+                                "content": msg_item["text"],
+                                "source": "status_agent",
+                            })
+                        except Exception:
+                            pass
             ws["_subgraph_intermediates"] = existing
+
+        # 报告卡片 done 事件
+        report_id = ""
+        l2_patch = _extract_layer2_from_patch(patch)
+        status_report = l2_patch.get("current_status_report") if isinstance(l2_patch.get("current_status_report"), dict) else {}
+        if isinstance(status_report, dict):
+            report_id = _get_item_identity(status_report, "report_id", "id")
+        if _sw:
+            try:
+                _sw({"event_type": "report_card", "status": "done", "report_type": "status", "report_id": report_id})
+            except Exception:
+                pass
+
         return ok(output=text, state_patch=patch)
 
     def _plan_tool(instruction: str) -> ToolResult:
+        # 获取 stream writer 用于发射实时展示事件
+        try:
+            _sw = get_stream_writer()
+        except RuntimeError:
+            _sw = None
+
         cfg = _current_config()
         checkpointer = resolve_runtime_checkpointer(cfg)
         subgraph = get_plan_subgraph(checkpointer=checkpointer) if checkpointer is not None else get_plan_subgraph()
@@ -608,6 +827,14 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
             },
             "private_messages": [],
         }
+
+        # 报告卡片 loading 事件
+        if _sw:
+            try:
+                _sw({"event_type": "report_card", "status": "loading", "report_type": "plan"})
+            except Exception:
+                pass
+
         pending_payload = _extract_pending_interrupt(subgraph, invoke_cfg)
         active_cfg = invoke_cfg
         if pending_payload is not None:
@@ -661,18 +888,47 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
         if isinstance(final, dict) and isinstance(final.get("text"), str):
             text = final["text"].strip()
         text = _build_plan_tool_observation(text, patch)
-        # 提取子图中间 AI 消息，累积到 working_state 的临时字段
+
+        # 提取子图中间 AI 消息，累积到 working_state 的临时字段，并通过 stream_writer 实时发射
         intermediate = sub_out.get("intermediate_messages") or [] if isinstance(sub_out, dict) else []
         if intermediate:
             ws = state_getter()
             existing = ws.get("_subgraph_intermediates") or []
-            for msg in intermediate:
-                if isinstance(msg, dict) and msg.get("text"):
-                    existing.append({"from": "plan_agent", "content": msg["text"], "phase": "subgraph_thinking"})
+            for msg_item in intermediate:
+                if isinstance(msg_item, dict) and msg_item.get("text"):
+                    existing.append({"from": "plan_agent", "content": msg_item["text"], "phase": "subgraph_thinking"})
+                    if _sw:
+                        try:
+                            _sw({
+                                "event_type": "subgraph_thinking",
+                                "content": msg_item["text"],
+                                "source": "plan_agent",
+                            })
+                        except Exception:
+                            pass
             ws["_subgraph_intermediates"] = existing
+
+        # 报告卡片 done 事件
+        report_id = ""
+        l2_patch = _extract_layer2_from_patch(patch)
+        plan_item = l2_patch.get("current_action_plan") if isinstance(l2_patch.get("current_action_plan"), dict) else {}
+        if isinstance(plan_item, dict):
+            report_id = _get_item_identity(plan_item, "plan_id", "id")
+        if _sw:
+            try:
+                _sw({"event_type": "report_card", "status": "done", "report_type": "plan", "report_id": report_id})
+            except Exception:
+                pass
+
         return ok(output=text, state_patch=patch)
 
     def _guide_tool(instruction: str) -> ToolResult:
+        # 获取 stream writer 用于发射实时展示事件
+        try:
+            _sw = get_stream_writer()
+        except RuntimeError:
+            _sw = None
+
         cfg = _current_config()
         checkpointer = resolve_runtime_checkpointer(cfg)
         subgraph = get_guide_subgraph(checkpointer=checkpointer) if checkpointer is not None else get_guide_subgraph()
@@ -686,6 +942,14 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
             },
             "private_messages": [],
         }
+
+        # 报告卡片 loading 事件
+        if _sw:
+            try:
+                _sw({"event_type": "report_card", "status": "loading", "report_type": "guide"})
+            except Exception:
+                pass
+
         pending_payload = _extract_pending_interrupt(subgraph, invoke_cfg)
         active_cfg = invoke_cfg
         if pending_payload is not None:
@@ -711,15 +975,39 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
         if isinstance(final, dict) and isinstance(final.get("text"), str):
             text = final["text"].strip()
         text = _build_guide_tool_observation(text, patch)
-        # 提取子图中间 AI 消息，累积到 working_state 的临时字段
+
+        # 提取子图中间 AI 消息，累积到 working_state 的临时字段，并通过 stream_writer 实时发射
         intermediate = sub_out.get("intermediate_messages") or [] if isinstance(sub_out, dict) else []
         if intermediate:
             ws = state_getter()
             existing = ws.get("_subgraph_intermediates") or []
-            for msg in intermediate:
-                if isinstance(msg, dict) and msg.get("text"):
-                    existing.append({"from": "guide_agent", "content": msg["text"], "phase": "subgraph_thinking"})
+            for msg_item in intermediate:
+                if isinstance(msg_item, dict) and msg_item.get("text"):
+                    existing.append({"from": "guide_agent", "content": msg_item["text"], "phase": "subgraph_thinking"})
+                    if _sw:
+                        try:
+                            _sw({
+                                "event_type": "subgraph_thinking",
+                                "content": msg_item["text"],
+                                "source": "guide_agent",
+                            })
+                        except Exception:
+                            pass
             ws["_subgraph_intermediates"] = existing
+
+        # 报告卡片 done 事件
+        report_id = ""
+        l2_patch = _extract_layer2_from_patch(patch)
+        guides = l2_patch.get("action_guides") if isinstance(l2_patch.get("action_guides"), list) else []
+        if guides:
+            latest = guides[-1] if isinstance(guides[-1], dict) else {}
+            report_id = _get_item_identity(latest, "guide_id", "id")
+        if _sw:
+            try:
+                _sw({"event_type": "report_card", "status": "done", "report_type": "guide", "report_id": report_id})
+            except Exception:
+                pass
+
         return ok(output=text, state_patch=patch)
 
     status_tool = StructuredTool.from_function(
@@ -757,6 +1045,10 @@ def _build_all_tools(state_getter, runtime_config: dict[str, Any] | None = None)
 
 def main_agent_node(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
     working_state: dict[str, Any] = dict(state or {})
+    try:
+        _stream_writer = get_stream_writer()
+    except RuntimeError:
+        _stream_writer = None  # 单元测试无 stream 上下文时兜底
     runtime_cfg: dict[str, Any] = sanitize_runtime_config(config)
     checkpointer = resolve_runtime_checkpointer(config)
     if checkpointer is not None:
@@ -782,6 +1074,7 @@ def main_agent_node(state: AgentState, config: RunnableConfig | None = None) -> 
             max_rounds=int(os.getenv("MAIN_AGENT_TOOL_MAX_ROUNDS", "10")),
             config=config,
             live_state=working_state,
+            writer=_stream_writer,
         )
 
     merged_tool_patch = merge_patches({}, supervisor["patches"])
@@ -797,6 +1090,7 @@ def main_agent_node(state: AgentState, config: RunnableConfig | None = None) -> 
     for item in subgraph_intermediates or []:
         if isinstance(item, dict) and item.get("content"):
             pending_responses.append(item)
+    pending_responses.extend(_build_system_task_pending_responses(state, working_state, pending_responses))
     old_status_markdown = _extract_status_report_markdown(state)
     new_status_markdown = _extract_status_report_markdown(working_state)
     if new_status_markdown and new_status_markdown != old_status_markdown:
@@ -849,3 +1143,119 @@ def main_agent_node(state: AgentState, config: RunnableConfig | None = None) -> 
         if _card is not None:
             out["inquiry_card"] = _card
     return out
+
+
+def _emit_ai_events(writer, msg: AIMessage) -> None:
+    """把 AIMessage 中的 reasoning、文字回复、tool_calls 都 emit 出去。"""
+    if writer is None:
+        return
+    try:
+        reasoning = extract_reasoning_content(msg)
+        if reasoning:
+            writer({"event_type": "reasoning", "content": reasoning})
+        text = (msg.content or "").strip()
+        if text and not msg.tool_calls:
+            writer({"event_type": "ai_intermediate", "content": text, "phase": "intermediate"})
+        for tc in (msg.tool_calls or []):
+            tool_name = tc["name"]
+            writer({
+                "event_type": "tool_call",
+                "status": "loading",
+                "tool_name": tool_name,
+                "tool_call_id": tc.get("id", ""),
+                "tool_label": get_tool_label(tool_name),
+                "args_preview": str(tc.get("args", ""))[:200],
+            })
+    except Exception:
+        pass  # stream writer 失败不能影响主流程
+
+
+def _emit_tool_done_from_message(
+    writer,
+    msg: ToolMessage,
+    patch: dict[str, Any] | None = None,
+    previous_state: dict[str, Any] | None = None,
+) -> None:
+    """把工具执行结果 emit 出去，如果当前工具 patch 真正产生新报告则额外 emit report_ready。"""
+    if writer is None:
+        return
+    try:
+        result_preview = str(msg.content or "")[:300]
+        tool_name = getattr(msg, "name", "") or ""
+        writer({
+            "event_type": "tool_call",
+            "status": "done",
+            "tool_name": tool_name,
+            "tool_call_id": getattr(msg, "tool_call_id", ""),
+            "tool_label": get_tool_label(tool_name),
+            "result_summary": result_preview,
+        })
+        # 只对当前工具真正新增/更新的报告 emit report_ready，避免 plan/guide patch 把旧 status 再次带出来。
+        l2 = (patch.get("layer2_memory") or {}) if isinstance(patch, dict) else {}
+        if not isinstance(l2, dict):
+            return
+
+        old_status = _extract_current_status_report_item(previous_state or {})
+        new_status = l2.get("current_status_report") if isinstance(l2.get("current_status_report"), dict) else {}
+        old_status_id = _get_item_identity(old_status, "report_id", "id")
+        new_status_id = _get_item_identity(new_status, "report_id", "id")
+        status_content = _first_non_empty_text(new_status.get("report_content"))
+        if new_status and new_status_id and new_status_id != old_status_id and status_content:
+            writer({
+                "event_type": "report_ready",
+                "report_type": "status",
+                "report_kind": "status_report",
+                "report_id": new_status_id,
+                "task_key": f"status_{new_status_id}",
+                "content": status_content,
+                "preview": str(new_status)[:500],
+            })
+
+        old_plan = _extract_current_action_plan_item(previous_state or {})
+        new_plan = l2.get("current_action_plan") if isinstance(l2.get("current_action_plan"), dict) else {}
+        old_plan_id = _get_item_identity(old_plan, "plan_id", "id")
+        new_plan_id = _get_item_identity(new_plan, "plan_id", "id")
+        plan_content = _first_non_empty_text(new_plan.get("plan_content"))
+        if new_plan and new_plan_id and new_plan_id != old_plan_id and plan_content:
+            writer({
+                "event_type": "report_ready",
+                "report_type": "plan",
+                "report_kind": "action_plan",
+                "report_id": new_plan_id,
+                "task_key": f"plan_{new_plan_id}",
+                "content": plan_content,
+                "preview": str(new_plan)[:500],
+            })
+
+        old_guide_ids = {
+            _get_item_identity(guide, "guide_id", "id")
+            for guide in _extract_action_guides(previous_state or {})
+            if _get_item_identity(guide, "guide_id", "id")
+        }
+        guides = l2.get("action_guides")
+        if isinstance(guides, list):
+            for guide in guides:
+                if not isinstance(guide, dict):
+                    continue
+                guide_id = _get_item_identity(guide, "guide_id", "id")
+                if not guide_id or guide_id in old_guide_ids:
+                    continue
+                guide_payload = guide.get("guide") if isinstance(guide.get("guide"), dict) else {}
+                guide_content = _first_non_empty_text(
+                    guide_payload.get("guide_content"),
+                    guide.get("guide_content"),
+                )
+                if not guide_content:
+                    continue
+                writer({
+                    "event_type": "report_ready",
+                    "report_type": "guide",
+                    "report_kind": "action_guide",
+                    "report_id": guide_id,
+                    "task_key": f"guide_{guide_id}",
+                    "content": guide_content,
+                    "title": _first_non_empty_text(guide.get("title"), guide.get("one_liner")),
+                    "preview": str(guide)[:500],
+                })
+    except Exception:
+        pass  # stream writer 失败不能影响主流程

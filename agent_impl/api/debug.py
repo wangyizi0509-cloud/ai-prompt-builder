@@ -60,7 +60,6 @@ async def get_debug_context(session_id: str):
             "completed": bool(state.get("onboarding_completed", False)),
             "turn_count": state.get("onboarding_turn_count", 0),
             "max_turns": state.get("onboarding_max_turns", 3),
-            "has_handoff": bool(state.get("onboarding_handoff")),
         },
         "maintenance": {
             "queue_size": len(maintenance_queue) if isinstance(maintenance_queue, list) else 0,

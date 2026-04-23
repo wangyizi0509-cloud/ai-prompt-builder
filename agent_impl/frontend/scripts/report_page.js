@@ -678,10 +678,12 @@
         '</div>',
       ].join('');
 
+      // v2.1:付费成功后 stage 保留在 'paid',由 index.html 的 onMounted 自动首轮
+      // 完成 /api/chat/stream 后再调 markDone() 推进到 'done'。
       patchStore({
         paid: true,
         paid_at: new Date().toISOString(),
-        stage: 'done',
+        stage: 'paid',
       });
 
       try {

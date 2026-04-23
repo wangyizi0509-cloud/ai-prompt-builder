@@ -21,7 +21,6 @@ from graph.state import sync_new_messages_to_fullstore
 from graph.archive_manager import (
     check_layer3_compression_needed,
     check_task_reasoning_compression_needed,
-    refine_on_onboarding_complete,
     compress_layer3,
     compress_task_reasoning,
     archive_guide_to_layer2,
@@ -112,14 +111,7 @@ def _consume_maintenance_queue_inline(state: dict, queue: list[dict]) -> dict:
         try:
             task_updates: Dict[str, Any] = {}
 
-            if task_type == "onboarding_refine":
-                task_updates = refine_on_onboarding_complete(working_state)
-                flags = dict(flags)
-                flags["onboarding_refine_done"] = True
-                flags["onboarding_refine_queued"] = False
-                task_updates["maintenance_flags"] = flags
-
-            elif task_type == "layer3_compress":
+            if task_type == "layer3_compress":
                 # [DEBUG] 检查压缩输入状态
                 workspace_msgs = working_state.get("messages", []) or []
                 logger.info(f"layer3_compress: workspace_messages={len(workspace_msgs)}")
@@ -255,13 +247,7 @@ def post_turn_finalize_node(state: dict, config: RunnableConfig | None = None) -
     flags = _get_flags(working_state)
     before_len = len(queue)
 
-    # 2.1 Onboarding 完成后提纯（只要没做过，就保持 queued）
-    if working_state.get("onboarding_completed") and working_state.get("onboarding_handoff"):
-        if not flags.get("onboarding_refine_done") and not _queue_has(queue, "onboarding_refine", "onboarding_refine"):
-            _enqueue(queue, task_type="onboarding_refine", task_key="onboarding_refine")
-            _set_flag(updates, working_state, "onboarding_refine_queued", True)
-
-    # 2.2 对话压缩（Layer3）—— 基于工作区消息 (messages) 判断，而非全量存储
+    # 2.1 对话压缩（Layer3）—— 基于工作区消息 (messages) 判断, 而非全量存储
     # [DEBUG] 输出压缩检查的详细信息
     workspace_msgs = working_state.get("messages", []) or []
     user_turns = count_user_turns(workspace_msgs)

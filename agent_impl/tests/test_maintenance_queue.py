@@ -26,21 +26,6 @@ def _has_task(queue: list[dict], task_type: str, task_key_prefix: str) -> bool:
     return False
 
 
-def test_onboarding_complete_enqueues_refine():
-    state = {
-        "messages": [{"role": "user", "content": "hi", "id": "u1"}],
-        "layer3_memory": create_empty_layer3_memory(),
-        "onboarding_completed": True,
-        "onboarding_handoff": {"recommendation": "ok", "suggested_action": "建议进行现状分析"},
-        "maintenance_queue": [],
-        "maintenance_flags": {},
-    }
-
-    updates = post_turn_finalize_node(state)
-    queue = updates.get("maintenance_queue", [])
-    assert _has_task(queue, "onboarding_refine", "onboarding_refine")
-
-
 def test_fullstore_sync_appends_new_messages():
     layer3 = create_empty_layer3_memory()
     layer3["all_messages"] = [{"role": "user", "content": "t1", "id": "m1"}]

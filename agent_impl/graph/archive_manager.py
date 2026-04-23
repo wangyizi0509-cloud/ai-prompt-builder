@@ -697,63 +697,6 @@ def process_archiving_if_needed(state: "AgentState") -> dict:
     return updates
 
 
-def refine_on_onboarding_complete(state: "AgentState") -> dict:
-    """
-    Onboarding 结束时触发的提纯：
-    - 读取全量对话
-    - 提取静态情报 & 动态情报
-    - 生成对话摘要（可选）
-    """
-    layer1_memory = state.get("layer1_memory") or create_empty_layer1_memory()
-    layer2_memory = state.get("layer2_memory") or create_empty_layer2_memory()
-    layer3_memory = state.get("layer3_memory") or create_empty_layer3_memory()
-
-    messages = layer3_memory.get("all_messages", state.get("messages", []))
-    if not messages:
-        return {}
-
-    existing_context = layer1_memory.get("full_data", create_empty_user_context())
-    result = archive_conversation_batch(messages, existing_context, layer2_memory)
-
-    updated_context = result.get("updated_context", existing_context)
-    updated_layer1 = StorageProcessor.save_layer1(updated_context, layer1_memory)
-
-    updated_layer2 = layer2_memory
-    for intel in result.get("dynamic_intels", []):
-        updated_layer2 = StorageProcessor.upsert_dynamic_intel(updated_layer2, intel)
-
-    updated_layer3 = layer3_memory
-    conv_archive = result.get("conversation_archive")
-    if isinstance(conv_archive, list):
-        conv_archive = conv_archive[0] if conv_archive else {}
-    if not isinstance(conv_archive, dict):
-        if conv_archive:
-            logger.warning("Unexpected conversation_archive type: %s", type(conv_archive))
-        conv_archive = {}
-    if conv_archive:
-        turn_count = conv_archive.get("turn_count", len(messages))
-        key_topics = conv_archive.get("key_topics", [])
-        new_summary = create_conversation_summary(
-            summary=conv_archive.get("summary", ""),
-            topics=", ".join(key_topics) if isinstance(key_topics, list) else str(key_topics),
-            turn_range=f"1-{turn_count}",
-        )
-        max_summaries = LAYER3_ARCHIVE_CONFIG["max_summaries"]
-        updated_layer3 = StorageProcessor.append_conversation_summary(
-            layer3_memory,
-            new_summary,
-            max_summaries=max_summaries,
-            total_turns_delta=turn_count,
-        )
-
-    return {
-        "layer1_memory": updated_layer1,
-        "layer2_memory": updated_layer2,
-        "layer3_memory": updated_layer3,
-        "user_context": updated_context,
-    }
-
-
 # ============================================================
 # 调试/查询函数
 # ============================================================
