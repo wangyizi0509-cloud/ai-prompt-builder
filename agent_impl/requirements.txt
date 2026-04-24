@@ -10,6 +10,7 @@ psycopg-pool>=3.2.0
 # LangGraph CLI and SDK for deployment
 langgraph-cli>=0.4.0
 langgraph-sdk>=0.2.0
+langgraph-prebuilt>=1.0.0,<1.0.9
 
 # LangSmith for debugging and observability
 langsmith>=0.1.0
