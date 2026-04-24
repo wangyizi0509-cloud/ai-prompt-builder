@@ -1,43 +1,7 @@
-# LangGraph and LangChain
-langgraph>=1.0.5,<1.1.0
-langchain>=1.0.5,<1.2.11
-langchain-openai>=0.2.0
-langchain-deepseek>=0.1.0  # DeepSeek 官方集成，支持更稳定的 function calling
-langgraph-checkpoint-postgres>=0.2.0
-psycopg[binary]>=3.2.0
-psycopg-pool>=3.2.0
-
-# LangGraph CLI and SDK for deployment
-langgraph-cli>=0.4.0
-langgraph-sdk>=0.2.0
-# 注意：锁 <1.0.9，避免触发 prebuilt ToolNode 访问 Runtime.execution_info 的新 API
-# （该属性 1.1.6+ 的 langgraph 才有，platform 仍发 1.0.5 会炸）
-langgraph-prebuilt>=1.0.2,<1.0.9
-
-# LangSmith for debugging and observability
-langsmith>=0.1.0
-
-# Environment and configuration
-python-dotenv>=1.0.0
-pydantic>=2.0.0
-
-# Utilities
-rich>=13.0.0  # 美化终端输出
-typing-extensions>=4.0.0  # Python 3.11 compatibility for TypedDict
-json-repair>=0.30.0  # 修复 LLM 生成的非法 JSON tool call 参数
-
-# Web Server
-fastapi>=0.100.0
-uvicorn>=0.20.0
-python-multipart>=0.0.6  # 文件上传支持
-
-# HTTP Client (for multimodal API)
-httpx>=0.25.0
-
-# Image processing (OCR resize)
-Pillow>=10.0.0
-
-# Authentication and Database
-supabase>=2.0.0
-PyJWT>=2.8.0
-bcrypt>=4.0.0
+# 本文件仅是薄 shim：所有依赖和版本锁都在 pyproject.toml。
+# 请不要在这里加包——改 pyproject.toml 的 [project] dependencies 或
+# [project.optional-dependencies].test。
+#
+# 这份等价于"完整安装（含测试依赖）"，给 CI / 本地开发 / Zeabur 用。
+# 运行时（不含测试）用 requirements.runtime.txt。
+-e .[test]
