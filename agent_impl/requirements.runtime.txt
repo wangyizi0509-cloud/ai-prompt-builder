@@ -4,8 +4,8 @@
 # Keep versions aligned with requirements.txt where possible.
 
 # LangGraph and LangChain
-langgraph==1.0.5
-langchain==1.0.5
+langgraph>=1.1.0
+langchain>=1.0.5
 langchain-openai>=0.2.0
 langchain-deepseek>=0.1.0  # DeepSeek 官方集成，支持更稳定的 function calling
 langgraph-checkpoint-postgres>=0.2.0
