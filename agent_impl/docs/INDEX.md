@@ -30,7 +30,7 @@
 | **README** | `/README.md` | 项目简介与目录结构入口。 |
 | **贡献指南** | `/CONTRIBUTING.md` | 分支策略（main/develop/feature）、PR 流程。 |
 | **测试账号** | `/TEST_USERS.md` | 测试用邮箱和密码清单。 |
-| **迭代记录** | `/ITERATION_LOG.md` | 所有变更历史（需求、Bug、重构、基建等），每次提交后必须更新。 |
+| **项目变更记录** | `/ITERATION_LOG.md` | 高信噪比变更登记册，只记录跨模块变更、契约变化、部署问题、关键决策和未完成事项。 |
 
 ---
 
