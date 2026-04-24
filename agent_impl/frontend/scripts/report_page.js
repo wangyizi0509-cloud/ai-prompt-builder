@@ -354,24 +354,24 @@
     var urgencyText = escapeHtml(report.urgency_text || '窗口期约 2-3 周\n越早介入，扭转成本越低').replace(/\n/g, '<br/>');
 
     var html = [
-      /* ① 顶部深色 band（高 360px，覆盖 hero 卡区域） */
-      '<div class="rp-dark-band" aria-hidden="true"></div>',
-
-      /* ② Sticky 深色顶栏 */
+      /* ① Sticky 深色顶栏 */
       '<header class="rp-header-dark">',
-      '  <button type="button" class="rp-back-btn" id="rp-back-btn" aria-label="返回">',
-      '    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2">',
-      '      <path d="M15 6l-6 6 6 6"/>',
-      '    </svg>',
-      '  </button>',
+      '  <span class="rp-header-spacer" aria-hidden="true"></span>',
       '  <span class="rp-header-dark-title">DIAGNOSTIC REPORT</span>',
       '  <span class="rp-header-dark-id">' + escapeHtml(reportId) + '</span>',
       '</header>',
 
+      /* 固定底层：不随内容滚动，模拟原型手机框里的紫底 + 白底 */
+      '<div class="rp-fixed-backdrop" aria-hidden="true">',
+      '  <div class="rp-backdrop-dark"></div>',
+      '  <div class="rp-backdrop-light"></div>',
+      '</div>',
+
       /* 可滚动主内容区 */
       '<div class="rp-scroll-body">',
+      '<section class="rp-hero-stage">',
 
-      /* ③ Hero 卡（玻璃态） */
+      /* ② Hero 卡（浮在独立深色底层上的玻璃态） */
       '<div class="rp-hero-card">',
       '  <div class="rp-hero-pill" style="background:' + escapeAttr(style.bg) + ';color:' + escapeAttr(themeColor) + ';">',
       '    <span class="rp-hero-pill-dot" style="background:' + escapeAttr(themeColor) + ';"></span>',
@@ -379,18 +379,21 @@
       '  </div>',
       '  <div class="rp-hero-title">' + escapeHtml(stateTitle) + '</div>',
       '  <div class="rp-hero-trend">' + escapeHtml(trendText) + '</div>',
-
-      /* 5 维 mini 预览 */
-      '  <div class="rp-hero-acr">',
-      '    <div class="rp-hero-acr-label">5 维健康度 · 吸引 / 舒适 / 张力 / 信任 / 回应</div>',
-      '    <div class="rp-hero-acr-body">',
-      '      <div class="rp-hero-acr-radar">' + miniRadarSvg + '</div>',
-      '      <div class="rp-hero-acr-scores">' + miniScoresHtml + '</div>',
-      '    </div>',
-      '  </div>',
       '</div>',
 
-      /* ④ 核心问题（白底区域） */
+      /* 5 维 mini 预览 */
+      '<div class="rp-hero-acr">',
+      '  <div class="rp-hero-acr-label">5 维健康度 · 吸引 / 舒适 / 张力 / 信任 / 回应</div>',
+      '  <div class="rp-hero-acr-body">',
+      '    <div class="rp-hero-acr-radar">' + miniRadarSvg + '</div>',
+      '    <div class="rp-hero-acr-scores">' + miniScoresHtml + '</div>',
+      '  </div>',
+      '</div>',
+      '</section>',
+
+      '<div class="rp-light-content">',
+
+      /* ③ 核心问题（白底区域） */
       '<div class="rp-section-header">',
       '  <div>',
       '    <div class="rp-section-title-dark">识别出的关键问题</div>',
@@ -400,20 +403,21 @@
       '</div>',
       '<div class="rp-problem-list">' + problemHtml + '</div>',
 
-      /* ⑤ 锁住完整方案 3 大能力（编号表） */
+      /* ④ 锁住完整方案 3 大能力（编号表） */
       '<div class="rp-locked-title">🔒 完整方案 · 3 大能力</div>',
       '<div class="rp-locked-table">' + lockedTableHtml + '</div>',
 
-      /* ⑥ 信任横条 */
+      /* ⑤ 信任横条 */
       '<div class="rp-trust-bar">',
       '  <div class="rp-trust-avatars">' + avatarsHtml + '</div>',
       '  <span class="rp-trust-text">已有 <b>2,847</b> 人用此方案推进关系</span>',
       '</div>',
 
-      /* ⑦ 底部渐变过渡带 */
+      /* ⑥ 底部渐变过渡带 */
       '<div class="rp-transition-grad" aria-hidden="true"></div>',
 
-      /* ⑧ 深色付费大卡 */
+      /* ⑦ 深色付费大卡 */
+      '<div class="rp-paycard-wrap">',
       '<div class="rp-paycard-dark">',
       '  <div class="rp-paycard-unlock-label">UNLOCK</div>',
       '  <div class="rp-paycard-urgency">' + urgencyText + '</div>',
@@ -429,6 +433,8 @@
       '  </div>',
       '  <button type="button" class="rp-cta-btn" id="rp-unlock-btn">立即解锁 · ¥99</button>',
       '  <div class="rp-refund-note">💙 7 天无理由退款</div>',
+      '</div>',
+      '</div>',
       '</div>',
 
       '</div>', /* end rp-scroll-body */
@@ -446,16 +452,6 @@
     // 绑定解锁按钮
     var unlockBtn = document.getElementById('rp-unlock-btn');
     if (unlockBtn) unlockBtn.addEventListener('click', onUnlockClick);
-
-    // 绑定返回按钮
-    var backBtn = document.getElementById('rp-back-btn');
-    if (backBtn) backBtn.addEventListener('click', function () {
-      if (window.history && window.history.length > 1) {
-        window.history.back();
-      } else {
-        window.location.href = '/onboarding.html';
-      }
-    });
 
     // 保证 stage 记成 'report'
     if ((loadStore() || {}).stage !== 'report') {
