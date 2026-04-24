@@ -267,38 +267,104 @@
     };
   }
 
-  /** 只上传图片，~2s 返回 URL。用于 onboarding v2 并行流水线的第 1 步。 */
-  async function uploadOnly(file, sessionId) {
-    const form = new FormData();
-    form.append('file', file);
-    form.append('session_id', sessionId);
-    form.append('eval_mode', 'true');
-    const resp = await fetch('/api/upload/upload-only', {
-      method: 'POST',
-      body: form,
-    });
-    if (!resp.ok) {
-      throw new Error('上传失败: HTTP ' + resp.status);
+  /** 合并多个 AbortSignal，任一 abort 则合并 signal 也 abort。
+   *  (iOS Safari <17.4 没有 AbortSignal.any，手动合并。) */
+  function combineSignals(signals) {
+    const ctrl = new AbortController();
+    const onAbort = () => ctrl.abort();
+    for (const s of signals) {
+      if (!s) continue;
+      if (s.aborted) { ctrl.abort(); break; }
+      s.addEventListener('abort', onAbort, { once: true });
     }
-    const data = await resp.json();
-    return {
-      url: data.url || '',
-      path: data.path || '',
-      success: !!data.success,
-      error: data.error || null,
-    };
+    return ctrl.signal;
   }
 
-  /** 只跑 OCR，慢路径（~60-90s）。后台异步调用，结果写回 localStorage。 */
+  /** fetch 包一层超时 + AbortController。timeoutMs 到则 abort，抛出 AbortError。
+   *  externalSignal 可选：外部也能主动中止（用于 iOS 卡住场景强制重试）。 */
+  function fetchWithTimeout(url, options, timeoutMs, externalSignal) {
+    const ctrl = new AbortController();
+    const signal = combineSignals([ctrl.signal, externalSignal]);
+    const opts = Object.assign({}, options, { signal });
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    return fetch(url, opts).finally(() => clearTimeout(timer));
+  }
+
+  /** 指数退避重试。retries=2 表示最多尝试 3 次。onlyRetryIf 返回 false 则不再重试。 */
+  async function withRetry(fn, { retries = 2, baseDelayMs = 800, onlyRetryIf = () => true } = {}) {
+    let lastErr;
+    for (let i = 0; i <= retries; i++) {
+      try {
+        return await fn(i);
+      } catch (e) {
+        lastErr = e;
+        if (i === retries || !onlyRetryIf(e)) break;
+        const delay = baseDelayMs * Math.pow(2, i);
+        console.warn('[onboarding] upload retry', i + 1, 'after', delay, 'ms:', e && e.message);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+    throw lastErr;
+  }
+
+  /** 只上传图片，~2s 返回 URL。用于 onboarding v2 并行流水线的第 1 步。
+   *  超时 45s；网络/超时/5xx 自动重试最多 2 次（指数退避）。
+   *  externalSignal 可选：上层在 iOS 卡住场景可强制中止。 */
+  async function uploadOnly(file, sessionId, externalSignal) {
+    return withRetry(async () => {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('session_id', sessionId);
+      form.append('eval_mode', 'true');
+      let resp;
+      try {
+        resp = await fetchWithTimeout('/api/upload/upload-only', {
+          method: 'POST',
+          body: form,
+        }, 45000, externalSignal);
+      } catch (e) {
+        if (e && e.name === 'AbortError') {
+          const err = new Error('上传超时，请重试');
+          // 外部主动 abort 时不再内部重试（上层会重新发起）
+          err.retryable = !(externalSignal && externalSignal.aborted);
+          throw err;
+        }
+        const err = new Error('网络异常，请检查后重试');
+        err.retryable = true;
+        throw err;
+      }
+      if (!resp.ok) {
+        const err = new Error('上传失败: HTTP ' + resp.status);
+        err.retryable = resp.status >= 500 || resp.status === 408 || resp.status === 429;
+        throw err;
+      }
+      const data = await resp.json();
+      return {
+        url: data.url || '',
+        path: data.path || '',
+        success: !!data.success,
+        error: data.error || null,
+      };
+    }, { retries: 2, onlyRetryIf: (e) => !!(e && e.retryable) });
+  }
+
+  /** 只跑 OCR，慢路径（~60-90s）。后台异步调用，结果写回 localStorage。
+   *  超时 120s；不重试（失败不阻塞主流程）。 */
   async function ocrOnly(file, sessionId) {
     const form = new FormData();
     form.append('file', file);
     form.append('screenshot_type', 'screenshot');
     form.append('session_id', sessionId);
-    const resp = await fetch('/api/upload/ocr-only', {
-      method: 'POST',
-      body: form,
-    });
+    let resp;
+    try {
+      resp = await fetchWithTimeout('/api/upload/ocr-only', {
+        method: 'POST',
+        body: form,
+      }, 120000);
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw new Error('OCR 超时');
+      throw new Error('OCR 网络异常');
+    }
     if (!resp.ok) {
       throw new Error('OCR 失败: HTTP ' + resp.status);
     }
@@ -353,11 +419,17 @@
       bank: bankData,
       store: readStore(),
       uploading: 0,             // 正在上传的张数（用于禁用按钮）
+      currentStage: null,
       currentQuestionId: null,
+      currentHookQuestionId: null,
       draftAnswer: null,        // 当前题的选中值（单选 string / 多选 array）
       draftFreeInput: {},       // 当前题 option 的自由输入: { optionId: text }
       currentHook: null,        // { hookText, hookImage, nextQid }
       summaryShown: false,
+      pendingAutoConfirmTimer: null,
+      pendingFiles: new Map(),       // preview_url → File；用于失败/断网恢复后重试
+      uploadControllers: new Map(),  // preview_url → AbortController；用于"卡住"时强制重试
+      uploadStartAt: new Map(),      // preview_url → timestamp；判断 uploading 是否卡住
     };
 
     const els = {
@@ -405,11 +477,19 @@
     function refreshStore() { state.store = readStore() || defaultStore(); }
 
     function showStage(name) {
+      state.currentStage = name;
       const stages = ['free-input', 'opening-hook', 'question', 'card-hook', 'loading'];
       stages.forEach(s => {
         const el = document.getElementById('stage-' + s);
         if (el) el.classList.toggle('active', s === name);
       });
+      if (els.qBackBtn) {
+        const allowBack = !['opening-hook', 'loading'].includes(name);
+        els.qBackBtn.style.visibility = allowBack ? 'visible' : 'hidden';
+        els.qBackBtn.disabled = !allowBack;
+        els.qBackBtn.setAttribute('aria-hidden', allowBack ? 'false' : 'true');
+        els.qBackBtn.tabIndex = allowBack ? 0 : -1;
+      }
       // 进度条只在 question/card-hook 显示
       if (els.progress) {
         els.progress.style.display = ['question', 'card-hook'].includes(name) ? 'flex' : 'none';
@@ -427,12 +507,89 @@
       }
     }
 
+    function clearPendingAutoConfirm() {
+      if (state.pendingAutoConfirmTimer) {
+        clearTimeout(state.pendingAutoConfirmTimer);
+        state.pendingAutoConfirmTimer = null;
+      }
+    }
+
+    function activeQuestionIds() {
+      return orderedQuestionIds().filter(qid =>
+        state.bank.question_bank[qid] && !isSkipped(state.store.analysis, qid)
+      );
+    }
+
+    function renderAnsweredCardHook(qid) {
+      const runtime = composeRuntimeQuestion(state.bank, qid, state.store.analysis);
+      if (!runtime) return false;
+      const answer = state.store.answers && state.store.answers[qid];
+      if (answer === undefined || answer === null || (Array.isArray(answer) && answer.length === 0)) {
+        return false;
+      }
+      const hook = resolveHook(state.bank, qid, answer);
+      renderCardHook(qid, runtime, hook);
+      return true;
+    }
+
+    function returnToFreeInput() {
+      state.store = writeStore({
+        stage: 'free_input',
+        analysis: null,
+        answers: {},
+        report: null,
+      });
+      state.currentQuestionId = null;
+      state.currentHookQuestionId = null;
+      state.draftAnswer = null;
+      renderFreeInput();
+    }
+
+    function handleBack() {
+      clearPendingAutoConfirm();
+      clearError();
+      refreshStore();
+
+      if (['opening-hook', 'loading'].includes(state.currentStage)) return;
+
+      if (state.currentStage === 'free-input') {
+        state.store = writeStore({ stage: 'splash' });
+        window.location.href = '/splash.html';
+        return;
+      }
+
+      if (state.currentStage === 'card-hook') {
+        const qid = state.currentHookQuestionId || state.currentQuestionId;
+        if (qid) {
+          renderQuestion(qid);
+          return;
+        }
+        advanceToNextQuestionOrSummary();
+        return;
+      }
+
+      if (state.currentStage === 'question') {
+        const currentQid = state.currentQuestionId;
+        const active = activeQuestionIds();
+        const idx = active.indexOf(currentQid);
+        if (idx <= 0) {
+          renderOpeningHook();
+          return;
+        }
+        const prevQid = active[idx - 1];
+        if (!renderAnsweredCardHook(prevQid)) {
+          renderQuestion(prevQid);
+        }
+        return;
+      }
+
+      renderFreeInput();
+    }
+
     function updateProgress() {
       if (!els.progress) return;
       // 只数未 skip 的题有多少，以及当前答完了几道
-      const active = orderedQuestionIds().filter(qid =>
-        state.bank.question_bank[qid] && !isSkipped(state.store.analysis, qid)
-      );
+      const active = activeQuestionIds();
       const total = active.length || 1;
       const answered = active.filter(qid => {
         const ans = state.store.answers[qid];
@@ -462,6 +619,9 @@
 
     function renderFreeInput() {
       refreshStore();
+      clearPendingAutoConfirm();
+      state.currentQuestionId = null;
+      state.currentHookQuestionId = null;
       if (els.descTextarea && state.store.free_text) {
         els.descTextarea.value = state.store.free_text;
       }
@@ -510,15 +670,23 @@
           thumb.appendChild(s);
         } else if (img.status === 'failed') {
           const s = document.createElement('div');
-          s.className = 'thumb-status';
-          s.textContent = '失败';
+          s.className = 'thumb-status thumb-status-retry';
+          const canRetry = !!state.pendingFiles.get(img.preview_url);
+          s.textContent = canRetry ? '失败·点击重试' : '失败·请重新添加';
+          if (canRetry) {
+            s.style.cursor = 'pointer';
+            s.addEventListener('click', (ev) => {
+              ev.stopPropagation();
+              retryImage(img.preview_url);
+            });
+          }
           thumb.appendChild(s);
         }
         const rm = document.createElement('button');
         rm.className = 'thumb-remove';
         rm.type = 'button';
         rm.textContent = '×';
-        rm.addEventListener('click', () => removeImage(idx));
+        rm.addEventListener('click', (ev) => { ev.stopPropagation(); removeImage(idx); });
         thumb.appendChild(rm);
         els.uploadGrid.appendChild(thumb);
       });
@@ -534,8 +702,16 @@
 
     function removeImage(idx) {
       const imgs = (state.store.uploaded_images || []).slice();
+      const removed = imgs[idx];
       imgs.splice(idx, 1);
       state.store = writeStore({ uploaded_images: imgs });
+      if (removed && removed.preview_url) {
+        state.pendingFiles.delete(removed.preview_url);
+        const ctrl = state.uploadControllers.get(removed.preview_url);
+        if (ctrl) { try { ctrl.abort(); } catch (_) {} }
+        state.uploadControllers.delete(removed.preview_url);
+        state.uploadStartAt.delete(removed.preview_url);
+      }
       renderUploadGrid();
       refreshSubmitBtn();
     }
@@ -595,86 +771,180 @@
         const imgs = (state.store.uploaded_images || []).slice();
         imgs.push(placeholder);
         state.store = writeStore({ uploaded_images: imgs });
-        state.uploading += 1;
-        renderUploadGrid();
-        refreshSubmitBtn();
+        state.pendingFiles.set(preview, file);
+        uploadImageEntry(file, preview);
+      }
+      if (els.uploadFileInput) els.uploadFileInput.value = '';
+    }
 
-        // Step 1（快，~2s）：上传拿 URL → 立刻解锁提交按钮
-        let uploadOk = false;
-        try {
-          const resp = await uploadOnly(file, state.store.session_id);
+    /** 单个 entry 的上传+OCR 流水线。可重入：首次上传 & 失败重试都走这里。
+     *  entry 由 preview_url 在 uploaded_images 中定位（preview_url 在 entry 生命周期内不变）。 */
+    async function uploadImageEntry(file, preview) {
+      // 清理上一轮残留的 controller（重试场景）
+      const prevCtrl = state.uploadControllers.get(preview);
+      if (prevCtrl) {
+        try { prevCtrl.abort(); } catch (_) {}
+      }
+      const ctrl = new AbortController();
+      state.uploadControllers.set(preview, ctrl);
+      state.uploadStartAt.set(preview, Date.now());
+
+      // 标记为 uploading（失败重试场景会把 failed → uploading）
+      (function markUploading() {
+        refreshStore();
+        const updated = (state.store.uploaded_images || []).slice();
+        const idx = updated.findIndex(i => i.preview_url === preview);
+        if (idx < 0) return;
+        if (updated[idx].status !== 'uploading') {
+          updated[idx] = Object.assign({}, updated[idx], { status: 'uploading' });
+          state.store = writeStore({ uploaded_images: updated });
+        }
+      })();
+      state.uploading += 1;
+      renderUploadGrid();
+      refreshSubmitBtn();
+
+      let uploadOk = false;
+      try {
+        const resp = await uploadOnly(file, state.store.session_id, ctrl.signal);
+        refreshStore();
+        const updated = (state.store.uploaded_images || []).slice();
+        const idx = updated.findIndex(i => i.preview_url === preview);
+        if (idx >= 0) {
+          updated[idx] = {
+            status: 'ocr-pending',
+            preview_url: preview,
+            url: resp.url || '',
+            ocr: '',
+            ocr_failed: false,
+          };
+          state.store = writeStore({ uploaded_images: updated });
+          uploadOk = true;
+        }
+      } catch (e) {
+        // 若是被上层主动 abort（卡住重试场景），不标记 failed——上层会立刻重新发起
+        const aborted = !!(ctrl.signal.aborted) && state.uploadControllers.get(preview) !== ctrl;
+        if (!aborted) {
           refreshStore();
           const updated = (state.store.uploaded_images || []).slice();
-          const idx = updated.findIndex(
-            i => i.preview_url === preview && i.status === 'uploading'
-          );
-          if (idx >= 0) {
-            updated[idx] = {
-              status: 'ocr-pending',
-              preview_url: preview,
-              url: resp.url || '',
-              ocr: '',
-              ocr_failed: false,
-            };
-            state.store = writeStore({ uploaded_images: updated });
-            uploadOk = true;
-          }
-        } catch (e) {
-          refreshStore();
-          const updated = (state.store.uploaded_images || []).slice();
-          const idx = updated.findIndex(
-            i => i.preview_url === preview && i.status === 'uploading'
-          );
+          const idx = updated.findIndex(i => i.preview_url === preview);
           if (idx >= 0) {
             updated[idx] = Object.assign({}, updated[idx], { status: 'failed' });
             state.store = writeStore({ uploaded_images: updated });
           }
           showError(e.message || '上传异常');
-        } finally {
-          state.uploading -= 1;
-          renderUploadGrid();
-          refreshSubmitBtn();
         }
-
-        // Step 2（慢，~60-90s）：OCR 后台 fire-and-forget，不 await，不阻塞按钮
-        if (uploadOk) {
-          ocrOnly(file, state.store.session_id)
-            .then((resp) => {
-              refreshStore();
-              const updated = (state.store.uploaded_images || []).slice();
-              const idx = updated.findIndex(
-                i => i.preview_url === preview && i.status === 'ocr-pending'
-              );
-              if (idx < 0) return;
-              updated[idx] = Object.assign({}, updated[idx], {
-                status: 'ready',
-                ocr: resp.text || '',
-                ocr_failed: !resp.success,
-              });
-              state.store = writeStore({ uploaded_images: updated });
-              renderUploadGrid();
-            })
-            .catch((e) => {
-              refreshStore();
-              const updated = (state.store.uploaded_images || []).slice();
-              const idx = updated.findIndex(
-                i => i.preview_url === preview && i.status === 'ocr-pending'
-              );
-              if (idx < 0) return;
-              updated[idx] = Object.assign({}, updated[idx], {
-                status: 'ready',
-                ocr: '',
-                ocr_failed: true,
-                ocr_error: e.message || 'OCR 异常',
-              });
-              state.store = writeStore({ uploaded_images: updated });
-              renderUploadGrid();
-              console.warn('[onboarding] OCR 后台失败（不影响主流程）:', e.message);
-            });
+      } finally {
+        state.uploading -= 1;
+        // 只清理当前这轮 ctrl；若 map 已被新一轮 overwrite，不要误删
+        if (state.uploadControllers.get(preview) === ctrl) {
+          state.uploadControllers.delete(preview);
+          state.uploadStartAt.delete(preview);
         }
+        renderUploadGrid();
+        refreshSubmitBtn();
       }
-      if (els.uploadFileInput) els.uploadFileInput.value = '';
+
+      if (!uploadOk) return;
+
+      // Step 2（慢，~60-90s）：OCR 后台 fire-and-forget，不 await，不阻塞按钮
+      ocrOnly(file, state.store.session_id)
+        .then((resp) => {
+          refreshStore();
+          const updated = (state.store.uploaded_images || []).slice();
+          const idx = updated.findIndex(
+            i => i.preview_url === preview && i.status === 'ocr-pending'
+          );
+          if (idx < 0) return;
+          updated[idx] = Object.assign({}, updated[idx], {
+            status: 'ready',
+            ocr: resp.text || '',
+            ocr_failed: !resp.success,
+          });
+          state.store = writeStore({ uploaded_images: updated });
+          // URL 已落盘，file 不再需要保留
+          state.pendingFiles.delete(preview);
+          renderUploadGrid();
+        })
+        .catch((e) => {
+          refreshStore();
+          const updated = (state.store.uploaded_images || []).slice();
+          const idx = updated.findIndex(
+            i => i.preview_url === preview && i.status === 'ocr-pending'
+          );
+          if (idx < 0) return;
+          updated[idx] = Object.assign({}, updated[idx], {
+            status: 'ready',
+            ocr: '',
+            ocr_failed: true,
+            ocr_error: e.message || 'OCR 异常',
+          });
+          state.store = writeStore({ uploaded_images: updated });
+          state.pendingFiles.delete(preview);
+          renderUploadGrid();
+          console.warn('[onboarding] OCR 后台失败（不影响主流程）:', e.message);
+        });
     }
+
+    /** 失败项重试：从 pendingFiles 取回 File 重走 pipeline。 */
+    function retryImage(preview) {
+      const file = state.pendingFiles.get(preview);
+      if (!file) {
+        showError('文件已丢失，请重新添加');
+        return;
+      }
+      refreshStore();
+      const updated = (state.store.uploaded_images || []).slice();
+      const idx = updated.findIndex(i => i.preview_url === preview);
+      if (idx < 0 || updated[idx].status !== 'failed') return;
+      uploadImageEntry(file, preview);
+    }
+
+    /** 网络恢复 / 页面回到前台时，自动重试：
+     *  1) status === 'failed' 的 entry（断网恢复的正常路径）
+     *  2) status === 'uploading' 且开始时间超过 STUCK_MS 的 entry（iOS 挂起路径：
+     *     切后台时 fetch 可能挂起、setTimeout 被限流，回前台后需要强制 abort 并重新发起） */
+    const STUCK_MS = (typeof window !== 'undefined' && typeof window.__UPLOAD_STUCK_MS__ === 'number')
+      ? window.__UPLOAD_STUCK_MS__
+      : 15000;
+    function retryStuck() {
+      refreshStore();
+      const imgs = state.store.uploaded_images || [];
+      const now = Date.now();
+      let retried = 0, abortedStuck = 0;
+      imgs.forEach((img) => {
+        const file = state.pendingFiles.get(img.preview_url);
+        if (!file) return;
+        if (img.status === 'failed') {
+          retried += 1;
+          uploadImageEntry(file, img.preview_url);
+        } else if (img.status === 'uploading') {
+          const startedAt = state.uploadStartAt.get(img.preview_url);
+          if (!startedAt || (now - startedAt) < STUCK_MS) return;
+          const ctrl = state.uploadControllers.get(img.preview_url);
+          // 丢弃 map 中的 ctrl 让 catch 分支识别为"被上层 abort"，不标记 failed
+          state.uploadControllers.delete(img.preview_url);
+          state.uploadStartAt.delete(img.preview_url);
+          if (ctrl) { try { ctrl.abort(); } catch (_) {} }
+          abortedStuck += 1;
+          retried += 1;
+          uploadImageEntry(file, img.preview_url);
+        }
+      });
+      if (retried > 0) {
+        console.log('[onboarding] retryStuck:', { retried, abortedStuck });
+      }
+    }
+
+    // 网络恢复 / 切回前台时自动重传
+    const handleOnline = () => retryStuck();
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible' && (navigator.onLine !== false)) {
+        retryStuck();
+      }
+    };
+    window.addEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', handleVisible);
 
     async function handleSubmitFreeInput() {
       clearError();
@@ -733,6 +1003,9 @@
      */
     function renderOpeningHook() {
       refreshStore();
+      clearPendingAutoConfirm();
+      state.currentQuestionId = null;
+      state.currentHookQuestionId = null;
       const analysis = state.store.analysis || {};
       const rawHook = analysis.first_hook;
       const hook = _normalizeFirstHook(rawHook);
@@ -863,7 +1136,9 @@
     }
 
     function renderQuestion(qid) {
+      clearPendingAutoConfirm();
       state.currentQuestionId = qid;
+      state.currentHookQuestionId = null;
       const runtime = composeRuntimeQuestion(state.bank, qid, state.store.analysis);
       if (!runtime) {
         advanceToNextQuestionOrSummary();
@@ -872,6 +1147,8 @@
       state.draftFreeInput = {};
       // 复现已有 answer / 或 preselect 的初始值
       const existing = state.store.answers[qid];
+      const hasExistingAnswer = existing !== undefined && existing !== null
+        && !(Array.isArray(existing) && existing.length === 0);
       if (existing !== undefined) {
         state.draftAnswer = Array.isArray(existing) ? existing.slice() : existing;
       } else if (runtime.preselect && runtime.preselect.length) {
@@ -903,7 +1180,8 @@
       }
       if (els.qConfirm) {
         // A5（最后一题）即便是单选也展示按钮，让用户明确点击"生成完整诊断报告"
-        const showConfirm = runtime.allow_multi || runtime.id === 'A5';
+        // 已答过的单选题从反馈页返回时，也展示按钮，避免只恢复选中态但没有继续入口。
+        const showConfirm = runtime.allow_multi || runtime.id === 'A5' || (!runtime.allow_multi && hasExistingAnswer);
         els.qConfirm.style.display = showConfirm ? 'flex' : 'none';
         if (showConfirm) updateConfirmBtn(runtime);
       }
@@ -980,7 +1258,12 @@
         if (runtime.id === 'A5') {
           updateConfirmBtn(runtime);
         } else {
-          setTimeout(() => confirmAnswer(runtime), 500);
+          clearPendingAutoConfirm();
+          state.pendingAutoConfirmTimer = setTimeout(() => {
+            state.pendingAutoConfirmTimer = null;
+            if (state.currentStage !== 'question' || state.currentQuestionId !== runtime.id) return;
+            confirmAnswer(runtime);
+          }, 500);
         }
       }
     }
@@ -996,7 +1279,13 @@
         els.qConfirm.textContent = picked ? '提交 · 生成完整诊断报告' : '请先选择一项';
         return;
       }
-      if (!runtime.allow_multi) return;
+      if (!runtime.allow_multi) {
+        const picked = state.draftAnswer != null;
+        els.qConfirm.disabled = !picked;
+        els.qConfirm.classList.toggle('disabled', !picked);
+        els.qConfirm.textContent = picked ? '确认 · 继续' : '请先选择一项';
+        return;
+      }
       const n = Array.isArray(state.draftAnswer) ? state.draftAnswer.length : 0;
       const canConfirm = n > 0;
       els.qConfirm.disabled = !canConfirm;
@@ -1005,6 +1294,8 @@
     }
 
     function confirmAnswer(runtime) {
+      if (!runtime || state.currentQuestionId !== runtime.id) return;
+      clearPendingAutoConfirm();
       const qid = runtime.id;
       const answer = runtime.allow_multi
         ? (Array.isArray(state.draftAnswer) ? state.draftAnswer.slice() : [])
@@ -1102,6 +1393,9 @@
 
     function renderCardHook(qid, runtime, hook) {
       refreshStore();
+      clearPendingAutoConfirm();
+      state.currentQuestionId = qid;
+      state.currentHookQuestionId = qid;
       const active = orderedQuestionIds().filter(q =>
         state.bank.question_bank[q] && !isSkipped(state.store.analysis, q)
       );
@@ -1116,19 +1410,27 @@
       if (els.cardHookTag) {
         els.cardHookTag.textContent = runtime.allow_multi ? '组合诊断' : '即时反馈';
       }
-      // Headline（从 body 首句提取；如无 。 则不显示）
+      // Headline + Body：优先 headline 用首句，剩余放 body；若 body 空则隐藏整张 body 卡
       const headlineEl = document.getElementById('card-hook-headline');
+      const bodyCardEl = els.cardHookBody ? els.cardHookBody.closest('.hook-body-card') : null;
       const bodyText = (hook && hook.text) || '收到。我会把这一条纳入总评估。';
       const m = bodyText.match(/^([^。]+。)\s*(.*)$/s);
+      let restBody = '';
       if (headlineEl) {
         if (m && m[1].length < 40) {
           headlineEl.textContent = m[1].trim();
           headlineEl.style.display = 'block';
-          els.cardHookBody.innerHTML = formatHookBody(m[2].trim());
+          restBody = m[2].trim();
         } else {
           headlineEl.style.display = 'none';
-          els.cardHookBody.innerHTML = formatHookBody(bodyText);
+          restBody = bodyText;
         }
+      }
+      if (els.cardHookBody) {
+        els.cardHookBody.innerHTML = restBody ? formatHookBody(restBody) : '';
+      }
+      if (bodyCardEl) {
+        bodyCardEl.style.display = restBody ? 'block' : 'none';
       }
 
       // FeaturePreview：image 路径里藏着 feature key（如 .../行动规划.png）
@@ -1469,10 +1771,7 @@
       });
     }
     if (els.qBackBtn) {
-      els.qBackBtn.addEventListener('click', () => {
-        // 回退到首发钩子，让用户喘口气（不清除已答）
-        renderOpeningHook();
-      });
+      els.qBackBtn.addEventListener('click', handleBack);
     }
     if (els.cardHookContinue) {
       els.cardHookContinue.addEventListener('click', handleContinueFromCardHook);

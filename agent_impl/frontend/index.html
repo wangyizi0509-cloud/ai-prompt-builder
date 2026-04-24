@@ -1727,7 +1727,7 @@
                         role="tab"
                         :aria-selected="currentTab === 'plan'"
                     >
-                        规划
+                        锦囊
                     </button>
                 </div>
 
@@ -7842,71 +7842,5 @@
         }).mount('#app');
     </script>
 
-    <!-- ══════════════ DEBUG PANEL ══════════════ -->
-    <div id="dbg-root" style="position:fixed;bottom:16px;right:16px;z-index:9999;font-family:monospace;font-size:11px;">
-        <!-- toggle button -->
-        <button id="dbg-toggle"
-            onclick="document.getElementById('dbg-panel').style.display=document.getElementById('dbg-panel').style.display==='none'?'flex':'none';this.textContent=document.getElementById('dbg-panel').style.display==='none'?'🐛 Debug':'✕ Debug'"
-            style="background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;padding:4px 10px;cursor:pointer;float:right;">
-            🐛 Debug
-        </button>
-        <!-- panel -->
-        <div id="dbg-panel" style="display:none;flex-direction:column;width:380px;max-height:420px;background:#1e1e2e;border:1px solid #45475a;border-radius:8px;margin-top:4px;overflow:hidden;">
-            <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:#181825;border-bottom:1px solid #313244;">
-                <span style="color:#cba6f7;font-weight:bold;">SSE Debug Log</span>
-                <div style="display:flex;gap:6px;">
-                    <span id="dbg-loading" style="color:#a6e3a1;display:none;">⏳ loading</span>
-                    <button onclick="document.getElementById('dbg-list').innerHTML='';window.__dbgEntries=[];" style="background:#313244;color:#f38ba8;border:none;border-radius:4px;padding:2px 6px;cursor:pointer;font-size:10px;">Clear</button>
-                </div>
-            </div>
-            <ul id="dbg-list" style="margin:0;padding:4px 0;list-style:none;overflow-y:auto;flex:1;"></ul>
-        </div>
-    </div>
-    <script>
-        // lightweight vanilla logger — doesn't depend on Vue mounting
-        window.__dbgEntries = [];
-        const _origDbg = window._dbgHook; // placeholder
-        function dbgLog(tag, data) {
-            const ts = new Date().toLocaleTimeString('zh', { hour12: false });
-            const entry = { ts, tag, data: typeof data === 'object' ? JSON.stringify(data) : String(data ?? '') };
-            window.__dbgEntries.unshift(entry);
-            if (window.__dbgEntries.length > 80) window.__dbgEntries.pop();
-            const list = document.getElementById('dbg-list');
-            if (!list) return;
-            // color by tag
-            const color = tag.includes('ERR') || tag === 'CATCH' ? '#f38ba8'
-                : tag.includes('DONE') ? '#a6e3a1'
-                : tag === 'FINAL' || tag === 'FINAL(resume)' ? '#fab387'
-                : tag.startsWith('CHUNK') ? '#89dceb'
-                : tag.startsWith('FETCH') ? '#cba6f7'
-                : '#cdd6f4';
-            const li = document.createElement('li');
-            li.style.cssText = 'padding:2px 8px;border-bottom:1px solid #313244;color:' + color + ';word-break:break-all;white-space:pre-wrap;';
-            const dataStr = entry.data.length > 120 ? entry.data.substring(0, 120) + '…' : entry.data;
-            li.textContent = entry.ts + '  [' + tag + ']  ' + dataStr;
-            list.insertBefore(li, list.firstChild);
-            // keep max 60 DOM nodes
-            while (list.children.length > 60) list.removeChild(list.lastChild);
-        }
-        // patch Vue app's _dbg to also write to panel
-        const _vueMountInterval = setInterval(() => {
-            const app = document.getElementById('app').__vue_app__;
-            if (!app) return;
-            clearInterval(_vueMountInterval);
-            // We can't easily patch Vue's internal _dbg ref, so we expose dbgLog globally
-            // and call it from inline埋点 via window.dbgLog
-        }, 200);
-        window.dbgLog = dbgLog;
-
-        // isLoading observer via MutationObserver on a sentinel element — or just poll
-        setInterval(() => {
-            const loadingEl = document.getElementById('dbg-loading');
-            if (!loadingEl) return;
-            // detect any spinner visible
-            const spinner = document.querySelector('.animate-spin, [class*="loading"]');
-            loadingEl.style.display = spinner ? 'inline' : 'none';
-        }, 500);
-    </script>
-    <!-- ══════════════ END DEBUG PANEL ══════════════ -->
 </body>
 </html>

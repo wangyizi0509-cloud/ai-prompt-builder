@@ -93,7 +93,7 @@ A:由 Agent B/C 自己在 `nodes/analyze.py` / `nodes/report.py` 里决定。约
 1. **先 reproduce**:记下触发步骤,最好带 `session_id` 和时间点
 2. **定位 Owner**:查本文"文件归属表"找对应 agent
 3. **不要自己改 schemas.py / question_bank.py / hooks.py**:这三个是 A 冻结的契约,改了等于全员返工
-4. **如果确实需要改契约**:在 ITERATION_LOG 里开一条新记录,召集全部受影响的 agent 评审
+4. **如果确实需要改契约**:在 `ITERATION_LOG.md` 里开一条精简的项目级记录,召集全部受影响的 agent 评审
 5. **修复完跑一次 `_self_check.py`** 确认自测没有回归
 
 ---

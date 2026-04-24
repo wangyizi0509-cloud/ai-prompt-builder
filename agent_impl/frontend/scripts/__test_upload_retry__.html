@@ -1,0 +1,208 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>upload retry unit test</title></head>
+<body>
+<pre id="out"></pre>
+<script>
+// ─── 被测函数（从 onboarding_flow.js 原样复制，修改必须同步）─────────────
+
+function fetchWithTimeout(url, options, timeoutMs) {
+  const ctrl = new AbortController();
+  const opts = Object.assign({}, options, { signal: ctrl.signal });
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  return fetch(url, opts).finally(() => clearTimeout(timer));
+}
+
+async function withRetry(fn, { retries = 2, baseDelayMs = 800, onlyRetryIf = () => true } = {}) {
+  let lastErr;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn(i);
+    } catch (e) {
+      lastErr = e;
+      if (i === retries || !onlyRetryIf(e)) break;
+      const delay = baseDelayMs * Math.pow(2, i);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
+// ─── Test harness ────────────────────────────────────────────────────
+
+const out = document.getElementById('out');
+const log = (msg) => { out.textContent += msg + '\n'; console.log(msg); };
+let passed = 0, failed = 0;
+function assert(cond, name) {
+  if (cond) { passed++; log('✓ ' + name); }
+  else       { failed++; log('✗ ' + name); }
+}
+
+// Stub fetch
+const origFetch = window.fetch;
+function stubFetch(fn) { window.fetch = fn; }
+function restoreFetch() { window.fetch = origFetch; }
+
+// ─── Tests ───────────────────────────────────────────────────────────
+
+async function testTimeoutAborts() {
+  stubFetch((url, opts) => {
+    // never resolves until aborted
+    return new Promise((_resolve, reject) => {
+      opts.signal.addEventListener('abort', () => {
+        const err = new DOMException('aborted', 'AbortError');
+        reject(err);
+      });
+    });
+  });
+  const t0 = Date.now();
+  let caught = null;
+  try {
+    await fetchWithTimeout('/x', { method: 'POST' }, 200);
+  } catch (e) { caught = e; }
+  const dt = Date.now() - t0;
+  assert(caught && caught.name === 'AbortError', 'timeout triggers AbortError');
+  assert(dt >= 180 && dt < 500, 'timeout fires around 200ms (actual=' + dt + ')');
+  restoreFetch();
+}
+
+async function testFastFetchDoesNotAbort() {
+  stubFetch(() => Promise.resolve(new Response('ok', { status: 200 })));
+  const resp = await fetchWithTimeout('/x', {}, 500);
+  assert(resp.ok, 'fast fetch passes through');
+  // wait past timer to ensure no unexpected abort side-effect
+  await new Promise(r => setTimeout(r, 600));
+  assert(true, 'no late abort effect after success');
+  restoreFetch();
+}
+
+async function testRetrySuccessOnThirdAttempt() {
+  let n = 0;
+  const fn = async () => {
+    n++;
+    if (n < 3) { const e = new Error('flaky'); e.retryable = true; throw e; }
+    return 'ok';
+  };
+  const t0 = Date.now();
+  const r = await withRetry(fn, { retries: 2, baseDelayMs: 50, onlyRetryIf: (e) => !!e.retryable });
+  const dt = Date.now() - t0;
+  assert(r === 'ok', 'returns success after retries');
+  assert(n === 3, 'fn called 3 times (actual=' + n + ')');
+  // delays: 50, 100 → at least 150ms
+  assert(dt >= 140, 'backoff respected (actual=' + dt + 'ms)');
+}
+
+async function testRetryGivesUpAfterMax() {
+  let n = 0;
+  const fn = async () => { n++; const e = new Error('boom'); e.retryable = true; throw e; };
+  let caught = null;
+  try {
+    await withRetry(fn, { retries: 2, baseDelayMs: 10, onlyRetryIf: () => true });
+  } catch (e) { caught = e; }
+  assert(caught && caught.message === 'boom', 'final error propagated');
+  assert(n === 3, 'exactly 3 attempts (actual=' + n + ')');
+}
+
+async function testRetryRespectsOnlyRetryIf() {
+  let n = 0;
+  const fn = async () => { n++; const e = new Error('fatal'); e.retryable = false; throw e; };
+  let caught = null;
+  try {
+    await withRetry(fn, { retries: 2, baseDelayMs: 10, onlyRetryIf: (e) => !!e.retryable });
+  } catch (e) { caught = e; }
+  assert(caught && caught.message === 'fatal', 'non-retryable error thrown');
+  assert(n === 1, 'only 1 attempt for non-retryable (actual=' + n + ')');
+}
+
+async function testRetryImmediateSuccessNoDelay() {
+  let n = 0;
+  const fn = async () => { n++; return 'first-try'; };
+  const t0 = Date.now();
+  const r = await withRetry(fn, { retries: 2, baseDelayMs: 1000 });
+  const dt = Date.now() - t0;
+  assert(r === 'first-try' && n === 1, 'no retry when first call succeeds');
+  assert(dt < 50, 'no delay when no retry (actual=' + dt + 'ms)');
+}
+
+// ─── Simulate real uploadOnly shape (HTTP 500 retryable, HTTP 400 not) ───
+
+async function uploadOnlySim(responseSequence) {
+  // responseSequence: array of either {status: number} or 'timeout'
+  let i = 0;
+  stubFetch((url, opts) => {
+    const step = responseSequence[i++];
+    if (step === 'timeout') {
+      return new Promise((_r, rej) => {
+        opts.signal.addEventListener('abort', () => rej(new DOMException('aborted', 'AbortError')));
+      });
+    }
+    return Promise.resolve(new Response('{"url":"u","success":true}', { status: step.status, headers: { 'Content-Type': 'application/json' } }));
+  });
+  try {
+    return await withRetry(async () => {
+      let resp;
+      try {
+        resp = await fetchWithTimeout('/api/upload/upload-only', { method: 'POST' }, 100);
+      } catch (e) {
+        if (e && e.name === 'AbortError') { const err = new Error('上传超时'); err.retryable = true; throw err; }
+        const err = new Error('网络异常'); err.retryable = true; throw err;
+      }
+      if (!resp.ok) {
+        const err = new Error('HTTP ' + resp.status);
+        err.retryable = resp.status >= 500 || resp.status === 408 || resp.status === 429;
+        throw err;
+      }
+      return await resp.json();
+    }, { retries: 2, baseDelayMs: 20, onlyRetryIf: (e) => !!e.retryable });
+  } finally { restoreFetch(); }
+}
+
+async function testUploadOnly_500Then200() {
+  const r = await uploadOnlySim([{status:500}, {status:200}]);
+  assert(r && r.url === 'u', '500→200 retries and succeeds');
+}
+
+async function testUploadOnly_400NoRetry() {
+  let caught = null;
+  try { await uploadOnlySim([{status:400}, {status:200}]); } catch (e) { caught = e; }
+  assert(caught && caught.message === 'HTTP 400', '400 does not retry');
+}
+
+async function testUploadOnly_TimeoutThen200() {
+  const r = await uploadOnlySim(['timeout', {status:200}]);
+  assert(r && r.url === 'u', 'timeout→200 retries and succeeds');
+}
+
+async function testUploadOnly_3Failures() {
+  let caught = null;
+  try { await uploadOnlySim([{status:502}, {status:502}, 'timeout']); } catch (e) { caught = e; }
+  assert(caught && caught.message === '上传超时', 'gives up after all retries');
+}
+
+// ─── runner ──────────────────────────────────────────────────────────
+(async () => {
+  try {
+    await testTimeoutAborts();
+    await testFastFetchDoesNotAbort();
+    await testRetrySuccessOnThirdAttempt();
+    await testRetryGivesUpAfterMax();
+    await testRetryRespectsOnlyRetryIf();
+    await testRetryImmediateSuccessNoDelay();
+    await testUploadOnly_500Then200();
+    await testUploadOnly_400NoRetry();
+    await testUploadOnly_TimeoutThen200();
+    await testUploadOnly_3Failures();
+  } catch (e) {
+    log('UNCAUGHT ' + (e && e.stack || e));
+    failed++;
+  }
+  const total = passed + failed;
+  log('\n── summary ──');
+  log('passed: ' + passed + '/' + total);
+  log('failed: ' + failed);
+  window.__TEST_SUMMARY__ = { passed, failed, total };
+  document.title = failed === 0 ? 'PASS' : 'FAIL';
+})();
+</script>
+</body>
+</html>

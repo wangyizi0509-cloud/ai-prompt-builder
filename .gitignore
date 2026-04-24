@@ -35,6 +35,7 @@ agent_impl/logs/
 # Python venvs (local)
 .venv/
 .venv*/
+*.egg-info/
 
 # Local diagnostics
 agent_impl/lsof_*.txt
@@ -55,6 +56,9 @@ tmp_req*.txt
 
 # Playwright CLI session files
 .playwright-cli/
+
+# Local AI tool worktrees/settings
+.claude/
 
 # Local runtime data
 agent_impl/local_data/

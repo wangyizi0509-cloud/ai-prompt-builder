@@ -8,8 +8,8 @@ version = "0.1.0"
 description = "AI恋爱军师 Agent - 智能对话助手"
 requires-python = ">=3.11"
 dependencies = [
-    "langgraph>=1.1.0",
-    "langchain>=1.0.5",
+    "langgraph>=1.1.6,<2",
+    "langchain>=1.0.5,<2",
     "langchain-openai>=0.2.0",
     "langchain-deepseek>=0.1.0",
     "langgraph-cli>=0.4.0",
