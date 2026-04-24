@@ -25,7 +25,7 @@ from copy import deepcopy
 from typing import Any
 
 from pydantic import BaseModel, Field
-from langchain.agents import create_agent
+from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_core.runnables import RunnableConfig
@@ -602,7 +602,7 @@ def _run_langchain_supervisor(
     # to prevent the inner agent's tool-loop from being disrupted.
     cfg = build_inner_agent_config(config, namespace="main_tool_loop")
 
-    agent_graph = create_agent(model=llm, tools=wrapped_tools, system_prompt=None, name="tool_loop_agent", checkpointer=checkpointer)
+    agent_graph = create_react_agent(model=llm, tools=wrapped_tools, prompt=None, name="tool_loop_agent", checkpointer=checkpointer)
 
     rounds = max(1, int(max_rounds or 1))
     recursion_limit = max(25, rounds * 4 + 10)
