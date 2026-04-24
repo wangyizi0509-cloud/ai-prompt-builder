@@ -25,6 +25,7 @@ from copy import deepcopy
 from typing import Any
 
 from pydantic import BaseModel, Field
+from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_core.runnables import RunnableConfig
@@ -586,9 +587,6 @@ def _run_langchain_supervisor(
     live_state: dict | None = None,
     writer=None,
 ) -> dict[str, Any]:
-    # 手写 tool-loop，避开 langgraph.prebuilt.create_react_agent 里 ToolNode
-    # 访问 Runtime.execution_info 的新 API——LangGraph Platform 的 base image
-    # 锁死 langgraph==1.0.5（Runtime 上没有该属性），新版 prebuilt 会崩。
     patches: list[dict] = []
     emission_records: list[dict[str, Any]] = []
     wrapped_tools = _wrap_tools_for_patch_collection(
@@ -598,83 +596,52 @@ def _run_langchain_supervisor(
         emission_records=emission_records,
     )
 
-    tools_by_name: dict[str, BaseTool] = {}
-    for t in wrapped_tools:
-        tname = getattr(t, "name", None)
-        if tname:
-            tools_by_name[tname] = t
+    checkpointer = resolve_runtime_checkpointer(config)
 
+    # Build a clean config that strips ALL __pregel_* / checkpoint_* keys
+    # to prevent the inner agent's tool-loop from being disrupted.
     cfg = build_inner_agent_config(config, namespace="main_tool_loop")
 
-    try:
-        llm_with_tools = llm.bind_tools(wrapped_tools) if wrapped_tools else llm
-    except Exception:
-        logger.exception("bind_tools failed; falling back to unbounded llm")
-        llm_with_tools = llm
+    agent_graph = create_react_agent(model=llm, tools=wrapped_tools, prompt=None, name="tool_loop_agent", checkpointer=checkpointer)
 
     rounds = max(1, int(max_rounds or 1))
+    recursion_limit = max(25, rounds * 4 + 10)
+    cfg["recursion_limit"] = recursion_limit
 
-    messages_out: list[BaseMessage] = list(initial_messages)
-    convo: list[BaseMessage] = list(initial_messages)
+    messages_out = list(initial_messages)
     interrupt_value = None
+    tool_record_index = 0
 
-    for _ in range(rounds + 1):
-        try:
-            ai_msg = llm_with_tools.invoke(convo, config=cfg)
-        except GraphBubbleUp as bubble:
-            raise
-        if not isinstance(ai_msg, AIMessage):
-            ai_msg = AIMessage(content=str(getattr(ai_msg, "content", ai_msg) or ""))
-        convo.append(ai_msg)
-        messages_out.append(ai_msg)
-        _emit_ai_events(writer, ai_msg)
-
-        tool_calls = list(getattr(ai_msg, "tool_calls", None) or [])
-        if not tool_calls:
-            break
-
-        stop_loop = False
-        for tc in tool_calls:
-            tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
-            tc_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
-            tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
-            tool = tools_by_name.get(tc_name or "")
-            if tool is None:
-                tool_content = _tool_failure_to_content(tc_name or "", RuntimeError(f"tool {tc_name} not found"))
-                record: dict[str, Any] = {}
-            else:
-                pre_patch_index = len(emission_records)
-                try:
-                    tool_content = tool.invoke(tc_args or {}, config=sanitize_runtime_config(cfg))
-                except GraphBubbleUp as bubble:
-                    # interrupt() bubbles out — capture payload and stop
-                    interrupt_value = getattr(bubble, "args", None) or getattr(bubble, "value", None)
-                    stop_loop = True
-                    break
-                except Exception as e:
-                    logger.exception("manual tool loop: tool invoke failed: tool=%s", tc_name)
-                    tool_content = _tool_failure_to_content(tc_name or "", e)
-                record = emission_records[pre_patch_index] if pre_patch_index < len(emission_records) else {}
-
-            if not isinstance(tool_content, str):
-                tool_content = str(tool_content)
-
-            tool_msg = ToolMessage(
-                content=tool_content,
-                tool_call_id=tc_id or "",
-                name=tc_name or "",
-            )
-            convo.append(tool_msg)
-            messages_out.append(tool_msg)
-            _emit_tool_done_from_message(
-                writer,
-                tool_msg,
-                record.get("patch") if isinstance(record, dict) else None,
-                record.get("previous_state") if isinstance(record, dict) else None,
-            )
-
-        if stop_loop:
-            break
+    for chunk in agent_graph.stream(
+        {"messages": list(initial_messages)},
+        config=cfg,
+        stream_mode="updates",
+    ):
+        # __interrupt__ 出现在 chunk key 里
+        if "__interrupt__" in chunk:
+            interrupt_value = chunk["__interrupt__"]
+            continue
+        for node_name, node_delta in chunk.items():
+            if not isinstance(node_delta, dict):
+                continue
+            for msg in (node_delta.get("messages") or []):
+                # 内层图会重复把 initial_messages 放进来，用 id 去重
+                existing_ids = {getattr(m, "id", None) for m in messages_out}
+                msg_id = getattr(msg, "id", None)
+                if msg_id is not None and msg_id in existing_ids:
+                    continue
+                messages_out.append(msg)
+                if isinstance(msg, AIMessage):
+                    _emit_ai_events(writer, msg)
+                elif isinstance(msg, ToolMessage):
+                    record = emission_records[tool_record_index] if tool_record_index < len(emission_records) else {}
+                    tool_record_index += 1
+                    _emit_tool_done_from_message(
+                        writer,
+                        msg,
+                        record.get("patch") if isinstance(record, dict) else None,
+                        record.get("previous_state") if isinstance(record, dict) else None,
+                    )
 
     final = next(
         (m for m in reversed(messages_out) if isinstance(m, AIMessage)),
