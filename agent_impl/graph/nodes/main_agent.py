@@ -25,7 +25,6 @@ from copy import deepcopy
 from typing import Any
 
 from pydantic import BaseModel, Field
-from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_core.runnables import RunnableConfig
@@ -596,52 +595,46 @@ def _run_langchain_supervisor(
         emission_records=emission_records,
     )
 
-    checkpointer = resolve_runtime_checkpointer(config)
-
-    # Build a clean config that strips ALL __pregel_* / checkpoint_* keys
-    # to prevent the inner agent's tool-loop from being disrupted.
-    cfg = build_inner_agent_config(config, namespace="main_tool_loop")
-
-    agent_graph = create_react_agent(model=llm, tools=wrapped_tools, prompt=None, name="tool_loop_agent", checkpointer=checkpointer)
-
     rounds = max(1, int(max_rounds or 1))
-    recursion_limit = max(25, rounds * 4 + 10)
-    cfg["recursion_limit"] = recursion_limit
+    tool_map = {getattr(t, "name", None) or t.__class__.__name__: t for t in wrapped_tools}
+    llm_with_tools = llm.bind_tools(wrapped_tools)
 
     messages_out = list(initial_messages)
     interrupt_value = None
     tool_record_index = 0
 
-    for chunk in agent_graph.stream(
-        {"messages": list(initial_messages)},
-        config=cfg,
-        stream_mode="updates",
-    ):
-        # __interrupt__ 出现在 chunk key 里
-        if "__interrupt__" in chunk:
-            interrupt_value = chunk["__interrupt__"]
-            continue
-        for node_name, node_delta in chunk.items():
-            if not isinstance(node_delta, dict):
-                continue
-            for msg in (node_delta.get("messages") or []):
-                # 内层图会重复把 initial_messages 放进来，用 id 去重
-                existing_ids = {getattr(m, "id", None) for m in messages_out}
-                msg_id = getattr(msg, "id", None)
-                if msg_id is not None and msg_id in existing_ids:
-                    continue
-                messages_out.append(msg)
-                if isinstance(msg, AIMessage):
-                    _emit_ai_events(writer, msg)
-                elif isinstance(msg, ToolMessage):
-                    record = emission_records[tool_record_index] if tool_record_index < len(emission_records) else {}
-                    tool_record_index += 1
-                    _emit_tool_done_from_message(
-                        writer,
-                        msg,
-                        record.get("patch") if isinstance(record, dict) else None,
-                        record.get("previous_state") if isinstance(record, dict) else None,
-                    )
+    for _ in range(rounds):
+        ai_msg = llm_with_tools.invoke(messages_out)
+        messages_out.append(ai_msg)
+        _emit_ai_events(writer, ai_msg)
+
+        tool_calls = getattr(ai_msg, "tool_calls", None) or []
+        if not tool_calls:
+            break
+
+        for tc in tool_calls:
+            tool_name = tc["name"]
+            tool_args = tc.get("args", {})
+            tool_call_id = tc.get("id", "")
+            tool = tool_map.get(tool_name)
+            if tool is None:
+                content = f"工具 {tool_name} 不存在"
+            else:
+                try:
+                    content = tool.invoke(tool_args)
+                    content = _tool_output_to_content(content)
+                except Exception as exc:
+                    content = _tool_failure_to_content(tool_name, exc)
+            tool_msg = ToolMessage(content=content, tool_call_id=tool_call_id, name=tool_name)
+            messages_out.append(tool_msg)
+            record = emission_records[tool_record_index] if tool_record_index < len(emission_records) else {}
+            tool_record_index += 1
+            _emit_tool_done_from_message(
+                writer,
+                tool_msg,
+                record.get("patch") if isinstance(record, dict) else None,
+                record.get("previous_state") if isinstance(record, dict) else None,
+            )
 
     final = next(
         (m for m in reversed(messages_out) if isinstance(m, AIMessage)),
