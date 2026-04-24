@@ -21,6 +21,7 @@ import re
 from io import BytesIO
 from typing import Literal, Optional
 from dotenv import load_dotenv
+from langsmith import traceable
 from PIL import Image
 
 load_dotenv()
@@ -1172,6 +1173,7 @@ class ImageProcessor:
 
         return None
 
+    @traceable(name="ocr_detect_type", run_type="chain")
     async def detect_type(self, image_bytes: bytes) -> dict:
         """
         自动识别截图类型。
@@ -1520,6 +1522,7 @@ class ImageProcessor:
         result["screenshot_type"] = "private_chat_screenshot"
         return result
 
+    @traceable(name="ocr_process_image", run_type="chain")
     async def process_image(
         self,
         image_bytes: bytes,

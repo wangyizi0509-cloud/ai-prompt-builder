@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
 from typing import Any, Literal, Optional
 import logging
 from auth_utils import get_optional_user
+from langsmith import traceable
 
 ScreenshotType = Literal[
     "private_chat_screenshot",
@@ -78,11 +79,14 @@ async def _do_upload(
     return upload_result
 
 
+@traceable(name="ocr_pipeline", run_type="chain")
 async def _do_ocr(
     *,
     image_bytes: bytes,
     screenshot_type: str,
     context: Optional[str],
+    session_id: str | None = None,
+    device_id: str | None = None,
 ) -> dict[str, Any]:
     """仅做 OCR，返回 {success, text, screenshot_type, error}。
 
@@ -153,6 +157,7 @@ async def upload_screenshot(
     session_id: str = Form(...),
     context: Optional[str] = Form(None),
     eval_mode: bool = Form(False),
+    device_id: Optional[str] = Form(None),
     current_user=Depends(get_optional_user),
 ):
     """
@@ -198,6 +203,9 @@ async def upload_screenshot(
             image_bytes=image_bytes,
             screenshot_type=screenshot_type,
             context=context,
+            session_id=session_id,
+            device_id=device_id,
+            langsmith_extra={"metadata": {"session_id": session_id, "device_id": device_id or ""}},
         )
 
         # 3. 合并：把图片 URL 注入到 OCR 结果里（与旧契约完全一致）
@@ -241,6 +249,7 @@ async def upload_only(
     file: UploadFile = File(...),
     session_id: str = Form(...),
     eval_mode: bool = Form(False),
+    device_id: Optional[str] = Form(None),
     current_user=Depends(get_optional_user),
 ):
     """仅做「上传图片 → 拿到 URL」，不跑 OCR。返回 {success, url, path, error}。
@@ -297,6 +306,7 @@ async def ocr_only(
     screenshot_type: ScreenshotType = Form(...),
     session_id: str = Form(...),
     context: Optional[str] = Form(None),
+    device_id: Optional[str] = Form(None),
     current_user=Depends(get_optional_user),
 ):
     """仅跑 OCR，不做上传/存储。返回 {success, text, screenshot_type, error}。
@@ -326,6 +336,9 @@ async def ocr_only(
             image_bytes=image_bytes,
             screenshot_type=screenshot_type,
             context=context,
+            session_id=session_id,
+            device_id=device_id,
+            langsmith_extra={"metadata": {"session_id": session_id, "device_id": device_id or ""}},
         )
     except Exception as e:
         logger.error("[ocr-only] ‼️ 未捕获异常: %s", e, exc_info=True)

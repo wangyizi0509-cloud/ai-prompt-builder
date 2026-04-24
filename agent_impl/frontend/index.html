@@ -5566,6 +5566,7 @@
                         if (options?.inquiryReceiptPayload) {
                             requestBody.inquiry_receipt_payload = options.inquiryReceiptPayload;
                         }
+                        requestBody.device_id = (window.Tracker && window.Tracker.getAnonymousId && window.Tracker.getAnonymousId()) || '';
 
                         // Onboarding v2 首轮自动触发走 Path B;resume / feedback 不会重叠。
 
@@ -6893,6 +6894,7 @@
                             pendingOnboardingPayload.value = null;
                             try { window.OnboardingStorage && window.OnboardingStorage.markDone(); } catch (e) { /* noop */ }
                         }
+                        _pathBBody.device_id = (window.Tracker && window.Tracker.getAnonymousId && window.Tracker.getAnonymousId()) || '';
                         const response = await fetch('/api/chat/stream', {
                             method: 'POST',
                             headers: {

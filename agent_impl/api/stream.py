@@ -51,6 +51,7 @@ class StreamChatRequest(BaseModel):
     # call_status_agent。仅首轮生效，非首轮即使前端误传也被忽略。
     # 详见 onboarding_v2/API_CONTRACT.md §4。
     onboarding_payload: Optional[OnboardingPayload] = None
+    device_id: Optional[str] = None
 
 
 def _extract_answers_from_resume_payload(resume_payload: Optional[Union[dict[str, Any], str]]) -> dict[str, Any]:
@@ -848,6 +849,7 @@ async def chat_stream(
                 input_payload,
                 stream_mode=request.stream_mode,
                 command=resume_command,
+                device_id=request.device_id,
             ):
                 # 识别并转发 custom 事件（get_stream_writer 发出的中间过程事件）
                 chunk_event = getattr(chunk, "event", None)

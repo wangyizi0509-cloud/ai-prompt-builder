@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langsmith import traceable
 
 from config import get_onboarding_vision_llm
 from onboarding_v2.question_bank import QUESTION_BANK, list_question_ids
@@ -64,6 +65,7 @@ _FALLBACK_FIRST_HOOK_BODY = (
 # ---------- 公共 API ----------
 
 
+@traceable(name="onboarding_analyze", run_type="chain")
 async def run_analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     """合一分析入口。
 

@@ -51,6 +51,7 @@ class ChatRequest(BaseModel):
     # 诊断素材),main_agent 首轮按指令立即调 call_status_agent。仅首轮生效;
     # 非首轮即使前端误传也会被忽略。详见 onboarding_v2/API_CONTRACT.md §4。
     onboarding_payload: Optional[OnboardingPayload] = None
+    device_id: Optional[str] = None
 
 def _get_screenshot_label(screenshot_type: Optional[str]) -> str:
     labels = {
@@ -679,7 +680,7 @@ async def chat(
         )
         
         chunks = []
-        for chunk in run_assistant(thread_id, input_payload, stream_mode="values", command=resume_command):
+        for chunk in run_assistant(thread_id, input_payload, stream_mode="values", command=resume_command, device_id=request.device_id):
             chunks.append(chunk)
         
         # 反向遍历找最后一个 event="values" 的有效 chunk，而不是无条件取 chunks[-1]

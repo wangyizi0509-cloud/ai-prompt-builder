@@ -268,10 +268,11 @@
   }
 
   /** 只上传图片，~2s 返回 URL。用于 onboarding v2 并行流水线的第 1 步。 */
-  async function uploadOnly(file, sessionId) {
+  async function uploadOnly(file, sessionId, deviceId) {
     const form = new FormData();
     form.append('file', file);
     form.append('session_id', sessionId);
+    if (deviceId) form.append('device_id', deviceId);
     form.append('eval_mode', 'true');
     const resp = await fetch('/api/upload/upload-only', {
       method: 'POST',
@@ -290,11 +291,12 @@
   }
 
   /** 只跑 OCR，慢路径（~60-90s）。后台异步调用，结果写回 localStorage。 */
-  async function ocrOnly(file, sessionId) {
+  async function ocrOnly(file, sessionId, deviceId) {
     const form = new FormData();
     form.append('file', file);
     form.append('screenshot_type', 'screenshot');
     form.append('session_id', sessionId);
+    if (deviceId) form.append('device_id', deviceId);
     const resp = await fetch('/api/upload/ocr-only', {
       method: 'POST',
       body: form,
@@ -310,7 +312,7 @@
     };
   }
 
-  async function submitAnalyze({ sessionId, freeText, imageUrls, ocrTexts }) {
+  async function submitAnalyze({ sessionId, freeText, imageUrls, ocrTexts, deviceId }) {
     const resp = await fetch('/api/onboarding/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -319,6 +321,7 @@
         free_text: freeText,
         image_urls: imageUrls,
         ocr_texts: ocrTexts,
+        device_id: deviceId || '',
       }),
     });
     if (resp.status === 422) {
@@ -600,9 +603,10 @@
         refreshSubmitBtn();
 
         // Step 1（快，~2s）：上传拿 URL → 立刻解锁提交按钮
+        const deviceId = (window.Tracker && window.Tracker.getAnonymousId && window.Tracker.getAnonymousId()) || '';
         let uploadOk = false;
         try {
-          const resp = await uploadOnly(file, state.store.session_id);
+          const resp = await uploadOnly(file, state.store.session_id, deviceId);
           refreshStore();
           const updated = (state.store.uploaded_images || []).slice();
           const idx = updated.findIndex(
@@ -638,7 +642,7 @@
 
         // Step 2（慢，~60-90s）：OCR 后台 fire-and-forget，不 await，不阻塞按钮
         if (uploadOk) {
-          ocrOnly(file, state.store.session_id)
+          ocrOnly(file, state.store.session_id, deviceId)
             .then((resp) => {
               refreshStore();
               const updated = (state.store.uploaded_images || []).slice();
@@ -712,6 +716,7 @@
           // analyze 后端已不消费 ocr_texts（直接吃图），这里传空数组即可；
           // OCR 结果由后台 Step 2 写回 localStorage，留给最终 /report 用
           ocrTexts: [],
+          deviceId: (window.Tracker && window.Tracker.getAnonymousId && window.Tracker.getAnonymousId()) || '',
         });
         state.store = writeStore({ analysis: analysis, stage: 'questions' });
         renderOpeningHook();

@@ -67,6 +67,10 @@ class AnalyzeRequest(_StrictModel):
     """
 
     session_id: str = Field(..., description="前端生成的 UUID，会贯穿整个 onboarding。")
+    device_id: str | None = Field(
+        default=None,
+        description="设备维度的稳定 UUID（来自 tracker.js crushe_tracker_anon_id），用于跨 session 追踪。",
+    )
     free_text: str = Field(
         ...,
         min_length=5,
@@ -169,6 +173,10 @@ class ReportRequest(_StrictModel):
     """
 
     session_id: str = Field(..., description="同 `AnalyzeRequest.session_id`。")
+    device_id: str | None = Field(
+        default=None,
+        description="设备维度的稳定 UUID（来自 tracker.js crushe_tracker_anon_id），用于跨 session 追踪。",
+    )
     free_text: str = Field(..., description="用户最初的自由描述（原文）。")
     ocr_texts: list[str] = Field(
         default_factory=list, description="截图 OCR 文本列表。"

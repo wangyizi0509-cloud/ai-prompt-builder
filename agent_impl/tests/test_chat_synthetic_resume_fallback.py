@@ -24,7 +24,7 @@ def test_chat_synthetic_resume_when_no_pending_interrupt(monkeypatch):
     def _fake_thread_has_pending_interrupt(thread_id: str) -> bool:
         return False
 
-    def _fake_run_assistant(thread_id: str, input_state=None, stream_mode: str = "values", *, command: dict | None = None):
+    def _fake_run_assistant(thread_id: str, input_state=None, stream_mode: str = "values", *, command: dict | None = None, device_id: str | None = None):
         captured["thread_id"] = thread_id
         captured["input_state"] = input_state
         captured["command"] = command

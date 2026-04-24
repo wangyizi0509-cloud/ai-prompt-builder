@@ -178,6 +178,7 @@ def run_assistant(
     stream_mode: str | list = "updates",
     *,
     command: dict | None = None,
+    device_id: str | None = None,
 ):
     """运行 assistant 并返回流式结果。
 
@@ -197,6 +198,8 @@ def run_assistant(
         "assistant_id": ASSISTANT_ID,
         "stream_mode": modes,
     }
+    if device_id:
+        kwargs["config"] = {"metadata": {"device_id": device_id}}
     if command is not None:
         kwargs["command"] = command
         logger.info(f"run_assistant: thread={thread_id} mode=RESUME command_keys={list(command.keys())}")

@@ -31,7 +31,10 @@ async def report_endpoint(req: ReportRequest) -> DiagnosisReport:
     """生成免费诊断报告(LLM 节点③入口)。"""
     t0 = time.monotonic()
     try:
-        report = await run_report(req)
+        report = await run_report(
+            req,
+            langsmith_extra={"metadata": {"session_id": req.session_id or "", "device_id": req.device_id or ""}},
+        )
         log_event_server(
             anonymous_id=req.session_id,
             session_id=req.session_id,

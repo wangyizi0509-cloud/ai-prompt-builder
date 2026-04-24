@@ -42,7 +42,10 @@ async def analyze_endpoint(req: AnalyzeRequest) -> AnalyzeResponse:
     success = False
     skip_count = 0
     try:
-        resp = await run_analyze(req)
+        resp = await run_analyze(
+            req,
+            langsmith_extra={"metadata": {"session_id": req.session_id or "", "device_id": req.device_id or ""}},
+        )
         # 判断是否走了降级：降级态下 5 题 skip 全 False、verdict_tag 为「先补信息」
         is_fallback = (
             resp.first_hook.verdict_tag == "先补信息"

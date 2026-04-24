@@ -23,6 +23,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from langchain_core.messages import HumanMessage, SystemMessage
+from langsmith import traceable
 from pydantic import ValidationError
 
 from config import get_thinking_llm
@@ -243,6 +244,7 @@ async def _call_llm_once(
 # --------------------------------------------------------------------------- #
 
 
+@traceable(name="onboarding_report", run_type="chain")
 async def run_report(request: ReportRequest) -> DiagnosisReport:
     """生成诊断报告(带 1 次重试,失败抛 HTTPException 500)。
 

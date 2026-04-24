@@ -239,6 +239,7 @@
       free_text: store.free_text || '',
       ocr_texts: ocr,
       answers: store.answers || {},
+      device_id: (window.Tracker && window.Tracker.getAnonymousId && window.Tracker.getAnonymousId()) || '',
     };
   }
 

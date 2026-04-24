@@ -33,6 +33,53 @@
 
 ---
 
+## 2026-04-24 | infra | 全链路 LangSmith Tracing 接入 + device_id 维度追踪
+
+**背景**：上线后需要按用户设备追踪完整的后端 LLM 调用链路，用于 debug 和监控。session_id 每次刷新会变，改用 `device_id`（`tracker.js` 的 `crushe_tracker_anon_id`，设备维度稳定 UUID）作为追踪维度。
+
+**后端变更**：
+
+| 文件 | 变更 |
+|------|------|
+| `agent_impl/utils/image_processor.py` | `detect_type` / `process_image` 加 `@traceable` |
+| `agent_impl/api/upload.py` | `_do_ocr` 加 `@traceable` + `device_id` 参数；三个端点接收 `device_id: Form(None)` |
+| `agent_impl/onboarding_v2/nodes/analyze.py` | `run_analyze` 加 `@traceable` |
+| `agent_impl/onboarding_v2/nodes/report.py` | `run_report` 加 `@traceable` |
+| `agent_impl/onboarding_v2/schemas.py` | `AnalyzeRequest` / `ReportRequest` 新增 `device_id` 字段 |
+| `agent_impl/api/onboarding_analyze.py` | `langsmith_extra` metadata 加 `device_id` |
+| `agent_impl/api/onboarding_report.py` | `langsmith_extra` metadata 加 `device_id` |
+| `agent_impl/api/sdk_client.py` | `run_assistant()` 加 `device_id` 参数，写入 LangGraph run config metadata |
+| `agent_impl/api/chat.py` | `ChatRequest` 加 `device_id`，透传给 `run_assistant()` |
+| `agent_impl/api/stream.py` | `StreamChatRequest` 加 `device_id`，透传给 `run_assistant()` |
+| `agent_impl/tests/test_chat_synthetic_resume_fallback.py` | mock 签名加 `device_id` |
+| `agent_impl/tests/test_stream_resume_sdk_command.py` | mock 签名加 `device_id` |
+
+**前端变更**：
+
+| 文件 | 变更 |
+|------|------|
+| `agent_impl/frontend/scripts/onboarding_flow.js` | `uploadOnly` / `ocrOnly` / `submitAnalyze` 函数加 `deviceId` 参数；调用处读取 `window.Tracker.getAnonymousId()` 透传 |
+| `agent_impl/frontend/scripts/report_page.js` | `buildReportRequest` 加 `device_id` 字段 |
+| `agent_impl/frontend/index.html` | `sendMessageToBackend` 和 `sendMessage`（Path B）两处 `/api/chat/stream` 调用加 `device_id` |
+
+**覆盖范围**：
+
+| 链路 | 追踪方式 | device_id 维度 |
+|------|----------|----------------|
+| LangGraph 主图（主对话） | LangGraph CLI 自动追踪 | ✅ config.metadata |
+| onboarding analyze | LangChain 自动 + `@traceable` | ✅ langsmith_extra |
+| onboarding report | LangChain 自动 + `@traceable` | ✅ langsmith_extra |
+| OCR pipeline（httpx 裸调） | `@traceable` 手动包装 | ✅ langsmith_extra |
+| 前端行为 / HTTP 层错误 | 不在 LangSmith 范围 | — |
+
+**LangSmith 查询方式**：进入 crushe-agent-debug 项目 → Add filter → Metadata → `device_id` = `<设备 anon_id>`，可看到该用户所有链路（OCR、analyze、report、主对话）的完整 trace。
+
+**结果**：✅ 全部完成，330 单元测试通过
+
+**影响范围**：仅观测层，不改变任何业务逻辑；LangSmith 上报失败时静默降级，不影响主流程。
+
+---
+
 ## 2026-04-22 | eval | Onboarding v2 · PM 接管完整走查 + 6 个 bug 并行修复
 
 **背景**：产品经理（Claude）夜间接管 onboarding v2 全流程视觉 + 功能验收。需求：用手机打开全流程跟需求文档 & 原型完全一致，不许有 bug。如遇后端问题，前端先 mock 走通流程，后端作为独立工作线并行修。

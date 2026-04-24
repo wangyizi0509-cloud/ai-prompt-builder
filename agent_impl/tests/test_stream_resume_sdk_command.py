@@ -26,7 +26,7 @@ def test_stream_resume_uses_sdk_command(monkeypatch):
         captured["updated_thread_id"] = thread_id
         captured["updates"] = dict(updates or {})
 
-    def _fake_run_assistant(thread_id: str, input_state=None, stream_mode: str = "values", *, command: dict | None = None):
+    def _fake_run_assistant(thread_id: str, input_state=None, stream_mode: str = "values", *, command: dict | None = None, device_id: str | None = None):
         captured["thread_id"] = thread_id
         captured["input_state"] = input_state
         captured["stream_mode"] = stream_mode
@@ -88,7 +88,7 @@ def test_stream_synthetic_resume_when_no_pending_interrupt(monkeypatch):
         captured["updated_thread_id"] = thread_id
         captured["updates"] = dict(updates or {})
 
-    def _fake_run_assistant(thread_id: str, input_state=None, stream_mode: str = "values", *, command: dict | None = None):
+    def _fake_run_assistant(thread_id: str, input_state=None, stream_mode: str = "values", *, command: dict | None = None, device_id: str | None = None):
         captured["thread_id"] = thread_id
         captured["input_state"] = input_state
         captured["stream_mode"] = stream_mode
